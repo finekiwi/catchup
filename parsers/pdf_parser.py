@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -38,25 +39,33 @@ def parse_pdf(file_path: str) -> Document:
     On parser failure, this function returns a fallback Document with empty blocks
     while keeping core metadata fields populated.
     """
+    start_time = time.perf_counter()
     document = Document(
         id=_safe_document_id(file_path=file_path),
         source=Path(file_path).name,
         format=DocumentFormat.PDF,
         status=ProcessingStatus.PARSED,
     )
-
-    if DoclingLoader is None:
-        LOGGER.error("DoclingLoader is unavailable; returning fallback document for %s", file_path)
-        return document
+    document.processing.parser_model = "docling"
 
     try:
+        if DoclingLoader is None:
+            LOGGER.error("DoclingLoader is unavailable; returning fallback document for %s", file_path)
+            _mark_parse_failed(document=document)
+            return document
+
         loader = _create_docling_loader(file_path=file_path)
         loaded_docs = loader.load()
         document.blocks = _to_blocks(loaded_docs=loaded_docs)
+        if not document.blocks:
+            _mark_parse_failed(document=document)
         return document
     except Exception:
         LOGGER.exception("Failed to parse PDF %s; returning fallback document", file_path)
+        _mark_parse_failed(document=document)
         return document
+    finally:
+        document.processing.latency_ms = (time.perf_counter() - start_time) * 1000
 
 
 def _create_docling_loader(file_path: str) -> Any:
@@ -156,6 +165,8 @@ def _extract_block_type(element: Any) -> BlockType:
         return BlockType.EQUATION
     if normalized in _TEXT_TYPES:
         return BlockType.TEXT
+    if normalized:
+        LOGGER.warning("Unknown Docling block type '%s'; defaulting to text", normalized)
 
     return BlockType.TEXT
 
@@ -235,9 +246,20 @@ def _get_first_present(element: Any, *keys: str) -> Any:
 
 
 def _safe_document_id(file_path: str) -> str:
-    """Generate robust document id with path-hash fallback when file read fails."""
+    """
+    Generate robust document id with path-hash fallback when file read fails.
+
+    The fallback uses the file path string (not file contents), so it is less
+    stable for deduplication and may collide across moved/copied files.
+    """
     try:
         return generate_document_id(file_path=file_path)
     except Exception:
         LOGGER.exception("Failed to hash source file %s; using path hash fallback", file_path)
         return hashlib.sha256(file_path.encode("utf-8")).hexdigest()[:16]
+
+
+def _mark_parse_failed(document: Document) -> None:
+    """Mark parsing failure in document tags without duplicating entries."""
+    if "parse_failed" not in document.metadata.tags:
+        document.metadata.tags.append("parse_failed")
