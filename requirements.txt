@@ -1,0 +1,11 @@
+docling
+nbformat
+langchain
+langchain-community
+langchain-openai
+chromadb
+streamlit
+pyvis
+python-dotenv
+pytest
+ruff

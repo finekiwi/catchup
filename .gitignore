@@ -205,3 +205,9 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Claude Code / Codex agent files
+CLAUDE.md
+AGENTS.md
+SKILL.md
+catchup-v2-collaboration-strategy.md
