@@ -142,11 +142,6 @@ def get_document(doc_id: str) -> Optional[Document]:
         connection.close()
 
 
-def get_document_by_hash(doc_id: str) -> Optional[Document]:
-    """Get a document by hash ID for cache checks."""
-    return get_document(doc_id)
-
-
 def update_status(doc_id: str, status: ProcessingStatus) -> None:
     """Update processing status for a document."""
     connection = _connect()
