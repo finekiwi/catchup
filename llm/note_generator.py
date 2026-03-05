@@ -27,8 +27,18 @@ _MAX_CONTENT_LEN = 2000
 
 _LLM_COST_PER_1M: dict[str, dict[str, float]] = {
     "gpt-4o-mini": {"input": 0.15, "output": 0.60},
-    "gpt-4o":      {"input": 2.50, "output": 10.00},
+    "gpt-4o": {"input": 2.50, "output": 10.00},
 }
+
+_openai_client: openai.OpenAI | None = None
+
+
+def _get_client() -> openai.OpenAI:
+    """Return a module-level cached OpenAI client (lazy init)."""
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = openai.OpenAI()
+    return _openai_client
 
 
 def _compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
@@ -100,7 +110,7 @@ def generate_note(doc: Document, model: str = "gpt-4o-mini") -> dict[str, Any]:
     t0 = time.perf_counter()
 
     try:
-        client = openai.OpenAI()
+        client = _get_client()
         resp = client.chat.completions.create(
             model=model,
             messages=[

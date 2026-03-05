@@ -58,10 +58,10 @@ def _mock_openai_response(doc_dict: dict, input_tokens: int = 120, output_tokens
 
 
 def _patch_openai(monkeypatch, response: MagicMock) -> MagicMock:
-    """Patch openai.OpenAI() in note_generator module and return the mock client."""
+    """Patch _get_client() in note_generator module and return the mock client."""
     mock_client = MagicMock()
     mock_client.chat.completions.create.return_value = response
-    monkeypatch.setattr("llm.note_generator.openai.OpenAI", lambda: mock_client)
+    monkeypatch.setattr("llm.note_generator._get_client", lambda: mock_client)
     return mock_client
 
 
