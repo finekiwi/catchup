@@ -24,3 +24,13 @@
 | Version | Date | Change | Quality Impact |
 |---------|------|--------|----------------|
 | v1.0.0 | 2026-03-05 | Initial prompt: structured study note generation from serialized document blocks. Outputs `title`, `summary`, `note_markdown`, `key_concepts` (0-10), `difficulty_level`, `estimated_read_time_min`, `schema_version`, `confidence`, `errors`. | Baseline |
+
+## Known Limitations (v1 — recorded 2026-03-05)
+
+Observed during CU-07 mid-check demo. Candidates for v1.1 prompt iteration.
+
+| # | Prompt | Symptom | Root Cause | Proposed Fix |
+|---|--------|---------|------------|--------------|
+| 1 | `note_generation.py` | `note_markdown` returned as JSON object (`{"sections": [...]}`) instead of markdown string | No explicit instruction that `note_markdown` must be a plain markdown string | Add "Output `note_markdown` as a plain markdown string, not a JSON object" to prompt |
+| 2 | `note_generation.py` | `key_concepts` returns English terms even for Korean-language source documents (e.g. "Version Control" instead of "버전 관리") | Prompt does not specify that concept language should follow source document language | Add "Extract key concepts in the same language as the source document" |
+| 3 | `vlm_diagram.py` | VLM ignores schema and returns Korean-keyed JSON (e.g. `"문서 흐름"`, `"구성 요소"`) causing `DiagramVLMOutput.model_validate()` failure | Prompt field names are English but no explicit "respond in English keys only" instruction | Add "All JSON field names must be exactly as specified in the schema — do not translate or rename them" |
