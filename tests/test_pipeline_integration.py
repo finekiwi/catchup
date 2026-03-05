@@ -14,7 +14,7 @@ from vlm.client import VLMResult
 generate_note = pytest.importorskip("llm.note_generator").generate_note
 
 
-def test_image_to_note_pipeline_with_mock_models(tmp_path: Path) -> None:
+def test_image_to_note_pipeline_with_mock_models(tmp_path: Path, monkeypatch) -> None:
     """Image parse output should flow into note generation successfully."""
     image_path = tmp_path / "lecture.png"
     image_path.write_bytes(b"\x89PNG\r\n\x1a\nfake")
@@ -44,21 +44,32 @@ def test_image_to_note_pipeline_with_mock_models(tmp_path: Path) -> None:
         parsed_doc = parse_image(file_path=str(image_path))
     assert len(parsed_doc.blocks) == 1
 
-    def fake_llm_infer(_: str) -> str:
-        return json.dumps(
-            {
-                "schema_version": "v1.1.0",
-                "title": "미분 학습노트",
-                "summary": "미분의 핵심을 정리한다.",
-                "note_markdown": "## 핵심\\n- 변화율",
-                "key_concepts": ["미분", "변화율"],
-                "difficulty_level": "beginner",
-                "estimated_read_time_min": 2,
-                "confidence": 0.86,
-                "errors": [],
-            }
-        )
+    llm_note_response = json.dumps(
+        {
+            "schema_version": "v1.1.0",
+            "title": "미분 학습노트",
+            "summary": "미분의 핵심을 정리한다.",
+            "note_markdown": "## 핵심\n- 변화율",
+            "key_concepts": ["미분", "변화율"],
+            "difficulty_level": "beginner",
+            "estimated_read_time_min": 2,
+            "confidence": 0.86,
+            "errors": [],
+        }
+    )
 
-    note_markdown = generate_note(document=parsed_doc, llm_infer=fake_llm_infer)
-    assert "## 핵심" in note_markdown
-    assert "변화율" in note_markdown
+    import llm.note_generator as note_gen_module
+    from unittest.mock import MagicMock
+
+    mock_resp = MagicMock()
+    mock_resp.choices[0].message.content = llm_note_response
+    mock_resp.usage.prompt_tokens = 80
+    mock_resp.usage.completion_tokens = 120
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = mock_resp
+    monkeypatch.setattr(note_gen_module, "openai", MagicMock(OpenAI=lambda: mock_client))
+    monkeypatch.setattr(note_gen_module, "log_api_call", lambda **kw: None)
+
+    result = generate_note(parsed_doc)
+    assert "## 핵심" in result["note_markdown"]
+    assert "변화율" in result["key_concepts"]
