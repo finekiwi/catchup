@@ -27,6 +27,7 @@
 | v1.1.0 | 2026-03-05 | Added explicit JSON escaping rules for `note_markdown`. | Minor stability improvement |
 | v1.2.0 | 2026-03-05 | (1) Explicit language rule: all output fields must match source document language. (2) `note_markdown` strictly forbidden from containing JSON objects or verbatim code — must be pure markdown (headings, paragraphs, bullets, code fences). (3) Synthesis instruction for large documents: summarize, skip boilerplate setup code. (4) `schema_version` bumped to v1.2.0. Fixes limitations #1 #2 #4 #5 from v1 known issues. | Targets JSON-in-markdown bug, English key_concepts on Korean docs, and raw content dump on large ipynb |
 | v1.2.1 | 2026-03-05 | Add strict heading hierarchy rule: `##` for main sections, `###` for subsections, `#` (h1) forbidden since title is rendered separately. Fixes inconsistent font sizes observed in Streamlit rendering of large ipynb notes. | Consistent heading levels throughout note_markdown |
+| v1.2.2 | 2026-03-05 | Fix over-compression from v1.2.0 "skip boilerplate" instruction. Add minimum content depth requirement: 3-6 sentences or 3-5 bullets per section. Clarify code handling: describe logic/algorithms/design decisions, not raw lines. Restrict "skip" to truly boilerplate lines only (bare imports, assert env checks). | Prevents 1-sentence section summaries; restores substantive note content |
 
 ## Known Limitations & v2 Roadmap (recorded 2026-03-05, CU-07 demo)
 
