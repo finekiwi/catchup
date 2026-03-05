@@ -17,7 +17,7 @@ load_dotenv()
 LOGGER = logging.getLogger(__name__)
 DEFAULT_CHROMA_PATH = "data/chroma"
 COLLECTION_NAME = "catchup_blocks"
-EMBEDDING_DIMENSION = 64
+EMBEDDING_DIMENSION = 64  # TODO: Update to match real embedding model dimension before switching from placeholder embeddings
 
 
 def _chroma_path() -> Path:
@@ -95,10 +95,17 @@ def store_embeddings(doc_id: str, blocks: list[Block]) -> None:
         metadatas.append(block_metadata)
         embeddings.append(_embed_text(block.content))
 
+    # Remove existing vectors for this doc before upserting to avoid stale results on re-ingest
+    try:
+        collection.delete(where={"doc_id": doc_id})
+    except Exception:
+        LOGGER.warning("Could not delete existing vectors for document id=%s — proceeding with upsert", doc_id)
+
     try:
         if hasattr(collection, "upsert"):
             collection.upsert(ids=ids, documents=documents, metadatas=metadatas, embeddings=embeddings)
         else:
+            # TODO: collection.add() raises on duplicate IDs; remove this fallback once chromadb>=1.5.2 is the minimum
             collection.add(ids=ids, documents=documents, metadatas=metadatas, embeddings=embeddings)
     except Exception:
         LOGGER.exception("Failed to store Chroma embeddings for document id=%s", doc_id)

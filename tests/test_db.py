@@ -29,10 +29,10 @@ def test_sqlite_crud_flow(tmp_path, monkeypatch) -> None:
     document = _build_document()
     sqlite_db.save_document(document)
 
-    fetched_by_hash = sqlite_db.get_document_by_hash(document.id)
-    assert fetched_by_hash is not None
-    assert fetched_by_hash.id == document.id
-    assert fetched_by_hash.metadata.title == "Sample Title"
+    saved = sqlite_db.get_document(document.id)
+    assert saved is not None
+    assert saved.id == document.id
+    assert saved.metadata.title == "Sample Title"
 
     sqlite_db.update_status(document.id, ProcessingStatus.NOTE_GENERATED)
     fetched = sqlite_db.get_document(document.id)
@@ -86,6 +86,14 @@ class _FakeCollection:
     def __init__(self) -> None:
         self.records: dict[str, dict[str, Any]] = {}
 
+    def delete(self, where: dict[str, Any]) -> None:
+        """Delete records matching where filter (supports doc_id key)."""
+        doc_id = where.get("doc_id")
+        if doc_id:
+            keys_to_delete = [k for k, v in self.records.items() if v["metadata"].get("doc_id") == doc_id]
+            for key in keys_to_delete:
+                del self.records[key]
+
     def upsert(
         self,
         ids: list[str],
@@ -106,6 +114,8 @@ class _FakeCollection:
         del query_embeddings
         del include
 
+        # NOTE: real ChromaDB returns by similarity score; this fake returns alphabetically by ID.
+        # Update when switching to real embeddings.
         selected_ids = sorted(self.records.keys())[:n_results]
         selected_documents = [self.records[item_id]["document"] for item_id in selected_ids]
         selected_metadatas = [self.records[item_id]["metadata"] for item_id in selected_ids]
@@ -116,6 +126,31 @@ class _FakeCollection:
             "metadatas": [selected_metadatas],
             "distances": [selected_distances],
         }
+
+
+def test_chroma_reingest_removes_stale_vectors(monkeypatch) -> None:
+    """Re-ingesting a doc with fewer blocks must not leave stale old vectors queryable."""
+    fake_collection = _FakeCollection()
+    monkeypatch.setattr(chroma_db, "_get_collection", lambda: fake_collection)
+
+    # First ingest: 3 blocks
+    blocks_v1 = [
+        Block(type=BlockType.TEXT, content="Block A", order=0),
+        Block(type=BlockType.TEXT, content="Block B", order=1),
+        Block(type=BlockType.TEXT, content="Block C", order=2),
+    ]
+    chroma_db.store_embeddings("doc-reingest", blocks_v1)
+    assert len(fake_collection.records) == 3
+
+    # Re-ingest same doc_id with only 1 block — stale vectors must be gone
+    blocks_v2 = [
+        Block(type=BlockType.TEXT, content="Block A updated", order=0),
+    ]
+    chroma_db.store_embeddings("doc-reingest", blocks_v2)
+
+    assert len(fake_collection.records) == 1, "Stale vectors from first ingest must be removed"
+    assert "doc-reingest:0" in fake_collection.records
+    assert fake_collection.records["doc-reingest:0"]["document"] == "Block A updated"
 
 
 def test_chroma_store_and_search(monkeypatch) -> None:
