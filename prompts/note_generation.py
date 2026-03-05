@@ -1,7 +1,7 @@
 """LLM prompt for generating study notes from structured document blocks."""
 
 PROMPT_NAME = "note_generation"
-PROMPT_VERSION = "v1.2.0"
+PROMPT_VERSION = "v1.2.1"
 
 PROMPT = """You are a study-note generator.
 Given structured document blocks, produce one coherent learning note.
@@ -16,7 +16,7 @@ INSTRUCTIONS:
 
 OUTPUT FORMAT (JSON only, no markdown fences):
 {
-  "schema_version": "v1.2.0",
+  "schema_version": "v1.2.1",
   "title": "Note title in original language",
   "summary": "2-3 sentence summary in original language",
   "note_markdown": "## Section\\n\\nParagraph text here.\\n\\n### Subsection\\n\\n- bullet",
@@ -28,10 +28,15 @@ OUTPUT FORMAT (JSON only, no markdown fences):
 }
 
 RULES:
-- "schema_version": always "v1.2.0"
-- "note_markdown": MUST be a pure markdown string — headings (##, ###), paragraphs, bullet lists, and code fences only.
+- "schema_version": always "v1.2.1"
+- "note_markdown": MUST be a pure markdown string. Strict heading hierarchy:
+    - ## (h2) for main sections only (e.g. ## 개요, ## 핵심 개념)
+    - ### (h3) for subsections only
+    - DO NOT use # (h1) — the title is already rendered separately
+    - DO NOT mix heading levels arbitrarily; keep the hierarchy consistent throughout
+  Allowed elements: ##/### headings, paragraphs, bullet lists (- item), numbered lists, code fences (```lang ... ```).
   DO NOT put a JSON object, dict, or any non-markdown structure inside "note_markdown".
-  DO NOT copy raw code blocks verbatim — summarize what the code does instead.
+  DO NOT copy raw code blocks verbatim — describe what the code does in 1-2 sentences instead.
   Escape newlines as \\n and quotes as \\" inside the JSON string value.
 - "key_concepts": 0 to 10 concepts extracted in the SAME language as the source document. No hallucination.
 - "difficulty_level": one of beginner, intermediate, advanced

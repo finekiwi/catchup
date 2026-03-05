@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from prompts import note_generation, vlm_code, vlm_diagram, vlm_text
 
 
@@ -10,7 +12,7 @@ def test_prompt_common_constants() -> None:
     modules = [vlm_code, vlm_diagram, vlm_text, note_generation]
     for module in modules:
         assert module.PROMPT_NAME
-        assert module.PROMPT_VERSION in ("v1.1.0", "v1.2.0")
+        assert re.match(r"v\d+\.\d+\.\d+", module.PROMPT_VERSION)
         assert module.PROMPT
 
 

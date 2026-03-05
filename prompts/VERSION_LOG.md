@@ -26,6 +26,7 @@
 | v1.0.0 | 2026-03-05 | Initial prompt: structured study note generation from serialized document blocks. Outputs `title`, `summary`, `note_markdown`, `key_concepts` (0-10), `difficulty_level`, `estimated_read_time_min`, `schema_version`, `confidence`, `errors`. | Baseline |
 | v1.1.0 | 2026-03-05 | Added explicit JSON escaping rules for `note_markdown`. | Minor stability improvement |
 | v1.2.0 | 2026-03-05 | (1) Explicit language rule: all output fields must match source document language. (2) `note_markdown` strictly forbidden from containing JSON objects or verbatim code — must be pure markdown (headings, paragraphs, bullets, code fences). (3) Synthesis instruction for large documents: summarize, skip boilerplate setup code. (4) `schema_version` bumped to v1.2.0. Fixes limitations #1 #2 #4 #5 from v1 known issues. | Targets JSON-in-markdown bug, English key_concepts on Korean docs, and raw content dump on large ipynb |
+| v1.2.1 | 2026-03-05 | Add strict heading hierarchy rule: `##` for main sections, `###` for subsections, `#` (h1) forbidden since title is rendered separately. Fixes inconsistent font sizes observed in Streamlit rendering of large ipynb notes. | Consistent heading levels throughout note_markdown |
 
 ## Known Limitations (v1 — recorded 2026-03-05)
 
