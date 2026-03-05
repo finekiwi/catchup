@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 from models.document import (
     Block,
@@ -184,7 +185,7 @@ def _parse_vlm_output(raw_response: str, image_type: ImageType) -> VLMParsedOutp
     return TextVLMOutput.model_validate(payload_dict)
 
 
-def _parse_json_dict(raw_response: str) -> dict:
+def _parse_json_dict(raw_response: str) -> dict[str, Any]:
     """Extract JSON object from model output, tolerating markdown fences."""
     cleaned = _strip_markdown_fence(raw_response).strip()
     if not cleaned:

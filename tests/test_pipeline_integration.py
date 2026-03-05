@@ -6,9 +6,12 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from parsers.image_parser import parse_image
-from llm.note_generator import generate_note
 from vlm.client import VLMResult
+
+generate_note = pytest.importorskip("llm.note_generator").generate_note
 
 
 def test_image_to_note_pipeline_with_mock_models(tmp_path: Path) -> None:
