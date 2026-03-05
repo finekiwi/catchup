@@ -22,8 +22,10 @@ load_dotenv()
 
 LOGGER = logging.getLogger(__name__)
 
-_MAX_BLOCKS = 50
-_MAX_CONTENT_LEN = 2000
+_MAX_BLOCKS = 40
+_MAX_CONTENT_LEN = 800       # per block in normal mode
+_MAX_CONTENT_LEN_LARGE = 400 # per block when doc has many blocks
+_LARGE_DOC_THRESHOLD = 30    # blocks: above this, use large-doc strategy
 
 _LLM_COST_PER_1M: dict[str, dict[str, float]] = {
     "gpt-4o-mini": {"input": 0.15, "output": 0.60},
@@ -50,15 +52,37 @@ def _compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     )
 
 
+def _sample_blocks(doc: Document, max_blocks: int = _MAX_BLOCKS) -> list:
+    """Return a representative block sample from the document.
+
+    For large documents, evenly samples across the full block list so the
+    LLM sees content from beginning, middle, and end rather than just the
+    first N blocks.
+    """
+    blocks = doc.blocks
+    if len(blocks) <= max_blocks:
+        return blocks
+
+    # Evenly spaced indices across the full document
+    step = len(blocks) / max_blocks
+    indices = {int(i * step) for i in range(max_blocks)}
+    return [blocks[i] for i in sorted(indices)]
+
+
 def _serialize_blocks(doc: Document, max_blocks: int = _MAX_BLOCKS) -> str:
     """Serialize document blocks into '[{type}] {content}' lines.
 
-    Truncates each block's content to _MAX_CONTENT_LEN chars to avoid
-    token overflow. Limits total blocks to max_blocks.
+    For large documents (> _LARGE_DOC_THRESHOLD blocks), samples evenly
+    across the document and applies a shorter per-block content limit so
+    the LLM receives representative coverage rather than just the beginning.
     """
+    is_large = len(doc.blocks) > _LARGE_DOC_THRESHOLD
+    content_limit = _MAX_CONTENT_LEN_LARGE if is_large else _MAX_CONTENT_LEN
+    sampled = _sample_blocks(doc, max_blocks)
+
     lines = []
-    for block in doc.blocks[:max_blocks]:
-        content = block.content[:_MAX_CONTENT_LEN]
+    for block in sampled:
+        content = block.content[:content_limit]
         lines.append(f"[{block.type.value}] {content}")
     return "\n".join(lines)
 
