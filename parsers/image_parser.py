@@ -83,7 +83,7 @@ def parse_image(file_path: str, model: str = "gpt-4o-mini") -> Document:
             blocks.append(
                 Block(
                     type=BlockType.TEXT,
-                    content=result.content,
+                    content=_json_to_plain_text(result.content),
                     order=0,
                     metadata=BlockMetadata(image_type=image_type),
                     image_path=file_path,
@@ -266,6 +266,39 @@ def _join_notes(first: str | None, second: str | None) -> str | None:
 def _normalize_escaped_text(value: str) -> str:
     """Normalize escaped newline/tab sequences for markdown/code strings."""
     return value.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\t", "\t")
+
+
+def _json_to_plain_text(raw: str) -> str:
+    """Convert a JSON string to plain text for LLM consumption.
+
+    When the VLM returns JSON that doesn't match the expected schema, this
+    function converts it to a readable key-value text format so that downstream
+    LLMs receive natural language instead of raw JSON.
+    Falls back to the original string if parsing fails.
+    """
+    import json as _json
+
+    try:
+        data = _json.loads(_strip_markdown_fence(raw).strip())
+    except (ValueError, TypeError):
+        return raw
+
+    if not isinstance(data, dict):
+        return raw
+
+    lines: list[str] = []
+    for key, value in data.items():
+        if isinstance(value, list):
+            lines.append(f"{key}:")
+            for item in value:
+                lines.append(f"  - {item}")
+        elif isinstance(value, dict):
+            lines.append(f"{key}:")
+            for k, v in value.items():
+                lines.append(f"  - {k}: {v}")
+        else:
+            lines.append(f"{key}: {value}")
+    return "\n".join(lines)
 
 
 def _safe_document_id(file_path: str) -> str:

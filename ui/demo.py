@@ -26,6 +26,77 @@ from parsers.image_parser import parse_image
 from llm.note_generator import generate_note
 from vlm.client import SUPPORTED_MODELS
 
+import json
+
+
+def _normalize_note_markdown(note_md: str | dict) -> str:
+    """Convert note_markdown to readable markdown.
+
+    When the LLM returns a JSON structure instead of plain markdown,
+    this function converts it into proper markdown. Handles:
+    - dict: already parsed by json.loads (gpt-4o returns note_markdown as object)
+    - str starting with '{': JSON string, parse then convert
+    - {"sections": [{"title": ..., "content": ...}, ...]}
+    - {"key": "value", ...} or {"key": [...], ...} (arbitrary dict)
+    Plain markdown strings pass through unchanged.
+    """
+    if isinstance(note_md, dict):
+        data = note_md
+    elif isinstance(note_md, str):
+        stripped = note_md.strip()
+        if not stripped.startswith("{"):
+            return note_md
+        try:
+            data = json.loads(stripped)
+        except (json.JSONDecodeError, ValueError):
+            return note_md
+        if not isinstance(data, dict):
+            return note_md
+    else:
+        return str(note_md)
+
+    # Case 1: {"sections": [{"title": ..., "content": ...}]}
+    sections = data.get("sections", [])
+    if isinstance(sections, list) and sections:
+        lines: list[str] = []
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            title = section.get("title", "")
+            content = section.get("content", "")
+            if title:
+                lines.append(f"## {title}")
+                lines.append("")
+            if content:
+                lines.append(content)
+                lines.append("")
+        if lines:
+            return "\n".join(lines).strip()
+
+    # Case 2: arbitrary dict — render each key as a section
+    lines = []
+    for key, value in data.items():
+        lines.append(f"## {key}")
+        lines.append("")
+        if isinstance(value, str):
+            lines.append(value)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, str):
+                    lines.append(f"- {item}")
+                elif isinstance(item, dict):
+                    parts = [f"**{k}:** {v}" for k, v in item.items()]
+                    lines.append(f"- {' | '.join(parts)}")
+                else:
+                    lines.append(f"- {item}")
+        elif isinstance(value, dict):
+            for k, v in value.items():
+                lines.append(f"- **{k}:** {v}")
+        else:
+            lines.append(str(value))
+        lines.append("")
+    return "\n".join(lines).strip()
+
 # ---------------------------------------------------------------------------
 # Page config
 # ---------------------------------------------------------------------------
@@ -176,6 +247,6 @@ if key_concepts:
         st.markdown(f"- `{concept}`")
 
 if note_markdown:
-    st.markdown(note_markdown)
+    st.markdown(_normalize_note_markdown(note_markdown))
 else:
     st.info("노트 내용이 없습니다.")
