@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from typing import Any
 
 import openai
 from dotenv import load_dotenv
@@ -52,7 +53,7 @@ def _serialize_blocks(doc: Document, max_blocks: int = _MAX_BLOCKS) -> str:
     return "\n".join(lines)
 
 
-def _make_fallback(doc: Document, raw_response: str, error_msg: str) -> dict:
+def _make_fallback(doc: Document, raw_response: str, error_msg: str) -> dict[str, Any]:
     """Build a fallback dict when JSON parsing fails or API errors out."""
     return {
         "title": doc.source,
@@ -67,7 +68,7 @@ def _make_fallback(doc: Document, raw_response: str, error_msg: str) -> dict:
     }
 
 
-def generate_note(doc: Document, model: str = "gpt-4o-mini") -> dict:
+def generate_note(doc: Document, model: str = "gpt-4o-mini") -> dict[str, Any]:
     """Generate a structured study note dict from a Document.
 
     Calls OpenAI chat completion API with document blocks serialized as

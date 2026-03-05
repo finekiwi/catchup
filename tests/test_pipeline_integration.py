@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+import llm.note_generator as note_gen_module
 from parsers.image_parser import parse_image
 from vlm.client import VLMResult
 
@@ -57,9 +58,6 @@ def test_image_to_note_pipeline_with_mock_models(tmp_path: Path, monkeypatch) ->
             "errors": [],
         }
     )
-
-    import llm.note_generator as note_gen_module
-    from unittest.mock import MagicMock
 
     mock_resp = MagicMock()
     mock_resp.choices[0].message.content = llm_note_response
