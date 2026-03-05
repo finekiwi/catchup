@@ -16,7 +16,7 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+import os
 
 from dotenv import load_dotenv
 
@@ -64,7 +64,7 @@ class VLMResult:
     latency_ms: float = 0.0
     cost_usd: float = 0.0
     success: bool = True
-    error: Optional[str] = None
+    error: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +138,7 @@ def _call_google(model: str, image_path: str | Path, prompt: str) -> VLMResult:
     import google.generativeai as genai  # lazy import
     import PIL.Image  # lazy import
 
+    genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
     img = PIL.Image.open(image_path)
     gemini = genai.GenerativeModel(model)
 

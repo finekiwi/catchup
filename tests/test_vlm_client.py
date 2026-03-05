@@ -33,7 +33,7 @@ if "google.generativeai" not in sys.modules:
 # PIL is installed (Pillow) — no stub needed; tests patch PIL.Image.open directly
 
 
-from vlm.client import VLMResult, call_vlm, _compute_cost, SUPPORTED_MODELS, _MODEL_REGISTRY  # noqa: E402
+from vlm.client import call_vlm, _compute_cost, _MODEL_REGISTRY  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +43,8 @@ from vlm.client import VLMResult, call_vlm, _compute_cost, SUPPORTED_MODELS, _MO
 @pytest.fixture()
 def fake_image(tmp_path: Path) -> Path:
     """Minimal valid 1×1 PNG."""
-    import struct, zlib
+    import struct
+    import zlib
 
     sig = b"\x89PNG\r\n\x1a\n"
     ihdr_data = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
@@ -143,6 +144,7 @@ def test_call_vlm_google_success(fake_image: Path):
     mock_genai = MagicMock()
 
     with patch.dict(sys.modules, {"google.generativeai": mock_genai}), \
+         patch.dict("os.environ", {"GOOGLE_API_KEY": "test-key"}), \
          patch("PIL.Image.open"), \
          patch("vlm.client.log_api_call"):
         mock_model = MagicMock()
@@ -161,6 +163,7 @@ def test_call_vlm_google_failure(fake_image: Path):
     mock_genai = MagicMock()
 
     with patch.dict(sys.modules, {"google.generativeai": mock_genai}), \
+         patch.dict("os.environ", {"GOOGLE_API_KEY": "test-key"}), \
          patch("PIL.Image.open"), \
          patch("vlm.client.log_api_call"):
         mock_model = MagicMock()
