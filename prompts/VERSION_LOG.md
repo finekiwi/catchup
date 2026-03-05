@@ -23,4 +23,4 @@
 ## note_generation.py
 | Version | Date | Change | Quality Impact |
 |---------|------|--------|----------------|
-| v1.1.0 | 2026-03-03 | Added `schema_version`, `confidence`, `errors`, escaped JSON-string rule for `note_markdown`, key concepts relaxed to 0-10. | Higher JSON parse success |
+| v1.0.0 | 2026-03-05 | Initial prompt: structured study note generation from serialized document blocks. Outputs `title`, `summary`, `note_markdown`, `key_concepts` (0-10), `difficulty_level`, `estimated_read_time_min`, `schema_version`, `confidence`, `errors`. | Baseline |
