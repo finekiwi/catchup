@@ -103,6 +103,8 @@ else:
         st.error("파일 처리 중 오류가 발생했습니다.")
         st.stop()
 
+    doc.source = uploaded_file.name
+
     # Check parse failure
     parse_failed = not doc.blocks or "parse_failed" in doc.metadata.tags
     if parse_failed:
@@ -169,7 +171,9 @@ if meta_parts:
     st.write(" | ".join(meta_parts))
 
 if key_concepts:
-    st.write("**핵심 개념:** " + ", ".join(str(c) for c in key_concepts))
+    st.write("**핵심 개념:**")
+    for concept in key_concepts:
+        st.markdown(f"- `{concept}`")
 
 if note_markdown:
     st.markdown(note_markdown)

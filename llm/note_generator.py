@@ -63,6 +63,17 @@ def _serialize_blocks(doc: Document, max_blocks: int = _MAX_BLOCKS) -> str:
     return "\n".join(lines)
 
 
+def _strip_markdown_fence(text: str) -> str:
+    """Remove a single outer markdown code fence if present."""
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.splitlines()[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines)
+
+
 def _make_fallback(doc: Document, raw_response: str, error_msg: str) -> dict[str, Any]:
     """Build a fallback dict when JSON parsing fails or API errors out."""
     return {
@@ -125,7 +136,7 @@ def generate_note(doc: Document, model: str = "gpt-4o-mini") -> dict[str, Any]:
         cost_usd = _compute_cost(model, input_tokens, output_tokens)
 
         try:
-            result = json.loads(raw)
+            result = json.loads(_strip_markdown_fence(raw))
             if not isinstance(result, dict):
                 raise ValueError("LLM response JSON must be an object")
         except (json.JSONDecodeError, ValueError) as parse_exc:
