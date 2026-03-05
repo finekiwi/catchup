@@ -1,13 +1,11 @@
-"""Image parser that maps VLM JSON outputs into shared Document blocks."""
+"""Image parser: VLM-based classification + analysis → Document."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
-import time
 from pathlib import Path
-from typing import Callable
 
 from models.document import (
     Block,
@@ -21,15 +19,23 @@ from models.document import (
     generate_document_id,
 )
 from parsers.schemas.vlm_outputs import CodeVLMOutput, DiagramVLMOutput, TextVLMOutput, VLMOutputBase
+from prompts.vlm_classify import PROMPT as CLASSIFY_PROMPT
 from prompts.vlm_code import PROMPT as VLM_CODE_PROMPT
 from prompts.vlm_diagram import PROMPT as VLM_DIAGRAM_PROMPT
 from prompts.vlm_text import PROMPT as VLM_TEXT_PROMPT
-from utils.logging import log_api_call
+from vlm.client import call_vlm
 
 LOGGER = logging.getLogger(__name__)
 
-VLMInferFn = Callable[[str, str], str]
 VLMParsedOutput = CodeVLMOutput | DiagramVLMOutput | TextVLMOutput
+
+_IMAGE_TYPE_MAP: dict[str, ImageType] = {
+    "code_screenshot": ImageType.CODE_SCREENSHOT,
+    "diagram": ImageType.DIAGRAM,
+    "text_capture": ImageType.TEXT_CAPTURE,
+    "equation": ImageType.EQUATION,
+    "other": ImageType.OTHER,
+}
 
 _PROMPT_BY_IMAGE_TYPE: dict[ImageType, str] = {
     ImageType.CODE_SCREENSHOT: VLM_CODE_PROMPT,
@@ -40,73 +46,59 @@ _PROMPT_BY_IMAGE_TYPE: dict[ImageType, str] = {
 }
 
 
-def parse_image(
-    file_path: str,
-    image_type: ImageType,
-    vlm_infer: VLMInferFn,
-    *,
-    model_name: str = "unknown-vlm",
-    retry_count: int = 1,
-) -> Document:
+def parse_image(file_path: str, model: str = "gpt-4o-mini") -> Document:
     """
-    Parse one image file through VLM and map output to shared Document schema.
+    Parse one image file through VLM (classify then analyze) and return a Document.
 
-    Note:
-        VLM JSON schema and Block schema are intentionally separated.
-        Mapping is handled by `map_vlm_output_to_block`.
+    Two VLM calls are made:
+        1. Classification: determine image type (code/diagram/text/equation/other)
+        2. Analysis: type-specific structured extraction
+
+    Args:
+        file_path: Path to the image file (JPEG / PNG / GIF / WebP).
+        model: VLM model identifier. Defaults to "gpt-4o-mini".
+
+    Returns:
+        Document with one Block from analysis, or empty blocks on VLM failure.
+        On JSON parse failure, raw VLM response is stored as a TEXT block.
     """
-    start_time = time.perf_counter()
     source_name = Path(file_path).name
     document_id = _safe_document_id(file_path)
 
-    response_error: str | None = None
-    parsed_output: VLMParsedOutput | None = None
-    raw_response = ""
+    # Step 1: classify
+    image_type = _classify_image(file_path, model)
 
-    prompt = _PROMPT_BY_IMAGE_TYPE.get(image_type, VLM_TEXT_PROMPT)
-
-    for attempt in range(retry_count + 1):
-        current_prompt = prompt if attempt == 0 else _build_retry_prompt(raw_response=raw_response, image_type=image_type)
-        call_start = time.perf_counter()
-        success = False
-        error: str | None = None
-
-        try:
-            raw_response = vlm_infer(file_path, current_prompt)
-            parsed_output = _parse_vlm_output(raw_response=raw_response, image_type=image_type)
-            success = True
-            response_error = None
-            break
-        except Exception as exc:  # noqa: BLE001
-            response_error = str(exc)
-            error = response_error
-            LOGGER.warning("VLM parse attempt failed for %s (attempt=%s): %s", file_path, attempt + 1, exc)
-        finally:
-            latency_ms = (time.perf_counter() - call_start) * 1000
-            log_api_call(
-                model=model_name,
-                stage="image_parsing",
-                input_tokens=0,
-                output_tokens=0,
-                latency_ms=latency_ms,
-                cost_usd=0.0,
-                success=success,
-                error=error,
-            )
+    # Step 2: analyze
+    analysis_prompt = _PROMPT_BY_IMAGE_TYPE[image_type]
+    result = call_vlm(model, file_path, analysis_prompt, stage="image_analysis")
 
     blocks: list[Block] = []
-    if parsed_output is not None:
-        blocks.append(map_vlm_output_to_block(image_type=image_type, payload=parsed_output, order=0, image_path=file_path))
+    if result.success:
+        try:
+            parsed = _parse_vlm_output(result.content, image_type)
+            blocks.append(map_vlm_output_to_block(image_type=image_type, payload=parsed, order=0, image_path=file_path))
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("VLM JSON parse failed for %s, using raw fallback: %s", file_path, exc)
+            blocks.append(
+                Block(
+                    type=BlockType.TEXT,
+                    content=result.content,
+                    order=0,
+                    metadata=BlockMetadata(image_type=image_type),
+                    image_path=file_path,
+                )
+            )
+    else:
+        LOGGER.error("VLM analysis call failed for %s: %s", file_path, result.error)
 
-    total_latency_ms = (time.perf_counter() - start_time) * 1000
     processing = ProcessingInfo(
-        parser_model="image_parser_v1.1",
-        vlm_model=model_name,
-        latency_ms=total_latency_ms,
+        parser_model="image_parser_v2.0",
+        vlm_model=model,
+        latency_ms=result.latency_ms,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        cost_usd=result.cost_usd,
     )
-
-    if response_error and not blocks:
-        LOGGER.error("Failed to parse image %s. Returning fallback document. error=%s", file_path, response_error)
 
     return Document(
         id=document_id,
@@ -116,6 +108,21 @@ def parse_image(
         processing=processing,
         status=ProcessingStatus.PARSED,
     )
+
+
+def _classify_image(file_path: str, model: str) -> ImageType:
+    """Call VLM to classify image type. Falls back to OTHER on any failure."""
+    result = call_vlm(model, file_path, CLASSIFY_PROMPT, stage="image_classify")
+    if not result.success:
+        LOGGER.warning("Classification VLM call failed for %s, defaulting to OTHER", file_path)
+        return ImageType.OTHER
+    try:
+        payload = json.loads(_strip_markdown_fence(result.content).strip())
+        type_str = payload.get("image_type", "other")
+        return _IMAGE_TYPE_MAP.get(type_str, ImageType.OTHER)
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.warning("Classification JSON parse failed for %s: %s, defaulting to OTHER", file_path, exc)
+        return ImageType.OTHER
 
 
 def map_vlm_output_to_block(
@@ -155,6 +162,7 @@ def map_vlm_output_to_block(
             image_path=image_path,
         )
 
+    # TextVLMOutput
     metadata.caption = _join_notes(payload.title, quality_note)
     return Block(
         type=BlockType.TEXT,
@@ -252,17 +260,6 @@ def _join_notes(first: str | None, second: str | None) -> str | None:
     """Join two optional text notes into one caption field."""
     parts = [value for value in (first, second) if value]
     return " | ".join(parts) if parts else None
-
-
-def _build_retry_prompt(raw_response: str, image_type: ImageType) -> str:
-    """Prompt used for one-step JSON repair retry."""
-    return (
-        "Your previous response was not valid JSON for the required schema.\n"
-        f"Image type: {image_type.value}\n"
-        "Return ONLY a valid JSON object that matches the required fields.\n"
-        "Do not include markdown fences or explanations.\n"
-        f"Previous response:\n{raw_response}"
-    )
 
 
 def _normalize_escaped_text(value: str) -> str:
