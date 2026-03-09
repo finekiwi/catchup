@@ -59,13 +59,7 @@ def test_image_to_note_pipeline_with_mock_models(tmp_path: Path, monkeypatch) ->
         }
     )
 
-    mock_resp = MagicMock()
-    mock_resp.choices[0].message.content = llm_note_response
-    mock_resp.usage.prompt_tokens = 80
-    mock_resp.usage.completion_tokens = 120
-    mock_client = MagicMock()
-    mock_client.chat.completions.create.return_value = mock_resp
-    monkeypatch.setattr(note_gen_module, "_get_client", lambda: mock_client)
+    monkeypatch.setitem(note_gen_module._PROVIDER_DISPATCH, "openai", lambda model, system, user: (llm_note_response, 80, 120))
     monkeypatch.setattr(note_gen_module, "log_api_call", lambda **kw: None)
 
     result = generate_note(parsed_doc)
