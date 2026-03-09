@@ -1,20 +1,26 @@
-"""LLM-based study note generator.
+"""LLM-based study note generator — multi-provider.
 
-Calls OpenAI chat completion API with serialized Document blocks
-and returns a structured learning note dict.
+Supports OpenAI, Anthropic, and Google Gemini for note generation.
+Calls chat completion API with serialized Document blocks and returns
+a structured learning note dict.
+
+Supported providers:
+- OpenAI   : gpt-4o-mini, gpt-4o
+- Anthropic: claude-haiku-4-5-20251001, claude-sonnet-4-6
+- Google   : gemini-3-flash-preview, gemini-3.1-pro-preview, gemini-3.1-flash-lite-preview
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from typing import Any
 
-import openai
 from dotenv import load_dotenv
 
-from models.document import Document, ProcessingStatus
+from models.document import BlockType, Document, ProcessingStatus
 from prompts.note_generation import PROMPT, PROMPT_VERSION
 from utils.logging import log_api_call
 
@@ -22,34 +28,95 @@ load_dotenv()
 
 LOGGER = logging.getLogger(__name__)
 
-_MAX_BLOCKS = 40
-_MAX_CONTENT_LEN = 800       # per block in normal mode
-_MAX_CONTENT_LEN_LARGE = 400 # per block when doc has many blocks
-_LARGE_DOC_THRESHOLD = 30    # blocks: above this, use large-doc strategy
+_MAX_BLOCKS = 80
+_MAX_CONTENT_LEN = 1200      # per block in normal mode
+_MAX_CONTENT_LEN_LARGE = 600 # per block when doc has many blocks
+_LARGE_DOC_THRESHOLD = 40    # blocks: above this, use large-doc strategy
+_MAX_CODE_LINES = 15         # code blocks: only first N lines passed to LLM
 
-_LLM_COST_PER_1M: dict[str, dict[str, float]] = {
-    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
-    "gpt-4o": {"input": 2.50, "output": 10.00},
+# ---------------------------------------------------------------------------
+# Model registry: model_id → {provider, input_cost_per_1m, output_cost_per_1m}
+# ---------------------------------------------------------------------------
+_MODEL_REGISTRY: dict[str, dict] = {
+    "gpt-4o-mini":               {"provider": "openai",     "input": 0.15,  "output": 0.60},
+    "gpt-4o":                    {"provider": "openai",     "input": 2.50,  "output": 10.00},
+    "gpt-4.1-mini":              {"provider": "openai",     "input": 0.40,  "output": 1.60},
+    "gpt-4.1-nano":              {"provider": "openai",     "input": 0.10,  "output": 0.40},
+    "gpt-5-nano":                {"provider": "openai",     "input": 0.20,  "output": 0.80},
+    "claude-haiku-4-5-20251001": {"provider": "anthropic",  "input": 0.80,  "output": 4.00},
+    "claude-sonnet-4-6":         {"provider": "anthropic",  "input": 3.00,  "output": 15.00},
+    "gemini-3-flash-preview":         {"provider": "google",     "input": 0.10,  "output": 0.40},
+    "gemini-3.1-pro-preview":         {"provider": "google",     "input": 1.25,  "output": 10.00},
+    "gemini-3.1-flash-lite-preview":  {"provider": "google",     "input": 0.04,  "output": 0.15},
 }
 
-_openai_client: openai.OpenAI | None = None
-
-
-def _get_client() -> openai.OpenAI:
-    """Return a module-level cached OpenAI client (lazy init)."""
-    global _openai_client
-    if _openai_client is None:
-        _openai_client = openai.OpenAI()
-    return _openai_client
+SUPPORTED_LLM_MODELS: list[str] = list(_MODEL_REGISTRY.keys())
 
 
 def _compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     """Estimate cost in USD from token counts."""
-    info = _LLM_COST_PER_1M.get(model, {})
+    info = _MODEL_REGISTRY.get(model, {})
     return (
         input_tokens * info.get("input", 0) / 1_000_000
         + output_tokens * info.get("output", 0) / 1_000_000
     )
+
+
+# ---------------------------------------------------------------------------
+# Provider-level call functions — each returns (raw_text, input_tokens, output_tokens)
+# ---------------------------------------------------------------------------
+
+def _call_openai(model: str, system: str, user: str) -> tuple[str, int, int]:
+    """Call OpenAI chat completion API."""
+    import openai  # lazy import
+
+    client = openai.OpenAI()
+    resp = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        max_tokens=4096,
+    )
+    raw = resp.choices[0].message.content or ""
+    return raw, resp.usage.prompt_tokens, resp.usage.completion_tokens
+
+
+def _call_anthropic(model: str, system: str, user: str) -> tuple[str, int, int]:
+    """Call Anthropic Claude chat API."""
+    import anthropic  # lazy import
+
+    client = anthropic.Anthropic()
+    resp = client.messages.create(
+        model=model,
+        max_tokens=4096,
+        system=system,
+        messages=[{"role": "user", "content": user}],
+    )
+    raw = resp.content[0].text if resp.content else ""
+    return raw, resp.usage.input_tokens, resp.usage.output_tokens
+
+
+def _call_google(model: str, system: str, user: str) -> tuple[str, int, int]:
+    """Call Google Gemini chat API."""
+    import google.generativeai as genai  # lazy import
+
+    genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
+    gemini = genai.GenerativeModel(model, system_instruction=system)
+    resp = gemini.generate_content(user)
+    raw = resp.text or ""
+    meta = getattr(resp, "usage_metadata", None)
+    input_tokens = getattr(meta, "prompt_token_count", 0) or 0
+    output_tokens = getattr(meta, "candidates_token_count", 0) or 0
+    return raw, input_tokens, output_tokens
+
+
+_PROVIDER_DISPATCH: dict[str, Any] = {
+    "openai":    _call_openai,
+    "anthropic": _call_anthropic,
+    "google":    _call_google,
+}
 
 
 def _sample_blocks(doc: Document, max_blocks: int = _MAX_BLOCKS) -> list:
@@ -69,12 +136,24 @@ def _sample_blocks(doc: Document, max_blocks: int = _MAX_BLOCKS) -> list:
     return [blocks[i] for i in sorted(indices)]
 
 
+def _truncate_code(content: str, max_lines: int = _MAX_CODE_LINES) -> str:
+    """Return first max_lines of a code block with an omission note if truncated."""
+    code_lines = content.splitlines()
+    if len(code_lines) <= max_lines:
+        return content
+    kept = "\n".join(code_lines[:max_lines])
+    omitted = len(code_lines) - max_lines
+    return f"{kept}\n# ... ({omitted} lines omitted)"
+
+
 def _serialize_blocks(doc: Document, max_blocks: int = _MAX_BLOCKS) -> str:
     """Serialize document blocks into '[{type}] {content}' lines.
 
     For large documents (> _LARGE_DOC_THRESHOLD blocks), samples evenly
     across the document and applies a shorter per-block content limit so
     the LLM receives representative coverage rather than just the beginning.
+    CODE blocks are truncated to _MAX_CODE_LINES to prevent the LLM from
+    copying raw code into note_markdown.
     """
     is_large = len(doc.blocks) > _LARGE_DOC_THRESHOLD
     content_limit = _MAX_CONTENT_LEN_LARGE if is_large else _MAX_CONTENT_LEN
@@ -82,8 +161,12 @@ def _serialize_blocks(doc: Document, max_blocks: int = _MAX_BLOCKS) -> str:
 
     lines = []
     for block in sampled:
-        content = block.content[:content_limit]
-        lines.append(f"[{block.type.value}] {content}")
+        if block.type == BlockType.CODE:
+            content = _truncate_code(block.content)
+            lines.append(f"[code] {content}")
+        else:
+            content = block.content[:content_limit]
+            lines.append(f"[{block.type.value}] {content}")
     return "\n".join(lines)
 
 
@@ -116,8 +199,9 @@ def _make_fallback(doc: Document, raw_response: str, error_msg: str) -> dict[str
 def generate_note(doc: Document, model: str = "gpt-4o-mini") -> dict[str, Any]:
     """Generate a structured study note dict from a Document.
 
-    Calls OpenAI chat completion API with document blocks serialized as
-    '[{type}] {content}' lines (system: PROMPT, user: serialized blocks).
+    Routes to the appropriate provider (OpenAI / Anthropic / Google) based on
+    the model identifier. Document blocks are serialized as '[{type}] {content}'
+    lines and sent as user content with PROMPT as the system message.
 
     On success:
     - Parses the JSON response and returns it as a dict.
@@ -134,29 +218,27 @@ def generate_note(doc: Document, model: str = "gpt-4o-mini") -> dict[str, Any]:
 
     Args:
         doc: Source document with populated blocks.
-        model: OpenAI model identifier (default: gpt-4o-mini).
+        model: Model identifier. Must be one of SUPPORTED_LLM_MODELS.
 
     Returns:
         dict with keys: title, summary, note_markdown, key_concepts,
         difficulty_level, estimated_read_time_min, schema_version,
         confidence, errors.
+
+    Raises:
+        ValueError: If model is not in SUPPORTED_LLM_MODELS.
     """
+    if model not in _MODEL_REGISTRY:
+        raise ValueError(f"Unsupported model: {model!r}. Choose from: {SUPPORTED_LLM_MODELS}")
+
+    provider = _MODEL_REGISTRY[model]["provider"]
+    call_fn = _PROVIDER_DISPATCH[provider]
     user_content = _serialize_blocks(doc)
     t0 = time.perf_counter()
 
     try:
-        client = _get_client()
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-        )
+        raw, input_tokens, output_tokens = call_fn(model, PROMPT, user_content)
         latency_ms = (time.perf_counter() - t0) * 1000
-        raw = resp.choices[0].message.content or ""
-        input_tokens = resp.usage.prompt_tokens
-        output_tokens = resp.usage.completion_tokens
         cost_usd = _compute_cost(model, input_tokens, output_tokens)
 
         try:
@@ -211,4 +293,4 @@ def generate_note(doc: Document, model: str = "gpt-4o-mini") -> dict[str, Any]:
         return _make_fallback(doc, "", error_msg)
 
 
-__all__ = ["generate_note"]
+__all__ = ["generate_note", "SUPPORTED_LLM_MODELS"]
