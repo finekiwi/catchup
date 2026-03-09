@@ -16,18 +16,18 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv()
 
-import markdown as md_lib
-import streamlit as st
+import markdown as md_lib  # noqa: E402
+import streamlit as st  # noqa: E402
 
-from llm.note_generator import SUPPORTED_LLM_MODELS, generate_note
-from parsers.image_parser import parse_image
-from parsers.ipynb_parser import parse_ipynb
-from parsers.pdf_parser import parse_pdf
-from vlm.client import SUPPORTED_MODELS
+from llm.note_generator import SUPPORTED_LLM_MODELS, generate_note  # noqa: E402
+from parsers.image_parser import parse_image  # noqa: E402
+from parsers.ipynb_parser import parse_ipynb  # noqa: E402
+from parsers.pdf_parser import parse_pdf  # noqa: E402
+from vlm.client import SUPPORTED_MODELS  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Global CSS — light theme styles for all custom components
@@ -684,9 +684,10 @@ if not st.button("분석 시작", type="primary", use_container_width=False):
 file_bytes = uploaded_file.read()
 file_hash = hashlib.sha256(file_bytes).hexdigest()
 cache_key = f"result_{file_hash}_{vlm_model}_{llm_model}"
+doc_cache_key = f"doc_{file_hash}_{vlm_model}"
 
 if cache_key in st.session_state:
-    doc = st.session_state[f"doc_{file_hash}"]
+    doc = st.session_state[doc_cache_key]
     result = st.session_state[cache_key]
     st.toast("캐시된 결과를 불러왔습니다", icon="⚡")
 else:
@@ -745,7 +746,7 @@ else:
         status.update(label="분석 완료!", state="complete", expanded=False)
 
     # Cache
-    st.session_state[f"doc_{file_hash}"] = doc
+    st.session_state[doc_cache_key] = doc
     st.session_state[cache_key] = result
 
 # ===================================================================

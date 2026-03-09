@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 from models.document import BlockType, Document, ProcessingStatus
 from prompts.note_generation import PROMPT, PROMPT_VERSION
 from utils.logging import log_api_call
+from llm.schemas import NoteGenerationOutput
 
 load_dotenv()
 
@@ -245,6 +246,10 @@ def generate_note(doc: Document, model: str = "gpt-4o-mini") -> dict[str, Any]:
             result = json.loads(_strip_markdown_fence(raw))
             if not isinstance(result, dict):
                 raise ValueError("LLM response JSON must be an object")
+            try:
+                result = NoteGenerationOutput.model_validate(result).model_dump()
+            except Exception as val_exc:
+                LOGGER.warning("NoteGenerationOutput schema validation warning: %s", val_exc)
         except (json.JSONDecodeError, ValueError) as parse_exc:
             LOGGER.warning("Note generation JSON parse failed: %s", parse_exc)
             log_api_call(

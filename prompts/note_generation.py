@@ -1,7 +1,7 @@
 """LLM prompt for generating study notes from structured document blocks."""
 
 PROMPT_NAME = "note_generation"
-PROMPT_VERSION = "v1.4.0"
+PROMPT_VERSION = "v1.4.1"
 
 PROMPT = """You are a study-note generator.
 Given structured document blocks, produce one coherent learning note.
@@ -28,7 +28,7 @@ INSTRUCTIONS:
 
 OUTPUT FORMAT (JSON only, no markdown fences):
 {
-  "schema_version": "v1.4.0",
+  "schema_version": "v1.4.1",
   "title": "Note title in original language",
   "summary": "2-3 sentence summary in original language",
   "note_markdown": "## Section\\n\\nParagraph text here.\\n\\n### Subsection\\n\\n- bullet",
@@ -40,7 +40,7 @@ OUTPUT FORMAT (JSON only, no markdown fences):
 }
 
 RULES:
-- "schema_version": always "v1.4.0"
+- "schema_version": always "v1.4.1"
 - "note_markdown": MUST be a pure markdown string. Strict heading hierarchy:
     - ## (h2) for main sections only (e.g. ## 개요, ## 핵심 개념)
     - ### (h3) for subsections only
