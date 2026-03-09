@@ -48,7 +48,7 @@ _GLOBAL_CSS = """\
 .metric-card .value {
     font-size: 1.7rem;
     font-weight: 700;
-    color: #D94032;
+    color: #C4553A;
     line-height: 1.2;
 }
 .metric-card .label {
@@ -109,8 +109,8 @@ _GLOBAL_CSS = """\
 .note-content ul, .note-content ol { margin: 0.4em 0 0.4em 1.5em; }
 .note-content li { margin: 0.25em 0; font-size: 0.93rem; }
 .note-content code {
-    background: #FCEAE8;
-    color: #BF3528;
+    background: #F2DDD6;
+    color: #A8432C;
     padding: 0.15em 0.45em;
     border-radius: 4px;
     font-size: 0.85rem;
@@ -143,23 +143,23 @@ _GLOBAL_CSS = """\
     padding-top: 0.8em;
 }
 .note-content blockquote {
-    border-left: 3px solid #F0CCC8;
+    border-left: 3px solid #EACFC5;
     padding: 0.5em 1.2em;
     margin: 0.8em 0;
-    background: #FCEAE8;
+    background: #F2DDD6;
     color: #7A6555;
     border-radius: 0 8px 8px 0;
 }
 .note-content hr { border: none; border-top: 1px solid #E5D9CD; margin: 1.5em 0; }
 .note-content strong { font-weight: 700; color: #3D2E24; }
-.note-content a { color: #D94032; text-decoration: none; }
+.note-content a { color: #C4553A; text-decoration: none; }
 .note-content a:hover { text-decoration: underline; }
 
 /* ── Summary card ──────────────────────────────────────────────────────── */
 .summary-card {
     background: #F5EDE4;
-    border: 1px solid #F0CCC8;
-    border-left: 3px solid #F0CCC8;
+    border: 1px solid #EACFC5;
+    border-left: 3px solid #EACFC5;
     border-radius: 10px;
     padding: 1em 1.4em;
     margin: 0.6em 0 1em;
@@ -188,7 +188,7 @@ _GLOBAL_CSS = """\
 .sidebar-brand .logo {
     font-size: 1.6rem;
     font-weight: 800;
-    color: #D94032;
+    color: #C4553A;
     letter-spacing: -0.02em;
 }
 .sidebar-brand .tagline {
@@ -230,8 +230,8 @@ _GLOBAL_CSS = """\
     color: #FFFFFF;
 }
 .step-circle.active {
-    background: #D94032;
-    border-color: #D94032;
+    background: #C4553A;
+    border-color: #C4553A;
     color: #FFFFFF;
 }
 .step-label {
@@ -239,7 +239,7 @@ _GLOBAL_CSS = """\
     color: #A89585;
 }
 .step-label.done { color: #5B8C5A; font-weight: 600; }
-.step-label.active { color: #D94032; font-weight: 600; }
+.step-label.active { color: #C4553A; font-weight: 600; }
 .step-connector {
     width: 2px;
     height: 14px;
@@ -250,15 +250,15 @@ _GLOBAL_CSS = """\
 
 /* ── File uploader icon color ─────────────────────────────────────────── */
 [data-testid="stFileUploader"] svg {
-    color: #D94032 !important;
-    fill: #D94032 !important;
+    color: #C4553A !important;
+    fill: #C4553A !important;
 }
 [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] {
-    border-color: #F0CCC8;
+    border-color: #EACFC5;
 }
 [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"]:hover {
-    border-color: #D94032;
-    background: #FCEAE8;
+    border-color: #C4553A;
+    background: #F2DDD6;
 }
 
 /* ── Global accent override ──────────────────────────────────────────── */
@@ -270,47 +270,52 @@ _GLOBAL_CSS = """\
 /* Buttons */
 .stButton > button[kind="primary"],
 button[kind="primary"] {
-    background-color: #D94032 !important;
-    border-color: #D94032 !important;
+    background-color: #C4553A !important;
+    border-color: #C4553A !important;
     border-radius: 8px !important;
+}
+.stButton > button[kind="primary"],
+button[kind="primary"] {
+    transition: filter 0.2s, transform 0.15s, box-shadow 0.2s;
 }
 .stButton > button[kind="primary"]:hover,
 button[kind="primary"]:hover {
-    background-color: #BF3528 !important;
-    border-color: #BF3528 !important;
+    filter: brightness(1.08) !important;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(196, 85, 58, 0.25) !important;
 }
 .stButton > button[kind="primary"]:active,
 button[kind="primary"]:active {
-    background-color: #9E2C21 !important;
-    border-color: #9E2C21 !important;
+    filter: brightness(0.95) !important;
+    transform: translateY(0);
 }
 .stButton > button[kind="primary"]:focus:not(:active) {
-    box-shadow: 0 0 0 0.2rem rgba(217, 64, 50, 0.35) !important;
+    box-shadow: 0 0 0 0.2rem rgba(196, 85, 58, 0.35) !important;
 }
 
 /* Download button */
 .stDownloadButton > button {
-    border-color: #D94032 !important;
-    color: #D94032 !important;
+    border-color: #C4553A !important;
+    color: #C4553A !important;
 }
 .stDownloadButton > button:hover {
-    background-color: #FCEAE8 !important;
-    border-color: #BF3528 !important;
-    color: #BF3528 !important;
+    background-color: #F2DDD6 !important;
+    border-color: #A8432C !important;
+    color: #A8432C !important;
 }
 
 /* Toggle */
 [data-testid="stToggle"] label span[data-checked="true"] {
-    background-color: #D94032 !important;
+    background-color: #C4553A !important;
 }
 
 /* Tabs — active underline */
 .stTabs [data-baseweb="tab-highlight"] {
-    background-color: #D94032 !important;
+    background-color: #C4553A !important;
     height: 3px !important;
 }
 .stTabs [data-baseweb="tab"][aria-selected="true"] {
-    color: #D94032 !important;
+    color: #C4553A !important;
     font-weight: 700 !important;
 }
 .stTabs [data-baseweb="tab"][aria-selected="false"] {
@@ -322,31 +327,31 @@ button[kind="primary"]:active {
 
 /* Chat input focus */
 [data-testid="stChatInput"] textarea:focus {
-    border-color: #D94032 !important;
-    box-shadow: 0 0 0 1px #D94032 !important;
+    border-color: #C4553A !important;
+    box-shadow: 0 0 0 1px #C4553A !important;
 }
 [data-testid="stChatInputSubmitButton"] button,
 [data-testid="stChatInputSubmitButton"] svg {
-    color: #D94032 !important;
-    fill: #D94032 !important;
+    color: #C4553A !important;
+    fill: #C4553A !important;
 }
 
 /* Chat message assistant avatar */
 [data-testid="stChatMessage"] [data-testid="chatAvatarIcon-assistant"] {
-    background-color: #D94032 !important;
+    background-color: #C4553A !important;
 }
 
 /* Status widget */
 [data-testid="stStatus"] summary svg {
-    color: #D94032 !important;
+    color: #C4553A !important;
 }
 details[data-testid="stStatus"][open] > summary {
-    border-color: #D94032 !important;
+    border-color: #C4553A !important;
 }
 
 /* Spinner */
 .stSpinner > div > div {
-    border-top-color: #D94032 !important;
+    border-top-color: #C4553A !important;
 }
 
 /* Selectbox / multiselect */
@@ -354,17 +359,17 @@ details[data-testid="stStatus"][open] > summary {
     border-color: #E5D9CD !important;
 }
 [data-baseweb="select"] [data-baseweb="input"]:focus-within {
-    border-color: #D94032 !important;
-    box-shadow: 0 0 0 1px #D94032 !important;
+    border-color: #C4553A !important;
+    box-shadow: 0 0 0 1px #C4553A !important;
 }
 [data-baseweb="select"] svg {
-    color: #D94032 !important;
-    fill: #D94032 !important;
+    color: #C4553A !important;
+    fill: #C4553A !important;
 }
 [data-baseweb="popover"] li[aria-selected="true"],
 [data-baseweb="menu"] li[aria-selected="true"] {
-    background-color: #FCEAE8 !important;
-    color: #BF3528 !important;
+    background-color: #F2DDD6 !important;
+    color: #A8432C !important;
 }
 [data-baseweb="popover"] li:hover,
 [data-baseweb="menu"] li:hover {
@@ -374,29 +379,29 @@ details[data-testid="stStatus"][open] > summary {
     border-color: #E5D9CD !important;
 }
 [data-testid="stSelectbox"] > div > div:focus-within {
-    border-color: #D94032 !important;
-    box-shadow: 0 0 0 1px #D94032 !important;
+    border-color: #C4553A !important;
+    box-shadow: 0 0 0 1px #C4553A !important;
 }
 
 /* Expander */
 [data-testid="stExpander"] summary:hover svg {
-    color: #D94032 !important;
+    color: #C4553A !important;
 }
 
 /* Text input / textarea focus */
 .stTextInput input:focus,
 .stTextArea textarea:focus {
-    border-color: #D94032 !important;
-    box-shadow: 0 0 0 1px #D94032 !important;
+    border-color: #C4553A !important;
+    box-shadow: 0 0 0 1px #C4553A !important;
 }
 
 /* Link & anchor color */
-a { color: #D94032 !important; }
-a:hover { color: #BF3528 !important; }
+a { color: #C4553A !important; }
+a:hover { color: #A8432C !important; }
 
 /* Toast */
 [data-testid="stToast"] {
-    border-left-color: #D94032 !important;
+    border-left-color: #C4553A !important;
 }
 </style>
 """
@@ -406,7 +411,7 @@ _BLOCK_TYPE_COLORS: dict[str, str] = {
     "text": "#5B8C5A",
     "code": "#5A7B8C",
     "table": "#C4883A",
-    "figure": "#D94032",
+    "figure": "#C4553A",
     "equation": "#5A5470",
     "heading": "#4A6342",
 }
