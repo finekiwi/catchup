@@ -175,6 +175,154 @@ v1.1.0 프롬프트에 언어 지시 없음. `"Preserve original language"` 지�
 
 ---
 
+## Issue 8 — note_generator.py: OpenAI 전용 → 멀티 프로바이더 확장
+
+**Status:** Fixed
+
+**Symptom**
+`note_generator.py`가 OpenAI만 지원. Anthropic/Google 모델을 데모 UI에서 선택할 수 없었음.
+
+**Root Cause**
+`generate_note()`가 module-level `_openai_client` 캐시와 `openai.OpenAI()` 직접 호출로 하드코딩되어 있었음.
+
+**Fix**
+`vlm/client.py`와 동일한 provider dispatch 패턴으로 재구성:
+- `_MODEL_REGISTRY`: model_id → `{provider, input, output}` 비용 테이블 (6개 모델)
+- `SUPPORTED_LLM_MODELS`: 외부 노출 리스트, `demo.py`에서 import해서 selectbox 자동 확장
+- `_call_openai / _call_anthropic / _call_google`: lazy import, 각각 `(raw, input_tokens, output_tokens)` 반환
+- `_PROVIDER_DISPATCH`: `{provider: call_fn}` 라우팅 딕셔너리
+- `generate_note()`: `_MODEL_REGISTRY[model]["provider"]`로 dispatch, 미지원 모델은 `ValueError` raise
+
+```python
+# Before: OpenAI hardcoded
+client = openai.OpenAI()
+resp = client.chat.completions.create(model=model, messages=[...])
+
+# After: provider dispatch
+provider = _MODEL_REGISTRY[model]["provider"]
+raw, input_tokens, output_tokens = _PROVIDER_DISPATCH[provider](model, PROMPT, user_content)
+```
+
+**Test fix**
+기존 테스트가 `_get_client` / `openai.OpenAI` 패치 방식이었음. `_PROVIDER_DISPATCH`는 모듈 로드 시점에 함수 레퍼런스를 캡처하므로 모듈 속성 패치(`monkeypatch.setattr`)로는 dispatch를 우회할 수 없음. `monkeypatch.setitem(note_gen_module._PROVIDER_DISPATCH, "openai", mock_fn)`으로 전면 교체. 62개 테스트 전부 통과.
+
+---
+
+## Issue 9 — demo.py UI 전면 재설계 (다크 테마 + 컴포넌트 시스템)
+
+**Status:** Fixed
+
+**Symptom**
+초기 demo.py UI가 단조롭고 정보 밀도가 낮음. 파싱 결과와 노트가 세로로 쭉 나열되고, key_concepts는 raw 리스트로 덤프, 메트릭은 일반 텍스트로 출력됨.
+
+**Root Cause**
+MVP 수준 레이아웃 — styled HTML 없이 `st.write()` / `st.metric()` / `st.markdown()` 단순 호출만 사용. 결과 영역이 단일 세로 스크롤로 구성되어 파싱 요약과 노트가 구분되지 않음.
+
+**Fix**
+`ui/demo.py` 전면 재설계:
+
+- **전역 CSS** (`_GLOBAL_CSS`): 다크 테마 기반 컴포넌트 스타일 시트. `.metric-card`, `.block-badge`, `.concept-tag`, `.note-wrapper`, `.summary-card`, `.meta-badge`, `.sidebar-brand`, `.pipeline-step` 등 클래스 정의.
+- **탭 레이아웃**: `st.tabs(["📊 파싱 결과", "📝 학습 노트"])`로 파싱 요약 / 노트 영역 분리.
+- **파싱 요약 탭**: metric cards (`_render_metric_card`), 블록 타입 컬러 배지 (`_render_block_type_badges`), 블록 상세 expander (최대 30개 미리보기).
+- **노트 탭**: summary card, meta badges (난이도·읽기시간), key_concepts → `concept-tag` 뱃지 (`_render_concept_tags`), note content는 `.note-wrapper` 내부 렌더링.
+- **사이드바**: 브랜드 헤더, 파이프라인 단계 표시기 (`upload → parse → note`), 모델 설정 expander.
+- **진행 표시**: `st.spinner` → `st.status(expanded=True)` 2-step 진행 표시. 캐시 히트 시 `st.toast()`.
+- **_render_note_html**: `_NOTE_CSS` 인라인 주입 → `note-wrapper` div 재사용으로 변경 (전역 CSS가 담당).
+
+```python
+# Before: flat layout
+st.write(f"## {title}")
+for concept in key_concepts:
+    st.markdown(f"- `{concept}`")
+
+# After: styled HTML components
+st.markdown(f"### {title}")
+st.markdown(_render_concept_tags(key_concepts), unsafe_allow_html=True)
+```
+
+---
+
+## Issue 10 — Gemini 모델명 오류 (404 not found)
+
+**Status:** Fixed
+
+**Symptom**
+Gemini 모델 선택 시 `404 models/gemini-3-flash is not found for API version v1beta` 오류 발생.
+
+**Root Cause**
+`vlm/client.py`와 `llm/note_generator.py`에 `gemini-3-flash` / `gemini-3.1-pro`로 등록되어 있었으나 실제 존재하지 않는 모델명이었음.
+
+**Fix**
+두 파일 모두 실제 API 모델명으로 교체:
+```python
+# Before (존재하지 않음)
+"gemini-3-flash", "gemini-3.1-pro"
+
+# After (실제 모델명)
+"gemini-3-flash-preview", "gemini-3.1-pro-preview", "gemini-3.1-flash-lite-preview"
+```
+
+---
+
+## Issue 11 — ipynb 코드 블록이 note_markdown에 그대로 복사 → JSON parse fail
+
+**Status:** Fixed
+
+**Symptom**
+38-block ipynb (코드 24개) 분석 시 `노트 생성 경고: JSON parse failed` 발생. fallback으로 raw LLM 출력이 렌더링되는데, `note_markdown` 안에 `def detect(cls, text: str):` 같은 raw 코드가 그대로 포함되어 있음.
+
+**Root Cause**
+`_serialize_blocks()`가 코드 블록 전체를 LLM에 전달. 코드가 길면 LLM이 note_markdown에 코드 자체를 복사하고, 코드 내 `\n`이 JSON 문자열 안에서 이스케이프 되지 않아 `json.loads()` 실패.
+
+**Fix (1차 — 과도한 제한)**
+`_truncate_code(content, max_lines=6)` 추가 — 코드 블록을 앞 6줄로 자르고 `# ... (N lines omitted)` 표시.
+→ 부작용: LLM이 코드를 거의 이해 못 해서 note에서 코드 설명 섹션 자체가 사라짐.
+
+**Fix (2차 — 조정)**
+`_MAX_CODE_LINES` 6 → 15로 상향. 15줄이면 클래스 정의 + 핵심 메서드 시그니처까지 포함 가능. `[code]` 레이블 유지 (프롬프트에서 이미 코드 설명 지시).
+
+```python
+# Before: 전체 코드 전달
+content = block.content[:content_limit]  # 최대 1200자
+
+# After: 앞 15줄 + omit 표시
+def _truncate_code(content: str, max_lines: int = _MAX_CODE_LINES) -> str:
+    code_lines = content.splitlines()
+    if len(code_lines) <= max_lines:
+        return content
+    kept = "\n".join(code_lines[:max_lines])
+    return f"{kept}\n# ... ({len(code_lines) - max_lines} lines omitted)"
+```
+
+---
+
+## Issue 12 — 데모 UI 색상 테마 불일치 (보라/파랑 잔존)
+
+**Status:** Fixed
+
+**Symptom**
+배경을 라이트 테마로 전환했음에도 모델 선택창(selectbox), 사이드바 등 Streamlit 기본 위젯에 보라/파란 회색 색상이 잔존하여 빨강 계열 테마와 어울리지 않음.
+
+**Root Cause**
+두 가지 레이어에서 발생:
+1. `secondaryBackgroundColor`가 `#F5F5FA` (보라빛 미세 포함) → 사이드바·expander 배경에 노출
+2. Streamlit 기본 위젯(selectbox border, dropdown hover, chevron 아이콘)이 자체 파란 계열 색상 사용 — `primaryColor` 설정으로 완전히 제어되지 않음
+
+**Fix**
+`.streamlit/config.toml`:
+```toml
+secondaryBackgroundColor = "#FFF7ED"  # 연한 주황 → 빨강 primary와 조화
+```
+
+`ui/demo.py` `_GLOBAL_CSS` 추가:
+- `[data-baseweb="select"] [data-baseweb="input"]` → border `#FECACA` (연한 빨강)
+- `[data-baseweb="select"] svg` → chevron `#E53935`
+- `[data-baseweb="menu"] li:hover` → hover background `#FFF7ED`
+- `[data-baseweb="menu"] li[aria-selected="true"]` → 선택 항목 빨강 배경 + 텍스트
+- `[data-testid="stSelectbox"] > div > div` → border + focus 링 오버라이드
+
+---
+
 ## Summary
 
 | # | Issue | File(s) Changed | Fix Commit | Status |
@@ -186,3 +334,8 @@ v1.1.0 프롬프트에 언어 지시 없음. `"Preserve original language"` 지�
 | 5 | 이미지 VLM JSON → 노트 삽입 | `parsers/image_parser.py` | `2ea6f07` | Fixed (code) |
 | 6 | 대용량 ipynb 코드 복사 | `prompts/note_generation.py` | `2d543d7` | Prompt partial, code v2 |
 | 7 | key_concepts 언어 불일치 | `prompts/note_generation.py` | `2d543d7` | Prompt partial, eval pending |
+| 8 | note_generator OpenAI 전용 | `llm/note_generator.py`, `ui/demo.py`, `tests/test_note_generator.py`, `tests/test_pipeline_integration.py` | — | Fixed |
+| 9 | demo.py UI 단조롭고 정보 밀도 낮음 | `ui/demo.py` | — | Fixed |
+| 10 | Gemini 모델명 404 오류 | `vlm/client.py`, `llm/note_generator.py` | — | Fixed |
+| 11 | ipynb 코드 블록 → note_markdown 복사 + JSON parse fail | `llm/note_generator.py` | — | Fixed |
+| 12 | 데모 UI 색상 테마 불일치 (보라/파랑 잔존) | `ui/demo.py`, `.streamlit/config.toml` | — | Fixed |

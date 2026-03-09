@@ -72,7 +72,7 @@ flowchart TD
 - ✅ Storage layer — SQLite (metadata) + ChromaDB (vectors) + JSONL API logging
 - ✅ VLM client wrapper — 10 models across OpenAI, Google, and Anthropic; unified interface with per-call cost tracking
 - ✅ VLM prompts v1.1 — type-specific prompts: `vlm_code`, `vlm_diagram`, `vlm_text`; structured JSON output with confidence + error fields
-- ⬜ Image parser — VLM-based 5-class classification (code / diagram / text / equation / other) + type-specific routing
+- ✅ Image parser — VLM-based 5-class classification (code / diagram / text / equation / other) + type-specific routing
 
 ### LLM Pipeline
 - ✅ Note generation prompts v1.4 — study note prompt with versioned iteration history (v1.0 → v1.4.1); per-version quality delta recorded in `prompts/VERSION_LOG.md`

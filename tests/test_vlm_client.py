@@ -151,7 +151,7 @@ def test_call_vlm_google_success(fake_image: Path):
         mock_genai.GenerativeModel.return_value = mock_model
         mock_model.generate_content.return_value = mock_resp
 
-        result = call_vlm("gemini-3-flash", fake_image, "describe this")
+        result = call_vlm("gemini-3-flash-preview", fake_image, "describe this")
 
     assert result.success is True
     assert result.content == "hello from gemini"
@@ -170,7 +170,7 @@ def test_call_vlm_google_failure(fake_image: Path):
         mock_genai.GenerativeModel.return_value = mock_model
         mock_model.generate_content.side_effect = ConnectionError("timeout")
 
-        result = call_vlm("gemini-3-flash", fake_image, "describe this")
+        result = call_vlm("gemini-3-flash-preview", fake_image, "describe this")
 
     assert result.success is False
     assert result.content == ""
