@@ -5,7 +5,7 @@ Prompt selection / routing lives in image_parser.py (CU-05).
 
 Supported providers:
 - OpenAI   : gpt-4o-mini, gpt-4o
-- Google   : gemini-3-flash, gemini-3.1-pro
+- Google   : gemini-3-flash-preview, gemini-3.1-pro-preview, gemini-3.1-flash-lite-preview
 - Anthropic: claude-haiku-4-5-20251001, claude-sonnet-4-6
 """
 
@@ -32,8 +32,12 @@ LOGGER = logging.getLogger(__name__)
 _MODEL_REGISTRY: dict[str, dict] = {
     "gpt-4o-mini":               {"provider": "openai",     "input": 0.15,  "output": 0.60},
     "gpt-4o":                    {"provider": "openai",     "input": 2.50,  "output": 10.00},
-    "gemini-3-flash":            {"provider": "google",     "input": 0.30,  "output": 2.50},
-    "gemini-3.1-pro":            {"provider": "google",     "input": 1.25,  "output": 10.00},
+    "gpt-4.1-mini":              {"provider": "openai",     "input": 0.40,  "output": 1.60},
+    "gpt-4.1-nano":              {"provider": "openai",     "input": 0.10,  "output": 0.40},
+    "gpt-5-nano":                {"provider": "openai",     "input": 0.20,  "output": 0.80},
+    "gemini-3-flash-preview":         {"provider": "google",     "input": 0.10,  "output": 0.40},
+    "gemini-3.1-pro-preview":         {"provider": "google",     "input": 1.25,  "output": 10.00},
+    "gemini-3.1-flash-lite-preview":  {"provider": "google",     "input": 0.04,  "output": 0.15},
     "claude-haiku-4-5-20251001": {"provider": "anthropic",  "input": 0.80,  "output": 4.00},
     "claude-sonnet-4-6":         {"provider": "anthropic",  "input": 3.00,  "output": 15.00},
 }
