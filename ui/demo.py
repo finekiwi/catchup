@@ -186,15 +186,15 @@ _GLOBAL_CSS = """\
     padding: 0.5em 0 0.8em;
 }
 .sidebar-brand .logo {
-    font-size: 1.6rem;
+    font-size: 2.0rem;
     font-weight: 800;
     color: #C4553A;
     letter-spacing: -0.02em;
 }
 .sidebar-brand .tagline {
-    font-size: 0.72rem;
+    font-size: 0.82rem;
     color: #A89585;
-    margin-top: 0.2em;
+    margin-top: 0.3em;
     letter-spacing: 0.03em;
 }
 
