@@ -211,3 +211,15 @@ CLAUDE.md
 AGENTS.md
 SKILL.md
 catchup-v2-collaboration-strategy.md
+
+# Runtime data
+data/logs/
+refs/
+
+# Internal tooling
+.github/
+scripts/
+
+# macOS
+.DS_Store
+**/.DS_Store
