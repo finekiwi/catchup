@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CatchUp — UI Color Palette</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* === CATCHUP WARM & SOFT PALETTE === */
+    
+    /* Background */
+    --bg-primary: #FDF8F3;        /* 메인 배경: 따뜻한 크림 */
+    --bg-secondary: #F5EDE4;      /* 카드/섹션 배경 */
+    --bg-sidebar: #FAF4ED;        /* 사이드바 */
+    --bg-hover: #F0E6DA;          /* 호버 상태 */
+    
+    /* Brand / Accent */
+    --brand-primary: #C4553A;     /* 메인 브랜드: 테라코타 (로고, CTA) */
+    --brand-hover: #A8432C;       /* 브랜드 호버 */
+    --brand-light: #F2DDD6;       /* 브랜드 연한 배경 (선택된 탭, 뱃지 bg) */
+    --brand-subtle: #EACFC5;      /* 브랜드 아주 연한 (보더, 디바이더) */
+    
+    /* Text */
+    --text-primary: #3D2E24;      /* 본문 텍스트 */
+    --text-secondary: #7A6555;    /* 보조 텍스트, 캡션 */
+    --text-muted: #A89585;        /* 비활성, 플레이스홀더 */
+    --text-on-brand: #FFFFFF;     /* 브랜드 색 위 텍스트 */
+    
+    /* Semantic */
+    --success: #5B8C5A;           /* 완료, 성공 */
+    --success-light: #E3F0E3;
+    --warning: #C4883A;           /* 경고, 진행중 */
+    --warning-light: #F5EBDB;
+    --error: #B84233;             /* 에러 */
+    --error-light: #F5DDD9;
+    --info: #5A7B8C;              /* 정보 */
+    --info-light: #DDE8ED;
+    
+    /* Tags (통일된 파스텔 — 채도 낮추고 톤 맞춤) */
+    --tag-1: #E8D5C4;  --tag-1-text: #7A5A3E;   /* 코랄 베이지 */
+    --tag-2: #D4DDD0;  --tag-2-text: #4A6342;   /* 세이지 그린 */
+    --tag-3: #D6D4E0;  --tag-3-text: #5A5470;   /* 라벤더 */
+    --tag-4: #DBDCE8;  --tag-4-text: #4A4C66;   /* 슬레이트 블루 */
+    --tag-5: #E8D8D4;  --tag-5-text: #6B4A42;   /* 로즈우드 */
+    
+    /* Border & Divider */
+    --border: #E5D9CD;
+    --border-light: #EDE4DA;
+    --divider: #EDE4DA;
+    
+    /* Shadow */
+    --shadow-sm: 0 1px 3px rgba(61, 46, 36, 0.06);
+    --shadow-md: 0 4px 12px rgba(61, 46, 36, 0.08);
+    --shadow-lg: 0 8px 24px rgba(61, 46, 36, 0.10);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    padding: 40px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  h1 {
+    font-family: 'DM Serif Display', serif;
+    font-size: 2rem;
+    color: var(--brand-primary);
+    margin-bottom: 8px;
+  }
+
+  .subtitle {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    margin-bottom: 48px;
+  }
+
+  .section-title {
+    font-weight: 700;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+    margin-top: 40px;
+  }
+
+  /* === Swatch Grid === */
+  .swatch-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .swatch {
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border-light);
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+  .swatch:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+  }
+
+  .swatch-color {
+    height: 80px;
+    display: flex;
+    align-items: flex-end;
+    padding: 8px 12px;
+  }
+
+  .swatch-info {
+    padding: 10px 12px;
+    background: white;
+  }
+
+  .swatch-name {
+    font-weight: 600;
+    font-size: 0.8rem;
+    color: var(--text-primary);
+  }
+
+  .swatch-hex {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-family: monospace;
+  }
+
+  .swatch-role {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    margin-top: 2px;
+  }
+
+  /* === Component Preview === */
+  .preview-section {
+    margin-top: 56px;
+    padding: 32px;
+    background: var(--bg-secondary);
+    border-radius: 16px;
+    border: 1px solid var(--border-light);
+  }
+
+  .preview-title {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.3rem;
+    margin-bottom: 24px;
+    color: var(--text-primary);
+  }
+
+  /* Mini CatchUp UI Preview */
+  .ui-preview {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 0;
+    background: var(--bg-primary);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--shadow-md);
+    min-height: 420px;
+  }
+
+  .sidebar-preview {
+    background: var(--bg-sidebar);
+    padding: 20px 16px;
+    border-right: 1px solid var(--border);
+  }
+
+  .logo-preview {
+    font-family: 'DM Serif Display', serif;
+    color: var(--brand-primary);
+    font-size: 1.2rem;
+    margin-bottom: 4px;
+  }
+
+  .logo-sub {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    margin-bottom: 24px;
+  }
+
+  .sidebar-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+    margin-top: 16px;
+  }
+
+  .fake-select {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 0.78rem;
+    color: var(--text-primary);
+    width: 100%;
+  }
+
+  .pipeline-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin: 6px 0;
+  }
+  .pipeline-item.done { color: var(--success); }
+  .pipeline-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+  .pipeline-item.done .pipeline-dot { background: var(--success); }
+
+  .main-preview {
+    padding: 24px 28px;
+  }
+
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    margin-bottom: 20px;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .upload-zone:hover {
+    border-color: var(--brand-subtle);
+    background: var(--brand-light);
+  }
+
+  .file-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 0.78rem;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+  }
+
+  .btn-primary {
+    background: var(--brand-primary);
+    color: var(--text-on-brand);
+    border: none;
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+    font-family: 'DM Sans', sans-serif;
+  }
+  .btn-primary:hover {
+    background: var(--brand-hover);
+    transform: translateY(-1px);
+  }
+
+  .tabs-preview {
+    display: flex;
+    gap: 0;
+    margin: 20px 0 16px;
+    border-bottom: 2px solid var(--border-light);
+  }
+  .tab {
+    padding: 8px 16px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    cursor: pointer;
+    transition: color 0.2s, border-color 0.2s;
+  }
+  .tab.active {
+    color: var(--brand-primary);
+    border-bottom-color: var(--brand-primary);
+    font-weight: 600;
+  }
+  .tab:hover:not(.active) {
+    color: var(--text-secondary);
+  }
+
+  .note-title {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.1rem;
+    margin-bottom: 10px;
+  }
+
+  .meta-badges {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .badge {
+    font-size: 0.68rem;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-weight: 500;
+  }
+
+  .tags-preview {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .tag {
+    font-size: 0.72rem;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-weight: 500;
+  }
+
+  .note-card {
+    background: var(--bg-secondary);
+    border-radius: 10px;
+    padding: 16px;
+    font-size: 0.8rem;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    border-left: 3px solid var(--brand-subtle);
+  }
+
+  /* === CSS Variable Export === */
+  .code-block {
+    margin-top: 56px;
+    background: #2D2420;
+    border-radius: 12px;
+    padding: 24px;
+    overflow-x: auto;
+  }
+  .code-block pre {
+    color: #E8D5C4;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.75rem;
+    line-height: 1.7;
+  }
+  .code-comment { color: #7A6555; }
+  .code-prop { color: #C4883A; }
+  .code-value { color: #C4553A; }
+
+  /* === Streamlit Override Guide === */
+  .streamlit-guide {
+    margin-top: 56px;
+    padding: 32px;
+    background: white;
+    border-radius: 16px;
+    border: 1px solid var(--border-light);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .guide-title {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.3rem;
+    margin-bottom: 8px;
+  }
+
+  .guide-desc {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin-bottom: 20px;
+    line-height: 1.6;
+  }
+
+  .guide-code {
+    background: #2D2420;
+    border-radius: 10px;
+    padding: 20px;
+    overflow-x: auto;
+  }
+  .guide-code pre {
+    color: #E8D5C4;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.73rem;
+    line-height: 1.7;
+  }
+
+  /* Comparison */
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-top: 40px;
+  }
+  .comparison-card {
+    padding: 20px;
+    border-radius: 12px;
+    text-align: center;
+  }
+  .comparison-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 12px;
+  }
+</style>
+</head>
+<body>
+
+<h1>🧡 CatchUp — Color Palette</h1>
+<p class="subtitle">Warm & Soft · 학습 도구를 위한 따뜻하고 편안한 색 체계</p>
+
+<!-- BACKGROUNDS -->
+<div class="section-title">Background</div>
+<div class="swatch-grid">
+  <div class="swatch">
+    <div class="swatch-color" style="background: #FDF8F3;border-bottom:1px solid #E5D9CD;"></div>
+    <div class="swatch-info">
+      <div class="swatch-name">Primary BG</div>
+      <div class="swatch-hex">#FDF8F3</div>
+      <div class="swatch-role">메인 배경</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #F5EDE4;"></div>
+    <div class="swatch-info">
+      <div class="swatch-name">Secondary BG</div>
+      <div class="swatch-hex">#F5EDE4</div>
+      <div class="swatch-role">카드, 섹션</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #FAF4ED;"></div>
+    <div class="swatch-info">
+      <div class="swatch-name">Sidebar</div>
+      <div class="swatch-hex">#FAF4ED</div>
+      <div class="swatch-role">사이드바</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #F0E6DA;"></div>
+    <div class="swatch-info">
+      <div class="swatch-name">Hover</div>
+      <div class="swatch-hex">#F0E6DA</div>
+      <div class="swatch-role">호버 상태</div>
+    </div>
+  </div>
+</div>
+
+<!-- BRAND -->
+<div class="section-title">Brand / Accent</div>
+<div class="swatch-grid">
+  <div class="swatch">
+    <div class="swatch-color" style="background: #C4553A; color: white; font-size:0.7rem; font-weight:600;">Primary</div>
+    <div class="swatch-info">
+      <div class="swatch-name">Terracotta</div>
+      <div class="swatch-hex">#C4553A</div>
+      <div class="swatch-role">로고, CTA 버튼</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #A8432C; color: white; font-size:0.7rem; font-weight:600;">Hover</div>
+    <div class="swatch-info">
+      <div class="swatch-name">Deep Terracotta</div>
+      <div class="swatch-hex">#A8432C</div>
+      <div class="swatch-role">브랜드 호버</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #F2DDD6;"></div>
+    <div class="swatch-info">
+      <div class="swatch-name">Brand Light</div>
+      <div class="swatch-hex">#F2DDD6</div>
+      <div class="swatch-role">활성 탭 bg, 뱃지</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #EACFC5;"></div>
+    <div class="swatch-info">
+      <div class="swatch-name">Brand Subtle</div>
+      <div class="swatch-hex">#EACFC5</div>
+      <div class="swatch-role">보더, 액센트 라인</div>
+    </div>
+  </div>
+</div>
+
+<!-- TEXT -->
+<div class="section-title">Text</div>
+<div class="swatch-grid">
+  <div class="swatch">
+    <div class="swatch-color" style="background: #3D2E24; color: white; font-size:0.7rem;">Aa</div>
+    <div class="swatch-info">
+      <div class="swatch-name">Primary</div>
+      <div class="swatch-hex">#3D2E24</div>
+      <div class="swatch-role">본문</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #7A6555; color: white; font-size:0.7rem;">Aa</div>
+    <div class="swatch-info">
+      <div class="swatch-name">Secondary</div>
+      <div class="swatch-hex">#7A6555</div>
+      <div class="swatch-role">보조 텍스트</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #A89585; color: white; font-size:0.7rem;">Aa</div>
+    <div class="swatch-info">
+      <div class="swatch-name">Muted</div>
+      <div class="swatch-hex">#A89585</div>
+      <div class="swatch-role">비활성, 힌트</div>
+    </div>
+  </div>
+</div>
+
+<!-- SEMANTIC -->
+<div class="section-title">Semantic</div>
+<div class="swatch-grid">
+  <div class="swatch">
+    <div class="swatch-color" style="background: #5B8C5A; color:white; font-size:0.7rem;">✓ Success</div>
+    <div class="swatch-info">
+      <div class="swatch-name">Sage Green</div>
+      <div class="swatch-hex">#5B8C5A</div>
+      <div class="swatch-role">완료, 성공</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #C4883A; color:white; font-size:0.7rem;">◐ Warning</div>
+    <div class="swatch-info">
+      <div class="swatch-name">Amber</div>
+      <div class="swatch-hex">#C4883A</div>
+      <div class="swatch-role">경고, 진행중</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #B84233; color:white; font-size:0.7rem;">✕ Error</div>
+    <div class="swatch-info">
+      <div class="swatch-name">Burnt Sienna</div>
+      <div class="swatch-hex">#B84233</div>
+      <div class="swatch-role">에러</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #5A7B8C; color:white; font-size:0.7rem;">ℹ Info</div>
+    <div class="swatch-info">
+      <div class="swatch-name">Steel Blue</div>
+      <div class="swatch-hex">#5A7B8C</div>
+      <div class="swatch-role">정보</div>
+    </div>
+  </div>
+</div>
+
+<!-- TAGS -->
+<div class="section-title">Tags (개념 태그용 — 채도 통일)</div>
+<div class="swatch-grid">
+  <div class="swatch">
+    <div class="swatch-color" style="background: #E8D5C4;"><span style="color:#7A5A3E;font-size:0.7rem;font-weight:600;">가드레일</span></div>
+    <div class="swatch-info">
+      <div class="swatch-name">Coral Beige</div>
+      <div class="swatch-hex">#E8D5C4 / #7A5A3E</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #D4DDD0;"><span style="color:#4A6342;font-size:0.7rem;font-weight:600;">PII 감지</span></div>
+    <div class="swatch-info">
+      <div class="swatch-name">Sage</div>
+      <div class="swatch-hex">#D4DDD0 / #4A6342</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #D6D4E0;"><span style="color:#5A5470;font-size:0.7rem;font-weight:600;">HITL</span></div>
+    <div class="swatch-info">
+      <div class="swatch-name">Lavender</div>
+      <div class="swatch-hex">#D6D4E0 / #5A5470</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #DBDCE8;"><span style="color:#4A4C66;font-size:0.7rem;font-weight:600;">에이전트 보호</span></div>
+    <div class="swatch-info">
+      <div class="swatch-name">Slate</div>
+      <div class="swatch-hex">#DBDCE8 / #4A4C66</div>
+    </div>
+  </div>
+  <div class="swatch">
+    <div class="swatch-color" style="background: #E8D8D4;"><span style="color:#6B4A42;font-size:0.7rem;font-weight:600;">안전성 검사</span></div>
+    <div class="swatch-info">
+      <div class="swatch-name">Rosewood</div>
+      <div class="swatch-hex">#E8D8D4 / #6B4A42</div>
+    </div>
+  </div>
+</div>
+
+
+<!-- === MINI UI PREVIEW === -->
+<div class="preview-section">
+  <div class="preview-title">적용 미리보기</div>
+  <div class="ui-preview">
+    <!-- Sidebar -->
+    <div class="sidebar-preview">
+      <div class="logo-preview">🧡 CatchUp</div>
+      <div class="logo-sub">학습자료 자동 구조화 파이프라인</div>
+      
+      <div class="sidebar-label">VLM 모델 (이미지)</div>
+      <div class="fake-select">gpt-4o-mini ▾</div>
+      
+      <div class="sidebar-label">LLM 모델 (노트 생성)</div>
+      <div class="fake-select">gpt-4o-mini ▾</div>
+
+      <div style="margin-top:28px; padding-top:16px; border-top: 1px solid var(--divider);">
+        <div class="sidebar-label" style="margin-top:0;">파이프라인</div>
+        <div class="pipeline-item done">
+          <div class="pipeline-dot"></div>
+          파일 업로드
+        </div>
+        <div class="pipeline-item done">
+          <div class="pipeline-dot"></div>
+          파싱
+        </div>
+        <div class="pipeline-item">
+          <div class="pipeline-dot"></div>
+          노트 생성
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-preview">
+      <div class="upload-zone">
+        📎 학습자료를 드래그하거나 클릭하여 업로드하세요<br>
+        <span style="font-size:0.7rem; color:var(--text-muted);">PDF, IPYNB, PNG, JPG, JPEG · 200MB 제한</span>
+      </div>
+
+      <div class="file-chip">📄 LLM_046_Guardrails_Evaluation.ipynb <span style="color:var(--text-muted);">47.5KB</span></div>
+      
+      <div style="margin: 12px 0;">
+        <button class="btn-primary">분석 시작</button>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:8px;margin:16px 0;font-size:0.82rem;color:var(--success);">
+        ✓ 분석 완료!
+      </div>
+
+      <div class="tabs-preview">
+        <div class="tab">📊 파싱 결과</div>
+        <div class="tab active">📝 학습 노트</div>
+      </div>
+
+      <div class="note-title">가드레일(Guardrails) 구현 & 평가</div>
+      
+      <div class="meta-badges">
+        <span class="badge" style="background:var(--warning-light);color:var(--warning);">난이도: intermediate</span>
+        <span class="badge" style="background:var(--info-light);color:var(--info);">읽기 시간: 6분</span>
+      </div>
+
+      <div class="tags-preview">
+        <span class="tag" style="background:var(--tag-1);color:var(--tag-1-text);">가드레일</span>
+        <span class="tag" style="background:var(--tag-2);color:var(--tag-2-text);">PII 감지</span>
+        <span class="tag" style="background:var(--tag-3);color:var(--tag-3-text);">모델 기반 안전성 검사</span>
+        <span class="tag" style="background:var(--tag-4);color:var(--tag-4-text);">HITL</span>
+        <span class="tag" style="background:var(--tag-5);color:var(--tag-5-text);">에이전트 보호</span>
+      </div>
+
+      <div class="note-card">
+        이 문서는 결정론적, 모델 기반, 인간 중심(HITL) 가드레일을 포함한 에이전트 보호 방법론 및 그 검증 평가 과정에 대해 설명합니다.
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- === STREAMLIT CONFIG === -->
+<div class="streamlit-guide">
+  <div class="guide-title">Streamlit 적용 가이드</div>
+  <div class="guide-desc">
+    <code>.streamlit/config.toml</code>에 아래 내용을 넣으면 바로 적용돼. 추가로 <code>st.markdown()</code>으로 CSS 오버라이드하면 태그/카드 스타일까지 커스텀 가능.
+  </div>
+  <div class="guide-code">
+<pre><span class="code-comment"># .streamlit/config.toml</span>
+
+[theme]
+<span class="code-prop">primaryColor</span> = <span class="code-value">"#C4553A"</span>
+<span class="code-prop">backgroundColor</span> = <span class="code-value">"#FDF8F3"</span>
+<span class="code-prop">secondaryBackgroundColor</span> = <span class="code-value">"#F5EDE4"</span>
+<span class="code-prop">textColor</span> = <span class="code-value">"#3D2E24"</span>
+<span class="code-prop">font</span> = <span class="code-value">"sans serif"</span></pre>
+  </div>
+
+  <div style="margin-top:24px;">
+    <div class="guide-desc" style="margin-bottom:12px;">CSS 오버라이드 (태그, 카드, 버튼 등):</div>
+    <div class="guide-code">
+<pre><span class="code-comment"># ui/styles.py — st.markdown()에서 inject</span>
+
+CUSTOM_CSS = """
+&lt;style&gt;
+<span class="code-comment">/* 사이드바 */</span>
+[data-testid="stSidebar"] {
+    <span class="code-prop">background-color</span>: <span class="code-value">#FAF4ED</span>;
+}
+
+<span class="code-comment">/* 버튼 hover */</span>
+.stButton > button:hover {
+    <span class="code-prop">background-color</span>: <span class="code-value">#A8432C</span>;
+    <span class="code-prop">border-color</span>: <span class="code-value">#A8432C</span>;
+}
+
+<span class="code-comment">/* 태그 칩 공통 */</span>
+.tag-chip {
+    <span class="code-prop">padding</span>: 4px 12px;
+    <span class="code-prop">border-radius</span>: 20px;
+    <span class="code-prop">font-size</span>: 0.78rem;
+    <span class="code-prop">font-weight</span>: 500;
+}
+
+<span class="code-comment">/* 노트 카드 */</span>
+.note-card {
+    <span class="code-prop">background</span>: <span class="code-value">#F5EDE4</span>;
+    <span class="code-prop">border-left</span>: 3px solid <span class="code-value">#EACFC5</span>;
+    <span class="code-prop">border-radius</span>: 10px;
+    <span class="code-prop">padding</span>: 16px;
+}
+
+<span class="code-comment">/* 성공 메시지 */</span>
+.success-msg { <span class="code-prop">color</span>: <span class="code-value">#5B8C5A</span>; }
+&lt;/style&gt;
+"""
+</pre>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
