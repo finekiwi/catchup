@@ -27,6 +27,7 @@ from llm.note_generator import SUPPORTED_LLM_MODELS, generate_note  # noqa: E402
 from parsers.image_parser import parse_image  # noqa: E402
 from parsers.ipynb_parser import parse_ipynb  # noqa: E402
 from parsers.pdf_parser import parse_pdf  # noqa: E402
+from rag import index_document, query as rag_query  # noqa: E402
 from vlm.client import SUPPORTED_MODELS  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -750,9 +751,20 @@ else:
     st.session_state[cache_key] = result
 
 # ===================================================================
+# RAG INDEXING — run once per document (session-cached)
+# ===================================================================
+_indexed_key = f"indexed_{doc.id}"
+if not st.session_state.get(_indexed_key):
+    try:
+        index_document(doc)
+        st.session_state[_indexed_key] = True
+    except Exception as _idx_exc:
+        st.warning(f"RAG 인덱싱 실패: {_idx_exc}")
+
+# ===================================================================
 # RESULTS — Tabs
 # ===================================================================
-tab_parse, tab_note = st.tabs(["📊 파싱 결과", "📝 학습 노트"])
+tab_parse, tab_note, tab_qa = st.tabs(["📊 파싱 결과", "📝 학습 노트", "💬 Q&A"])
 
 # ─── Tab 1: Parsing results ───────────────────────────────────────────
 with tab_parse:
@@ -873,13 +885,68 @@ with tab_note:
         # Chat input
         if user_input := st.chat_input("질문을 입력하세요"):
             st.session_state["chat_messages"].append({"role": "user", "content": user_input})
-
-            # Placeholder response until RAG pipeline (CU-08) is connected
-            placeholder_reply = (
-                "🚧 RAG 파이프라인 연결 예정 (CU-08)\n\n"
-                f"**질문:** {user_input}\n\n"
-                "ChromaDB 검색 + LLM 답변이 연결되면 "
-                "문서 기반 답변을 제공합니다."
-            )
-            st.session_state["chat_messages"].append({"role": "assistant", "content": placeholder_reply})
+            try:
+                _chat_result = rag_query(user_input, model=llm_model)
+                _reply = _chat_result.answer
+                if _chat_result.source_blocks:
+                    _src_lines = []
+                    for _src in _chat_result.source_blocks[:3]:
+                        _loc = (
+                            f"page {_src.page}" if _src.page is not None
+                            else (f"cell {_src.cell_index}" if _src.cell_index is not None else "")
+                        )
+                        _src_lines.append(f"- {_src.source}" + (f" ({_loc})" if _loc else ""))
+                    _reply += "\n\n**출처:**\n" + "\n".join(_src_lines)
+            except Exception as _exc:
+                _reply = f"오류가 발생했습니다: {_exc}"
+            st.session_state["chat_messages"].append({"role": "assistant", "content": _reply})
             st.rerun()
+
+# ─── Tab 3: RAG Q&A ───────────────────────────────────────────────────
+with tab_qa:
+    st.markdown("#### 💬 문서 기반 Q&A")
+    st.caption(f"인덱싱된 문서: **{doc.source}** · LLM: `{llm_model}`")
+
+    if "qa_messages" not in st.session_state:
+        st.session_state["qa_messages"] = []
+
+    # Chat history
+    qa_container = st.container(height=400)
+    with qa_container:
+        for _msg in st.session_state["qa_messages"]:
+            with st.chat_message(_msg["role"]):
+                st.markdown(_msg["content"])
+
+    # Input
+    if qa_input := st.chat_input("문서에 대해 질문하세요", key="qa_tab_input"):
+        st.session_state["qa_messages"].append({"role": "user", "content": qa_input})
+
+        try:
+            with st.spinner("검색 중..."):
+                _qa_result = rag_query(qa_input, model=llm_model)
+
+            _qa_reply = _qa_result.answer
+            st.session_state["qa_messages"].append({"role": "assistant", "content": _qa_reply})
+
+            # Store source blocks for display
+            st.session_state["qa_last_sources"] = _qa_result.source_blocks
+        except Exception as _qa_exc:
+            st.error(f"Q&A 처리 중 오류가 발생했습니다: {_qa_exc}")
+            st.session_state["qa_last_sources"] = []
+
+        st.rerun()
+
+    # Source blocks from last answer
+    _last_sources = st.session_state.get("qa_last_sources", [])
+    if _last_sources:
+        st.markdown("---")
+        st.markdown("**참조 문서 블록**")
+        for _src in _last_sources:
+            _loc = (
+                f"page {_src.page}" if _src.page is not None
+                else (f"cell {_src.cell_index}" if _src.cell_index is not None else "")
+            )
+            _expander_label = f"📄 {_src.source}" + (f" · {_loc}" if _loc else "") + f"  `{_src.block_type}`"
+            with st.expander(_expander_label, expanded=False):
+                st.caption(f"block_order: {_src.block_order}")
+                st.text(_src.content_preview)
