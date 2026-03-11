@@ -676,9 +676,6 @@ st.session_state.setdefault("_pipeline_steps", {})["upload"] = True
 
 st.markdown(f"**{uploaded_file.name}** ({uploaded_file.size:,} bytes)")
 
-if not st.button("분석 시작", type="primary", use_container_width=False):
-    st.stop()
-
 # ===================================================================
 # ANALYSIS PIPELINE
 # ===================================================================
@@ -686,6 +683,10 @@ file_bytes = uploaded_file.read()
 file_hash = hashlib.sha256(file_bytes).hexdigest()
 cache_key = f"result_{file_hash}_{vlm_model}_{llm_model}"
 doc_cache_key = f"doc_{file_hash}_{vlm_model}"
+
+if not st.button("분석 시작", type="primary", use_container_width=False):
+    if cache_key not in st.session_state:
+        st.stop()
 
 if cache_key in st.session_state:
     doc = st.session_state[doc_cache_key]
@@ -762,12 +763,18 @@ if not st.session_state.get(_indexed_key):
         st.warning(f"RAG 인덱싱 실패: {_idx_exc}")
 
 # ===================================================================
-# RESULTS — Tabs
+# RESULTS — Navigation
 # ===================================================================
-tab_parse, tab_note, tab_qa = st.tabs(["📊 파싱 결과", "📝 학습 노트", "💬 Q&A"])
+active_tab = st.radio(
+    "탭 선택",
+    ["📊 파싱 결과", "📝 학습 노트", "💬 Q&A"],
+    horizontal=True,
+    key="active_tab",
+    label_visibility="collapsed",
+)
 
 # ─── Tab 1: Parsing results ───────────────────────────────────────────
-with tab_parse:
+if active_tab == "📊 파싱 결과":
     type_counts = Counter(block.type.value for block in doc.blocks)
 
     # Metric cards
@@ -794,7 +801,7 @@ with tab_parse:
             st.caption(f"... 외 {len(doc.blocks) - 30}개 블록")
 
 # ─── Tab 2: Study note + Q&A (side by side) ──────────────────────────
-with tab_note:
+if active_tab == "📝 학습 노트":
     title = result.get("title") or doc.source
     summary = result.get("summary")
     note_markdown = result.get("note_markdown")
@@ -890,12 +897,19 @@ with tab_note:
                 _reply = _chat_result.answer
                 if _chat_result.source_blocks:
                     _src_lines = []
-                    for _src in _chat_result.source_blocks[:3]:
+                    _seen_srcs: set[str] = set()
+                    for _src in _chat_result.source_blocks:
                         _loc = (
                             f"page {_src.page}" if _src.page is not None
                             else (f"cell {_src.cell_index}" if _src.cell_index is not None else "")
                         )
+                        _dedup_key = f"{_src.source}:{_loc}"
+                        if _dedup_key in _seen_srcs:
+                            continue
+                        _seen_srcs.add(_dedup_key)
                         _src_lines.append(f"- {_src.source}" + (f" ({_loc})" if _loc else ""))
+                        if len(_src_lines) >= 3:
+                            break
                     _reply += "\n\n**출처:**\n" + "\n".join(_src_lines)
             except Exception as _exc:
                 _reply = f"오류가 발생했습니다: {_exc}"
@@ -903,7 +917,7 @@ with tab_note:
             st.rerun()
 
 # ─── Tab 3: RAG Q&A ───────────────────────────────────────────────────
-with tab_qa:
+if active_tab == "💬 Q&A":
     st.markdown("#### 💬 문서 기반 Q&A")
     st.caption(f"인덱싱된 문서: **{doc.source}** · LLM: `{llm_model}`")
 

@@ -36,6 +36,7 @@
 | Version | Date | Change | Quality Impact |
 |---------|------|--------|----------------|
 | v1.0.0 | 2026-03-11 | Initial RAG Q&A prompt: context-grounded answer generation with inline source citations. Instructs LLM to cite only from provided context and reply "I don't know" when evidence is insufficient. | Baseline |
+| v1.1.0 | 2026-03-11 | Add emotional/conversational query handling: empathize and offer 1-2 relevant topics from context instead of hard "not found" response. Refine fallback message to Korean-only. | Better UX for non-document queries |
 
 ## Known Limitations & v2 Roadmap (recorded 2026-03-05, CU-07 demo)
 
