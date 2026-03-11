@@ -5,6 +5,8 @@ from __future__ import annotations
 import uuid
 from unittest.mock import MagicMock
 
+import pytest
+
 import chromadb
 
 import rag.qa_chain as qa_module
@@ -229,7 +231,5 @@ def test_source_block_content_preview_is_truncated_to_200_chars(monkeypatch):
 
 def test_query_unsupported_model_raises_value_error():
     """query() with an unregistered model must raise ValueError, not silently fall through to OpenAI."""
-    import pytest
-
     with pytest.raises(ValueError, match="Unsupported model"):
         query("any question", model="gpt-99-nonexistent")

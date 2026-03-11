@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
@@ -36,6 +36,7 @@ _MODEL_REGISTRY: dict[str, dict] = {
     "gpt-4o":                        {"provider": "openai",    "input": 2.50,  "output": 10.00},
     "gpt-4.1-mini":                  {"provider": "openai",    "input": 0.40,  "output": 1.60},
     "gpt-4.1-nano":                  {"provider": "openai",    "input": 0.10,  "output": 0.40},
+    "gpt-5-nano":                    {"provider": "openai",    "input": 0.20,  "output": 0.80},
     "claude-haiku-4-5-20251001":     {"provider": "anthropic", "input": 0.80,  "output": 4.00},
     "claude-sonnet-4-6":             {"provider": "anthropic", "input": 3.00,  "output": 15.00},
     "gemini-3-flash-preview":        {"provider": "google",    "input": 0.10,  "output": 0.40},
@@ -106,11 +107,16 @@ def _get_openai_embedding(text: str) -> tuple[list[float], int]:
     return resp.data[0].embedding, resp.usage.total_tokens
 
 
-def _is_document_indexed(collection: Any, document_id: str) -> bool:
-    """Return True if any blocks for this document_id already exist in the collection."""
+def _is_document_indexed(collection: Any, document_id: str, expected_block_count: int) -> bool:
+    """Return True only if all expected blocks for this document_id are already stored.
+
+    Comparing stored count against expected_block_count prevents partial ingests
+    from being treated as complete — if any block failed on a prior run, the document
+    will be re-indexed and the missing blocks backfilled via upsert.
+    """
     try:
-        result = collection.get(where={"document_id": document_id}, limit=1)
-        return bool(result.get("ids"))
+        result = collection.get(where={"document_id": document_id})
+        return len(result.get("ids", [])) >= expected_block_count
     except Exception:
         return False
 
@@ -165,7 +171,7 @@ def _call_google(model: str, system: str, user: str) -> tuple[str, int, int]:
     return raw, input_tokens, output_tokens
 
 
-_PROVIDER_DISPATCH: dict[str, Any] = {
+_PROVIDER_DISPATCH: dict[str, Callable[..., tuple[str, int, int]]] = {
     "openai":    _call_openai,
     "anthropic": _call_anthropic,
     "google":    _call_google,
@@ -193,7 +199,8 @@ def index_document(document: Document) -> None:
         LOGGER.error("RAG collection unavailable — skipping index for document id=%s", document.id)
         return
 
-    if _is_document_indexed(collection, document.id):
+    non_empty_blocks = [b for b in document.blocks if b.content.strip()]
+    if _is_document_indexed(collection, document.id, len(non_empty_blocks)):
         LOGGER.info("Document id=%s already indexed, skipping", document.id)
         return
 
