@@ -613,7 +613,7 @@ with st.sidebar:
 
     with st.expander("모델 설정", expanded=True):
         vlm_model = st.selectbox("VLM 모델 (이미지)", options=SUPPORTED_MODELS, index=0)
-        llm_model = st.selectbox("LLM 모델 (노트 생성)", options=SUPPORTED_LLM_MODELS, index=0)
+        llm_model = st.selectbox("LLM 모델 (노트/Q&A)", options=SUPPORTED_LLM_MODELS, index=0)
 
     st.markdown("---")
 
