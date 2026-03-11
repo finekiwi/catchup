@@ -27,6 +27,7 @@ from llm.note_generator import SUPPORTED_LLM_MODELS, generate_note  # noqa: E402
 from parsers.image_parser import parse_image  # noqa: E402
 from parsers.ipynb_parser import parse_ipynb  # noqa: E402
 from parsers.pdf_parser import parse_pdf  # noqa: E402
+from rag import index_document, query as rag_query  # noqa: E402
 from vlm.client import SUPPORTED_MODELS  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -612,7 +613,7 @@ with st.sidebar:
 
     with st.expander("모델 설정", expanded=True):
         vlm_model = st.selectbox("VLM 모델 (이미지)", options=SUPPORTED_MODELS, index=0)
-        llm_model = st.selectbox("LLM 모델 (노트 생성)", options=SUPPORTED_LLM_MODELS, index=0)
+        llm_model = st.selectbox("LLM 모델 (노트/Q&A)", options=SUPPORTED_LLM_MODELS, index=0)
 
     st.markdown("---")
 
@@ -675,9 +676,6 @@ st.session_state.setdefault("_pipeline_steps", {})["upload"] = True
 
 st.markdown(f"**{uploaded_file.name}** ({uploaded_file.size:,} bytes)")
 
-if not st.button("분석 시작", type="primary", use_container_width=False):
-    st.stop()
-
 # ===================================================================
 # ANALYSIS PIPELINE
 # ===================================================================
@@ -686,10 +684,16 @@ file_hash = hashlib.sha256(file_bytes).hexdigest()
 cache_key = f"result_{file_hash}_{vlm_model}_{llm_model}"
 doc_cache_key = f"doc_{file_hash}_{vlm_model}"
 
+if not st.button("분석 시작", type="primary", use_container_width=False):
+    if cache_key not in st.session_state:
+        st.stop()
+
 if cache_key in st.session_state:
     doc = st.session_state[doc_cache_key]
     result = st.session_state[cache_key]
-    st.toast("캐시된 결과를 불러왔습니다", icon="⚡")
+    if not st.session_state.get(f"_toast_shown_{cache_key}"):
+        st.toast("캐시된 결과를 불러왔습니다", icon="⚡")
+        st.session_state[f"_toast_shown_{cache_key}"] = True
 else:
     suffix = os.path.splitext(uploaded_file.name)[1]
     tmp_path: str | None = None
@@ -750,12 +754,29 @@ else:
     st.session_state[cache_key] = result
 
 # ===================================================================
-# RESULTS — Tabs
+# RAG INDEXING — run once per document (session-cached)
 # ===================================================================
-tab_parse, tab_note = st.tabs(["📊 파싱 결과", "📝 학습 노트"])
+_indexed_key = f"indexed_{doc.id}"
+if not st.session_state.get(_indexed_key):
+    try:
+        index_document(doc)
+        st.session_state[_indexed_key] = True
+    except Exception as _idx_exc:
+        st.warning(f"RAG 인덱싱 실패: {_idx_exc}")
+
+# ===================================================================
+# RESULTS — Navigation
+# ===================================================================
+active_tab = st.radio(
+    "탭 선택",
+    ["📊 파싱 결과", "📝 학습 노트"],
+    horizontal=True,
+    key="active_tab",
+    label_visibility="collapsed",
+)
 
 # ─── Tab 1: Parsing results ───────────────────────────────────────────
-with tab_parse:
+if active_tab == "📊 파싱 결과":
     type_counts = Counter(block.type.value for block in doc.blocks)
 
     # Metric cards
@@ -782,7 +803,7 @@ with tab_parse:
             st.caption(f"... 외 {len(doc.blocks) - 30}개 블록")
 
 # ─── Tab 2: Study note + Q&A (side by side) ──────────────────────────
-with tab_note:
+if active_tab == "📝 학습 노트":
     title = result.get("title") or doc.source
     summary = result.get("summary")
     note_markdown = result.get("note_markdown")
@@ -857,29 +878,56 @@ with tab_note:
     # ── Right column: Q&A Chat ───────────────────────────────────────
     with col_chat:
         st.markdown("#### 💬 Q&A")
-        st.caption("질문하거나 노트 수정을 요청하세요")
+        st.caption(f"문서에 대해 질문하세요 · LLM: `{llm_model}`")
 
         # Initialize chat history
         if "chat_messages" not in st.session_state:
             st.session_state["chat_messages"] = []
 
         # Scrollable chat area
-        chat_container = st.container(height=480)
+        chat_container = st.container(height=420)
         with chat_container:
             for msg in st.session_state["chat_messages"]:
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
 
-        # Chat input
+            # Process pending query — runs after user message is already rendered
+            if _pending := st.session_state.pop("_pending_chat", None):
+                with st.chat_message("assistant"):
+                    with st.spinner("생각 중..."):
+                        try:
+                            _chat_result = rag_query(_pending, model=llm_model)
+                            _reply = _chat_result.answer
+                            st.session_state["_chat_last_sources"] = _chat_result.source_blocks
+                        except Exception as _exc:
+                            _reply = f"오류가 발생했습니다: {_exc}"
+                            st.session_state["_chat_last_sources"] = []
+                st.session_state["chat_messages"].append({"role": "assistant", "content": _reply})
+                st.rerun()
+
+        # Chat input — just append user message and rerun immediately
         if user_input := st.chat_input("질문을 입력하세요"):
             st.session_state["chat_messages"].append({"role": "user", "content": user_input})
-
-            # Placeholder response until RAG pipeline (CU-08) is connected
-            placeholder_reply = (
-                "🚧 RAG 파이프라인 연결 예정 (CU-08)\n\n"
-                f"**질문:** {user_input}\n\n"
-                "ChromaDB 검색 + LLM 답변이 연결되면 "
-                "문서 기반 답변을 제공합니다."
-            )
-            st.session_state["chat_messages"].append({"role": "assistant", "content": placeholder_reply})
+            st.session_state["_pending_chat"] = user_input
             st.rerun()
+
+        # Source block expanders from last answer
+        _chat_sources = st.session_state.get("_chat_last_sources", [])
+        if _chat_sources:
+            st.markdown("---")
+            st.caption("**참조 블록**")
+            _seen_exp: set[str] = set()
+            for _src in _chat_sources:
+                _loc = (
+                    f"page {_src.page}" if _src.page is not None
+                    else (f"cell {_src.cell_index}" if _src.cell_index is not None else "")
+                )
+                _dedup_key = f"{_src.source}:{_loc}"
+                if _dedup_key in _seen_exp:
+                    continue
+                _seen_exp.add(_dedup_key)
+                _exp_label = f"📄 {_src.source}" + (f" · {_loc}" if _loc else "") + f"  `{_src.block_type}`"
+                with st.expander(_exp_label, expanded=False):
+                    st.caption(f"block_order: {_src.block_order}")
+                    st.text(_src.content_preview)
+

@@ -32,6 +32,15 @@
 | v1.4.0 | 2026-03-05 | (1) Section depth 상향: 5-8문장/4-6불릿 + what/why/how 필수. (2) 코드 설명 상세화: 클래스/함수 역할, 알고리즘, I/O, 디자인 패턴. (3) 최소 길이 강제: `note_markdown` 2000자 이상. (4) Code-level: `max_tokens=4096` 명시. | gpt-4o-mini의 축약 경향 대응 — 짧은 응답 방지 |
 | v1.4.1 | 2026-03-05 | 핵심 코드 스니펫 허용: "DO NOT include raw code" → "Include short key code snippets (signatures, core logic) inside code fences — max 10 lines each. Do NOT dump entire blocks verbatim." 학습노트에 클래스/함수 시그니처, 핵심 로직, 사용 예시 포함 가능. | 코드 중심 자료(ipynb)에서 학습 효과 향상 — 설명만으론 부족한 구현 디테일 보완 |
 
+## rag_qa.py
+| Version | Date | Change | Quality Impact |
+|---------|------|--------|----------------|
+| v1.0.0 | 2026-03-11 | Initial RAG Q&A prompt: context-grounded answer generation with inline source citations. Instructs LLM to cite only from provided context and reply "I don't know" when evidence is insufficient. | Baseline |
+| v1.1.0 | 2026-03-11 | Add emotional/conversational query handling: empathize and offer 1-2 relevant topics from context instead of hard "not found" response. Refine fallback message to Korean-only. | Better UX for non-document queries |
+| v1.2.0 | 2026-03-11 | Distinguish note modification requests from pure emotional expressions. Note edit requests now redirect user to ✏️ edit mode toggle instead of being misclassified as emotional queries. | Prevents misclassification of functional requests containing emotional words |
+| v1.2.1 | 2026-03-11 | Fix note modification response: replace English instruction with explicit Korean template to prevent LLM mistranslation ("가능합니다" → "지원하지 않습니다"). | Fixes response polarity bug in note modification guidance |
+| v1.2.2 | 2026-03-11 | Add English response template alongside Korean for note modification guidance to prevent confusion when user writes in English. | Covers multilingual users |
+
 ## Known Limitations & v2 Roadmap (recorded 2026-03-05, CU-07 demo)
 
 Issues observed during CU-07 mid-check demo.
