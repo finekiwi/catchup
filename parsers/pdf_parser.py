@@ -54,13 +54,22 @@ def parse_pdf(file_path: str) -> Document:
     """
     Parse a PDF with Docling DocumentConverter and return the intermediate Document schema.
 
+    Results are cached to data/parsed/ by file content hash. On subsequent calls with
+    the same file, the cached Document is returned immediately without re-running Docling.
     On parser failure, returns a fallback Document with empty blocks while keeping
     core metadata fields populated.
     """
+    from utils.cache import load_cached_parse, save_cached_parse, save_docling_doc
+
+    source_path = Path(file_path)
+    cached = load_cached_parse(source_path)
+    if cached is not None:
+        return cached
+
     start_time = time.perf_counter()
     document = Document(
         id=_safe_document_id(file_path=file_path),
-        source=Path(file_path).name,
+        source=source_path.name,
         format=DocumentFormat.PDF,
         status=ProcessingStatus.PARSED,
     )
@@ -83,6 +92,9 @@ def parse_pdf(file_path: str) -> Document:
         document.blocks = _to_blocks(result.document)
         if not document.blocks:
             _mark_parse_failed(document=document)
+        else:
+            save_cached_parse(source_path, document)
+            save_docling_doc(source_path, result.document)
         return document
 
     except Exception:

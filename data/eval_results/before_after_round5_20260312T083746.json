@@ -1,0 +1,289 @@
+{
+  "total": 15,
+  "by_tier": {
+    "1": {
+      "total": 4,
+      "before_score": 1.0,
+      "after_score": 0.75,
+      "improvement_pct": -25.0
+    },
+    "2": {
+      "total": 4,
+      "before_score": 0.5,
+      "after_score": 0.5,
+      "improvement_pct": 0.0
+    },
+    "3": {
+      "total": 4,
+      "before_score": 0.5,
+      "after_score": 0.75,
+      "improvement_pct": 50.0
+    },
+    "4": {
+      "total": 3,
+      "before_score": 0.3333,
+      "after_score": 0.3333,
+      "improvement_pct": 0.0
+    }
+  },
+  "overall_before": 0.6,
+  "overall_after": 0.6,
+  "overall_improvement": 0.0,
+  "results": [
+    {
+      "question": "What is the learning rate in gradient descent, and what problems arise when it is too small or too large?",
+      "tier": 1,
+      "case_id": "gs_001",
+      "before_answer": "The learning rate in gradient descent, denoted as ⌘, is a positive value that modulates how quickly the minimization of the loss function is performed. It must be chosen carefully:\n\n- If the learning rate is **too small**:\n  - Optimization will be slow and may get trapped in a local minimum early [little_book_ch3.pdf, chunk 13].\n\n- If the learning rate is **too large**:\n  - The optimization may bounce around a good minimum and never descend into it [little_book_ch3.pdf, chunk 14].",
+      "after_answer": "The learning rate in gradient descent, denoted as η, is a positive value that modulates how quickly the minimization is done and must be chosen carefully [little_book_ch3.pdf, page 19].\n\nProblems that arise from an improper learning rate include:\n\n- If the learning rate is too small:\n  - The optimization will be slow, and it may be trapped in a local minimum early [little_book_ch3.pdf, page 19].\n\n- If the learning rate is too large:\n  - The optimization may fail to converge, possibly leading to overshooting and instability during the updates [little_book_ch3.pdf, page 19].",
+      "before_sources": [
+        "d2l_ch4.pdf",
+        "little_book_ch3.pdf"
+      ],
+      "after_sources": [
+        "d2l_ch4.pdf",
+        "little_book_ch3.pdf"
+      ],
+      "before_score": 1.0,
+      "after_score": 1.0,
+      "expected_answer": "The learning rate η is a meta-parameter that modulates how quickly the minimization proceeds. If it is too small, optimization is slow and may be trapped in a local minimum early. If it is too large, the optimization may bounce around a good minimum and never descend into it."
+    },
+    {
+      "question": "How is the sigmoid function implemented in Python using NumPy, and what is its advantage over a scalar-only step function implementation?",
+      "tier": 1,
+      "case_id": "gs_002",
+      "before_answer": "The sigmoid function is implemented in Python using NumPy as follows:\n\n```python\ndef sigmoid(x):\n    return 1 / (1 + np.exp(-x))\n```\n\nThis implementation allows for the input `x` to be a NumPy array, enabling vectorized operations, which makes it efficient for handling multiple inputs at once. The advantage of using the sigmoid function over a scalar-only step function implementation is that the sigmoid function provides smooth and continuous outputs between 0 and 1, making it differentiable and suitable for gradient-based optimization methods. In contrast, a step function only outputs discrete values (0 or 1), leading to challenges in learning due to the lack of gradient information for optimization [d2l_ch4.pdf, chunk 63].",
+      "after_answer": "The sigmoid function is implemented in Python using NumPy as follows:\n\n```python\ndef sigmoid(x):\n    return 1 / (1 + np.exp(-x))\n```\nIn this implementation, `np.exp(-x)` computes the exponential for each element in the input array `x`, allowing the function to handle NumPy arrays effectively [deep_learning_ch3.pdf, page 24].\n\n### Advantages of the Sigmoid Function Over a Scalar-Only Step Function Implementation:\n- **Smoothness and Differentiability**: The sigmoid function is a smooth and differentiable approximation to a thresholding unit, which is beneficial for gradient-based learning methods [d2l_ch4.pdf, page 24].\n- **Output Range**: The sigmoid function squashes any input to a range between 0 and 1, making it interpretable as a probability, especially useful in binary classification settings [d2l_ch4.pdf, page 24].\n- **Handling Arrays**: The implementation with NumPy allows for processing of arrays instead of just scalars, utilizing broadcasting for efficient computation across multiple inputs [deep_learning_ch3.pdf, page 24]. In contrast, a scalar-only step function would not naturally accommodate multiple inputs in the same way.",
+      "before_sources": [
+        "deep_learning_ch3.pdf",
+        "d2l_ch4.pdf"
+      ],
+      "after_sources": [
+        "deep_learning_ch3.pdf",
+        "d2l_ch4.pdf"
+      ],
+      "before_score": 1.0,
+      "after_score": 1.0,
+      "expected_answer": "The sigmoid function is implemented as: def sigmoid(x): return 1 / (1 + np.exp(-x)). It correctly handles NumPy arrays via broadcasting, producing outputs such as [0.269, 0.731, 0.881] for inputs [-1.0, 1.0, 2.0]. The scalar step function cannot accept NumPy arrays as input."
+    },
+    {
+      "question": "Why does the Chat Completions API require including all past conversation history in each API request?",
+      "tier": 1,
+      "case_id": "gs_003",
+      "before_answer": "The Chat Completions API requires including all past conversation history in each API request because it does not manage conversation history on its own. This means that if you want the API to provide responses based on previous interactions, you must explicitly include the conversation history in the prompt for every request [llm_app_ch3.pdf, chunk 30].",
+      "after_answer": "Chat Completions API는 상태를 관리하지 않기 때문에 대화 기록을 기반으로 응답하게 하려면 대화 기록을 모두 요청에 포함시켜야 한다는 요구가 있다. 즉, 과거 대화 내용이 포함되지 않으면, 이전의 맥락을 이해할 수 없어 정확한 응답을 생성할 수 없다 [llm_app_ch3.pdf, page 85].",
+      "before_sources": [
+        "llm_app_ch3.pdf"
+      ],
+      "after_sources": [
+        "llm_app_ch3.pdf"
+      ],
+      "before_score": 1.0,
+      "after_score": 0.0,
+      "expected_answer": "Unlike the ChatGPT web interface, the Chat Completions API itself has no memory of previous conversations. To produce context-aware responses, the caller must include all prior message turns with their roles (system, user, assistant) in every request."
+    },
+    {
+      "question": "What is mini-batch stochastic gradient descent (SGD), and why is it more efficient than computing the full gradient over the entire dataset?",
+      "tier": 1,
+      "case_id": "gs_004",
+      "before_answer": "Mini-batch stochastic gradient descent (SGD) is a method where the full set of data is split into smaller batches for gradient updates. The parameters are updated based on the estimates of the gradient computed from each mini-batch. This approach is generally as fast as processing a single sample due to the efficiency of fitting the batches in the computing device's memory. It allows for multiple gradient steps for the same computational budget, even though these estimates are noisier [little_book_ch3.pdf, chunk 15].\n\nThe efficiency gained from mini-batch SGD comes from the redundancy in the data, which makes it a more effective strategy than calculating the full gradient over the entire dataset. Instead of being computationally heavy, mini-batch updates can utilize smaller partial sums as unbiased estimators of the full gradient, albeit with some noise [little_book_ch3.pdf, chunk 14].",
+      "after_answer": "Mini-batch stochastic gradient descent (SGD) is a method of training models where the full dataset is divided into small batches, and the model parameters are updated based on the estimate of the gradient computed from each of these batches. This process allows for more manageable computation, as each batch is small enough to fit into the computing device's memory and can be processed efficiently [little_book_ch3.pdf, page 22].\n\nThe efficiency of mini-batch SGD compared to computing the full gradient over the entire dataset is attributed to several factors:\n\n- **Noisy Estimation**: Each partial sum of the loss from a mini-batch serves as an unbiased estimator of the full gradient, albeit with some noise. This allows for more frequent updates to the parameters, effectively performing more gradient steps within the same computational budget [little_book_ch3.pdf, page 21].\n\n- **Redundancy in Data**: Due to the redundancy often present in the data, utilizing mini-batches results in a strategy that is generally more efficient than calculating the gradient across the full dataset [little_book_ch3.pdf, page 22].\n\n- **Gradual Processing**: Mini-batch processing can be performed at a speed that is comparable to processing individual samples, while allowing for parallel processing within batches [little_book_ch3.pdf, page 22].\n\nOverall, using mini-batches not only reduces the computational load but also speeds up the training process while maintaining effective gradient estimations.",
+      "before_sources": [
+        "d2l_ch4.pdf",
+        "little_book_ch3.pdf"
+      ],
+      "after_sources": [
+        "d2l_ch4.pdf",
+        "little_book_ch3.pdf"
+      ],
+      "before_score": 1.0,
+      "after_score": 1.0,
+      "expected_answer": "Mini-batch SGD updates parameters from a partial sum (mini-batch) of the full gradient rather than the entire dataset. Because any partial sum is an unbiased estimator of the full gradient, this performs more parameter updates per unit of computation. Due to data redundancy, this is a far more efficient strategy than full-batch gradient descent."
+    },
+    {
+      "question": "In the d2l dropout MLP example, what are the exact values of num_inputs, num_hiddens1, num_hiddens2, num_outputs, dropout1, and dropout2?",
+      "tier": 2,
+      "case_id": "gs_005",
+      "before_answer": "In the d2l dropout MLP example, the exact values are as follows:\n\n- **num_inputs**: 784\n- **num_hiddens1**: 256\n- **num_hiddens2**: 256\n- **num_outputs**: 10\n- **dropout1**: 0.2\n- **dropout2**: 0.5 [d2l_ch4.pdf, chunk 128].",
+      "after_answer": "In the d2l dropout MLP example, the exact values are as follows:\n\n- **num_inputs**: 784\n- **num_hiddens1**: 256\n- **num_hiddens2**: 256\n- **num_outputs**: 10\n- **dropout1**: 0.2\n- **dropout2**: 0.5 [d2l_ch4.pdf, page 53].",
+      "before_sources": [
+        "d2l_ch4.pdf"
+      ],
+      "after_sources": [
+        "d2l_ch4.pdf"
+      ],
+      "before_score": 1.0,
+      "after_score": 1.0,
+      "expected_answer": "num_inputs=784, num_hiddens1=256, num_hiddens2=256, num_outputs=10, dropout1=0.2 (applied after the first hidden layer), dropout2=0.5 (applied after the second hidden layer)."
+    },
+    {
+      "question": "What are the three outputs produced by the dropout_layer function in d2l when applied to the 2×8 matrix [[0..7],[8..15]] with dropout probabilities 0, 0.5, and 1.0 respectively?",
+      "tier": 2,
+      "case_id": "gs_006",
+      "before_answer": "The three outputs produced by the dropout_layer function in d2l when applied to the 2×8 matrix [[0..7], [8..15]] with dropout probabilities 0, 0.5, and 1.0 are as follows:\n\n1. **With dropout probability 0**: The output is:\n   ```\n   [[0. 1. 2. 3. 4. 5. 6. 7.]\n    [8. 9. 10. 11. 12. 13. 14. 15.]]\n   ```\n\n2. **With dropout probability 0.5**: The output is:\n   ```\n   [[0.2 4. 6. 8. 10. 12. 14.]\n    [0.18 20. 0. 0. 0. 28. 0.]]\n   ```\n\n3. **With dropout probability 1.0**: The output is:\n   ```\n   [[0. 0. 0. 0. 0. 0. 0. 0.]\n    [0. 0. 0. 0. 0. 0. 0. 0.]]\n   ```\n\nThese outputs demonstrate the effect of different dropout probabilities on the input matrix [d2l_ch4.pdf, chunk 127].",
+      "after_answer": "The three outputs produced by the dropout_layer function when applied to the 2×8 matrix [[0, 1, 2, 3, 4, 5, 6, 7], [8, 9, 10, 11, 12, 13, 14, 15]] with dropout probabilities 0, 0.5, and 1.0 are as follows:\n\n1. **With dropout probability 0**: The output is the input matrix itself,\n   \\[\n   \\begin{bmatrix}\n   0 & 1 & 2 & 3 & 4 & 5 & 6 & 7 \\\\\n   8 & 9 & 10 & 11 & 12 & 13 & 14 & 15\n   \\end{bmatrix}\n   \\]\n\n2. **With dropout probability 0.5**: The output has certain elements dropped, resulting in:\n   \\[\n   \\begin{bmatrix}\n   0 & 2 & 4 & 6 & 8 & 10 & 12 & 14 \\\\\n   0 & 18 & 20 & 0 & 0 & 0 & 28 & 0\n   \\end{bmatrix}\n   \\]\n\n3. **With dropout probability 1.0**: All elements are dropped out, leading to:\n   \\[\n   \\begin{bmatrix}\n   0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 \\\\\n   0 & 0 & 0 & 0 & 0 & 0 & 0 & 0\n   \\end{bmatrix}\n   \\]\n\nThese outputs illustrate how the dropout operation modifies the input tensor based on different dropout probabilities [d2l_ch4.pdf, page 53].",
+      "before_sources": [
+        "d2l_ch4.pdf"
+      ],
+      "after_sources": [
+        "d2l_ch4.pdf"
+      ],
+      "before_score": 0.0,
+      "after_score": 0.0,
+      "expected_answer": "dropout=0: original values unchanged [[0,1,2,3,4,5,6,7],[8,9,10,11,12,13,14,15]]. dropout=0.5: surviving values doubled, zeros elsewhere, e.g. [[0,2,4,6,8,10,12,14],[0,18,20,0,0,0,28,0]]. dropout=1.0: all zeros [[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0]]."
+    },
+    {
+      "question": "What is the L2 norm of the weight vector w after training the d2l weight decay model with lambd=0 (no regularization), and what does this value indicate?",
+      "tier": 2,
+      "case_id": "gs_007",
+      "before_answer": "The L2 norm of the weight vector w after training the d2l weight decay model with lambd=0 (no regularization) is 13.259391 [d2l_ch4.pdf, chunk 113]. This value indicates that the model has overfit badly, as the training error decreased while the test error did not improve, demonstrating a textbook case of overfitting.",
+      "after_answer": "The L2 norm of the weight vector \\( w \\) after training the d2l weight decay model with \\( \\lambda = 0 \\) (no regularization) is 13.259391 [d2l_ch4.pdf, page 46]. This value indicates that the model is overfitting badly, as it decreases the training error but does not decrease the test error, which is a textbook case of overfitting [d2l_ch4.pdf, page 46].",
+      "before_sources": [
+        "d2l_ch4.pdf"
+      ],
+      "after_sources": [
+        "d2l_ch4.pdf"
+      ],
+      "before_score": 1.0,
+      "after_score": 1.0,
+      "expected_answer": "The L2 norm of w is 13.259391 after training without regularization (lambd=0). This large value indicates severe overfitting: the weights grow unconstrained to memorize training data, including noise, at the cost of generalization to unseen data."
+    },
+    {
+      "question": "In the Git+GitHub book, what is the inline commit method for writing commit messages, what is the exact command syntax, and what is its key limitation?",
+      "tier": 2,
+      "case_id": "gs_008",
+      "before_answer": "In the Git+GitHub book, the inline commit method for writing commit messages is done using the `git commit -m \"your message\"` syntax. The exact command syntax mentioned is `git commit –m \"added output 'Tell Your World'\"` [git_github_ch3.pdf, chunk 41]. \n\nThe key limitation of this method is that it only allows a single line of message. More complex commit messages with multiple lines or detailed explanations require an alternative approach, such as using an editor for writing the commit message [git_github_ch3.pdf, chunk 41].",
+      "after_answer": "해당 내용은 문서에서 찾을 수 없습니다. 다른 질문이 있으시면 알려주세요.",
+      "before_sources": [
+        "git_github_ch3.pdf"
+      ],
+      "after_sources": [
+        "git_github_ch3.pdf"
+      ],
+      "before_score": 0.0,
+      "after_score": 0.0,
+      "expected_answer": "The inline method uses git commit -m '커밋 메시지' to enter the commit message directly on the command line without opening vim. For staging and committing tracked files at once, git commit -am '메시지' can be used. The key limitation is that double quotes cannot be used within the commit message with this method."
+    },
+    {
+      "question": "Why is the sigmoid function described in deep_learning_ch3 more suitable for use with the gradient descent update rule in little_book_ch3 than the step function?",
+      "tier": 3,
+      "case_id": "gs_009",
+      "before_answer": "The sigmoid function is described as more suitable for use with the gradient descent update rule compared to the step function for the following reasons:\n\n1. **Differentiability**: The sigmoid function provides a smooth, differentiable approximation to a thresholding unit, which is beneficial for gradient-based learning processes like gradient descent. In contrast, the step function is not differentiable at the threshold, making it unsuitable for gradient-based algorithms [d2l_ch4.pdf, chunk 64].\n\n2. **Gradient Availability**: The sigmoid function generates a non-zero gradient for a range of input values, which is essential for the backpropagation process in neural networks. This characteristic allows for parameter updates that drive the learning process. The step function, however, produces a gradient of zero nearly everywhere, preventing effective updates to the model's parameters during training [d2l_ch4.pdf, chunk 147].\n\n3. **Probability Interpretation**: The sigmoid output can be interpreted as probabilities, particularly for binary classification problems, which aligns well with the objective of many gradient descent applications. This probabilistic interpretation adds to the utility of the sigmoid function within models that use gradient descent [d2l_ch4.pdf, chunk 64].\n\nOverall, the characteristics of the sigmoid function support effective and efficient learning through gradient descent, unlike the step function which poses limitations in optimization.",
+      "after_answer": "The sigmoid function is described as a smooth, differentiable approximation to a thresholding unit, making it more suitable for use with the gradient descent update rule than the step function. The key reasons include:\n\n- **Smoothness**: The sigmoid function transforms inputs into outputs in the interval (0, 1), allowing for smooth transitions. This smoothness is crucial for gradient-based learning, enabling the calculation of gradients necessary for updating weights during backpropagation [d2l_ch4.pdf, page 24].\n\n- **Differentiability**: Unlike the step function, which has abrupt changes and is non-differentiable at the threshold, the sigmoid function is differentiable everywhere. This characteristic allows for effective gradient calculations, facilitating the learning process using gradient descent [d2l_ch4.pdf, page 24].\n\n- **Effective gradient propagation**: When backpropagating through multiple layers, the differentiability of sigmoid helps prevent the vanishing gradient problem present in step functions, thereby promoting more stable training of deep networks [d2l_ch4.pdf, page 61].\n\nOverall, these properties enable the sigmoid function to effectively respond to parameter updates in gradient descent, unlike the non-smooth step function.",
+      "before_sources": [
+        "d2l_ch4.pdf",
+        "little_book_ch3.pdf"
+      ],
+      "after_sources": [
+        "d2l_ch4.pdf"
+      ],
+      "before_score": 1.0,
+      "after_score": 1.0,
+      "expected_answer": "Gradient descent requires computing ∇L|w(wn) at every step (update rule: wn+1 = wn − η∇L|w(wn) from little_book). The sigmoid σ(x) = 1/(1+exp(-x)) is smooth and continuously differentiable everywhere, yielding meaningful gradients. The step function is flat almost everywhere with a discontinuity at x=0, so its gradient is zero almost everywhere, making gradient-based optimization impossible."
+    },
+    {
+      "question": "How do the weight decay overfitting results in d2l_ch4 (L2 norm of w=13.26 with lambd=0) connect to the training protocol recommendations in little_book_ch3?",
+      "tier": 3,
+      "case_id": "gs_010",
+      "before_answer": "해당 내용은 문서에서 찾을 수 없습니다. 다른 질문이 있으시면 알려주세요.",
+      "after_answer": "The weight decay overfitting results from d2l_ch4 indicate that with a regularization parameter λ set to 0, the L2 norm of the weight vector w grew large (13.26), leading to poor generalization on the test set despite a decrease in training error [d2l_ch4.pdf, page 46]. This scenario exemplifies overfitting, as the model learns to fit the training data too closely, neglecting its performance on unseen data.\n\nIn connection to the training protocol recommendations in little_book_ch3, it is stated that \"the weight decay regularization... consists of adding to the loss a term proportional to the sum of the squared parameters,\" which is aimed at reducing the complexity of the learned model and mitigating overfitting [little_book_ch3.pdf, page 12]. This practice is effective in minimizing the gap between the performance on the training set and the performance on new, unseen data, which aligns with the observation that using weight decay (L2 regularization) can help improve test set performance [little_book_ch3.pdf, page 13]. Thus, the principles outlined in little_book_ch3 support the implementation of weight decay as a strategy to combat overfitting, as demonstrated by the training results in d2l_ch4.",
+      "before_sources": [
+        "d2l_ch4.pdf"
+      ],
+      "after_sources": [
+        "d2l_ch4.pdf",
+        "little_book_ch3.pdf"
+      ],
+      "before_score": 0.0,
+      "after_score": 1.0,
+      "expected_answer": "d2l shows that training without regularization (lambd=0) yields L2 norm of w=13.259391 — a textbook overfitting case where training loss drops but test loss stays high. little_book's training protocols specify that meta-parameters, including regularization terms in the loss, must be tuned using a validation set disjoint from both training and test sets. The d2l experiment confirms this: without regularization meta-parameter tuning, weights grow without bound and the model overfits."
+    },
+    {
+      "question": "How does the Chat Completions API message structure (system/user/assistant roles) in llm_app_ch3 reflect the causal autoregressive architecture described in little_book_ch3?",
+      "tier": 3,
+      "case_id": "gs_011",
+      "before_answer": "해당 내용은 문서에서 찾을 수 없습니다. 다른 질문이 있으시면 알려주세요.",
+      "after_answer": "해당 내용은 문서에서 찾을 수 없습니다. 다른 질문이 있으시면 알려주세요.",
+      "before_sources": [
+        "llm_app_ch3.pdf"
+      ],
+      "after_sources": [
+        "llm_app_ch3.pdf"
+      ],
+      "before_score": 0.0,
+      "after_score": 0.0,
+      "expected_answer": "little_book defines a causal model where the output at position t depends only on inputs x1,...,xt-1. The Chat Completions API requires manually including all prior message turns in every request because the underlying model is causal and autoregressive — it generates each token conditioned on all preceding tokens. The system/user/assistant role sequence in the messages array encodes this ordered, left-to-right conversational history that the causal model processes."
+    },
+    {
+      "question": "The d2l_ch4 dropout MLP uses ReLU activations (npx.relu) rather than sigmoid. Based on deep_learning_ch3's discussion of activation functions, why is ReLU preferred in a multi-layer network?",
+      "tier": 3,
+      "case_id": "gs_012",
+      "before_answer": "The ReLU activation function is preferred in multi-layer networks for several reasons:\n\n1. **Simplicity and Efficiency**: ReLU is straightforward to implement and computationally efficient, as it only requires a max operation, making it faster than functions like sigmoid which involve exponential calculations [d2l_ch4.pdf, chunk 61].\n\n2. **Mitigation of Vanishing Gradients**: ReLU helps to mitigate the issue of vanishing gradients, which is a problem often encountered with sigmoid functions in deep networks. The ReLU function retains positive values and has a derivative of 1 for positive inputs, allowing gradients to flow more effectively through the network during training [d2l_ch4.pdf, chunk 62].\n\n3. **Piecewise Linearity**: Since ReLU is piecewise linear, it can construct continuous piecewise linear functions when used in MLPs, offering flexibility in modeling [d2l_ch4.pdf, chunk 68].\n\n4. **Behavior of Derivatives**: The derivative of ReLU is either 0 (for negative inputs) or 1 (for positive inputs), leading to a well-behaved optimization process [d2l_ch4.pdf, chunk 62]. In contrast, the sigmoid function has a limited gradient (maxing out at 0.25) and can lead to slow learning in deeper networks.\n\nThese attributes make ReLU a widely adopted choice for activation functions in deep learning architectures.",
+      "after_answer": "The ReLU activation function is preferred in a multi-layer network for the following reasons:\n\n1. **Non-linearity**: ReLU introduces non-linearity, which allows the network to learn complex patterns. If linear activation functions were used, stacking multiple layers would not increase the network's capability, as it could be simplified to a single linear transformation [deep_learning_ch3.pdf, page 27].\n\n2. **Mitigation of vanishing gradients**: ReLU helps to mitigate the vanishing gradient problem, which was a significant issue with earlier activation functions like sigmoid. The behavior of ReLU, where the derivatives either vanish or allow the argument to pass through, improves the optimization process significantly [d2l_ch4.pdf, page 24; d2l_ch4.pdf, page 64].\n\n3. **Performance**: ReLU has been shown to perform well across various predictive tasks, making it a popular choice. The simplicity of its implementation coupled with effective performance makes it favorable in practical applications [d2l_ch4.pdf, page 23].\n\nOverall, using ReLU activation allows for deeper networks that effectively learn from data without suffering from issues inherent to linear functions or the vanishing gradient problem.",
+      "before_sources": [
+        "d2l_ch4.pdf"
+      ],
+      "after_sources": [
+        "deep_learning_ch3.pdf",
+        "d2l_ch4.pdf"
+      ],
+      "before_score": 1.0,
+      "after_score": 1.0,
+      "expected_answer": "deep_learning_ch3 explains that sigmoid squashes outputs to (0,1) and has near-zero gradients for large input magnitudes, causing vanishing gradients in deep networks. The d2l MLP has 784→256→256→10 layers; with sigmoid, gradients would shrink through each layer making early layers learn very slowly. ReLU (f(x)=max(0,x)) maintains gradient magnitude for positive inputs, enabling effective backpropagation across multiple layers."
+    },
+    {
+      "question": "According to Figure 3.2 in little_book_ch3 (the gradient descent illustration), what is the geometric relationship between the gradient vector ∇L|w(w) and the level curves of the loss function L(w)?",
+      "tier": 4,
+      "case_id": "gs_013",
+      "before_answer": "According to Figure 3.2 in little_book_ch3, the gradient vector ∇L|w(w) is in the direction that maximizes the increase of L and is orthogonal to the level curves of the loss function L(w) [little_book_ch3.pdf, chunk 13].",
+      "after_answer": "According to Figure 3.2 in little_book_ch3, the gradient vector ∇L|w(w) is in the direction that maximizes the increase of the loss function L(w) and is orthogonal to the level curves of the loss function. This means the gradient points uphill in the direction of steepest ascent, while being perpendicular to the curves representing constant values of the loss function [little_book_ch3.pdf, page 20].",
+      "before_sources": [
+        "d2l_ch4.pdf",
+        "little_book_ch3.pdf"
+      ],
+      "after_sources": [
+        "little_book_ch3.pdf"
+      ],
+      "before_score": 1.0,
+      "after_score": 1.0,
+      "expected_answer": "Figure 3.2 shows that at every point w, the gradient ∇L|w(w) is perpendicular (orthogonal) to the level curves of L(w) and points in the direction of steepest increase of L. Gradient descent subtracts a fraction η of this gradient at each step, resulting in a trajectory that follows the steepest descent — moving downhill across level curves toward the minimum."
+    },
+    {
+      "question": "Describe the shape and key features of the step function graph (그림 3-6) in deep_learning_ch3 and explain why it is named a 'step' function.",
+      "tier": 4,
+      "case_id": "gs_014",
+      "before_answer": "해당 내용은 문서에서 찾을 수 없습니다. 다른 질문이 있으시면 알려주세요.",
+      "after_answer": "해당 내용은 문서에서 찾을 수 없습니다. 다른 질문이 있으시면 알려주세요.",
+      "before_sources": [
+        "deep_learning_ch3.pdf",
+        "d2l_ch4.pdf",
+        "little_book_ch3.pdf"
+      ],
+      "after_sources": [
+        "deep_learning_ch3.pdf",
+        "d2l_ch4.pdf"
+      ],
+      "before_score": 0.0,
+      "after_score": 0.0,
+      "expected_answer": "The graph (generated by matplotlib) shows a flat line at y=0 for all x<0 and a flat line at y=1 for all x≥0, with an abrupt vertical jump at x=0. The x-axis spans -5 to 5 and the y-axis from -0.1 to 1.1. It is called a 'step' function because the output jumps sharply from 0 to 1 like a staircase step, unlike the smooth sigmoid curve."
+    },
+    {
+      "question": "According to Figure 3.3 in llm_app_ch3 (OpenAI model and API mapping diagram), which models use the Chat Completions API and which use the legacy Completions API?",
+      "tier": 4,
+      "case_id": "gs_015",
+      "before_answer": "해당 내용은 문서에서 찾을 수 없습니다. 다른 질문이 있으시면 알려주세요.",
+      "after_answer": "해당 내용은 문서에서 찾을 수 없습니다. 다른 질문이 있으시면 알려주세요.",
+      "before_sources": [
+        "llm_app_ch3.pdf"
+      ],
+      "after_sources": [
+        "llm_app_ch3.pdf"
+      ],
+      "before_score": 0.0,
+      "after_score": 0.0,
+      "expected_answer": "Chat Completions API (/v1/chat/completions): GPT-4 series (gpt-4, gpt-4-32k) and GPT-3.5 series (gpt-3.5-turbo, gpt-3.5-turbo-16k). Legacy Completions API (/v1/completions): GPT-3 series including text-davinci-003, text-davinci-002, text-curie-001, text-babbage-001, and text-ada-001."
+    }
+  ],
+  "model": "gpt-4o-mini",
+  "timestamp": "2026-03-12T08:37:46.395447+00:00"
+}
