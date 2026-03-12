@@ -147,8 +147,6 @@ def _send_to_langfuse(client, payload: dict, session_id: Optional[str] = None) -
                         },
                     )
 
-        client.flush()
-
     except Exception as exc:
         LOGGER.warning("Langfuse generation send failed: %s", exc)
 
@@ -182,6 +180,14 @@ def langfuse_session(session_id: str) -> Iterator[None]:
         yield
     finally:
         _local.session_id = previous
+        # Flush buffered Langfuse observations once at session exit
+        # instead of per-call in _send_to_langfuse (avoids SDK batching defeat)
+        client = _get_langfuse_client()
+        if client is not None:
+            try:
+                client.flush()
+            except Exception:
+                LOGGER.debug("Langfuse flush failed at session exit")
 
 
 # ---------------------------------------------------------------------------

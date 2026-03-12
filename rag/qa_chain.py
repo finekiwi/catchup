@@ -115,7 +115,7 @@ def rechunk_blocks(
 
     Args:
         document: Parsed CatchUp Document (used for source/id metadata and fallback).
-        max_tokens: Maximum tokens per chunk (default 300 ≈ 1200 chars for cl100k_base).
+        max_tokens: Maximum tokens per chunk (default 500 ≈ 2000 chars for cl100k_base).
 
     Returns:
         List of (chunk_text, metadata_dict) tuples in document order.
