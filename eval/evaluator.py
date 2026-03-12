@@ -72,6 +72,13 @@ class EvalCase:
     actual_answer: str
     retrieved_contexts: list[str]
     sources: list[str] = field(default_factory=list)
+    """Source filenames observed in the retrieved blocks (for logging/reporting).
+
+    Note: for Citation Accuracy scoring, the retrieval_context strings should
+    already carry source prefixes such as '[doc.pdf] page 1\\n...' so the
+    G-Eval judge can verify whether the actual answer cites them correctly.
+    sources is NOT injected into retrieval_context; it is metadata only.
+    """
     case_id: Optional[str] = None
     tier: Optional[int] = None
 
@@ -160,11 +167,13 @@ def _build_citation_metric(judge_model: str) -> GEval:
     return GEval(
         name="Citation Accuracy",
         criteria=(
-            "Evaluate whether the actual output correctly cites the source documents "
-            "that support its claims. Check if filenames or page/cell references from "
-            "the retrieval context appear in the answer where claims are made. "
-            "Score 1.0 if all major claims are cited, 0.5 if some are cited, "
-            "0.0 if no citations are present despite factual claims."
+            "Each entry in the retrieval context begins with a source prefix in the "
+            "format '[filename.ext] page N' or '[filename.ext] cell N'. "
+            "Evaluate whether the actual output inline-cites those source filenames "
+            "or page/cell references when making factual claims drawn from the context. "
+            "Score 1.0 if every major claim is accompanied by an inline citation matching "
+            "a retrieval-context prefix, 0.5 if some claims are cited, "
+            "0.0 if no citations appear despite factual claims being made."
         ),
         evaluation_params=[
             LLMTestCaseParams.INPUT,
@@ -193,18 +202,17 @@ def _evaluate_single_case(
     Returns:
         CaseResult with all metric scores populated.
     """
-    # Annotate retrieval_context with source filenames so the citation metric can
-    # verify that source references in the actual answer match retrieved chunks.
-    annotated_contexts = list(case.retrieved_contexts)
-    if case.sources:
-        sources_note = "Expected source files: " + ", ".join(case.sources)
-        annotated_contexts = [sources_note] + annotated_contexts
-
+    # retrieval_context entries are expected to carry source prefixes in the format
+    # "[filename.pdf] page N\n..." or "[filename.ipynb] cell N\n..." — as produced
+    # by rag/qa_chain.py context_parts. The G-Eval citation metric checks whether
+    # the actual answer cites those prefixed filenames inline. EvalCase.sources is
+    # metadata only and is NOT injected here to avoid leaking ground-truth hints
+    # to the judge model.
     test_case = LLMTestCase(
         input=case.question,
         actual_output=case.actual_answer,
         expected_output=case.expected_answer,
-        retrieval_context=annotated_contexts,
+        retrieval_context=case.retrieved_contexts,
     )
 
     faithfulness_score = 0.0

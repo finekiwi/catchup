@@ -258,6 +258,16 @@ def run_comparison(
     if not golden_set_path.exists():
         raise FileNotFoundError(f"Golden set not found: {golden_set_path}")
 
+    # Validate model before any queries — baseline only supports OpenAI models.
+    # Fail fast here so run_comparison never produces a misleading report where
+    # all before_answers are "[ERROR] ..." due to a caught ValueError in the loop.
+    from eval.baseline import _SUPPORTED_BASELINE_MODELS
+    if model not in _SUPPORTED_BASELINE_MODELS:
+        raise ValueError(
+            f"run_comparison only supports OpenAI models for the baseline pipeline. "
+            f"Got: {model!r}. Supported: {sorted(_SUPPORTED_BASELINE_MODELS)}"
+        )
+
     golden_data = json.loads(golden_set_path.read_text(encoding="utf-8"))
     items = golden_data.get("items", [])
     if not items:

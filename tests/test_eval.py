@@ -338,6 +338,18 @@ def test_score_answer_low_keyword_skips_llm(monkeypatch):
 # ===========================================================================
 
 
+def test_run_comparison_unsupported_model(tmp_path):
+    """run_comparison raises ValueError before any queries when model is not OpenAI."""
+    gs = tmp_path / "golden_set.json"
+    gs.write_text(json.dumps({"items": [
+        {"id": "gs_001", "tier": 1, "question": "Q?",
+         "expected_answer": "A.", "expected_sources": ["doc.pdf"], "document_format": "pdf"}
+    ]}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="OpenAI models"):
+        run_comparison(golden_set_path=gs, model="claude-sonnet-4-6")
+
+
 def test_run_comparison_file_not_found(tmp_path):
     """run_comparison raises FileNotFoundError when golden_set_path does not exist."""
     missing = tmp_path / "no_golden.json"
