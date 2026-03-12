@@ -723,7 +723,11 @@ def query(
 
     # Search ChromaDB
     try:
-        n_results = min(top_k, collection.count())
+        if document_id is not None:
+            filtered_count = len(collection.get(where={"document_id": {"$eq": document_id}})["ids"])
+            n_results = min(top_k, filtered_count)
+        else:
+            n_results = min(top_k, collection.count())
         query_kwargs: dict[str, Any] = {
             "query_embeddings": [question_vector],
             "n_results": n_results,

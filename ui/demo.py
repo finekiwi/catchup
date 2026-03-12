@@ -32,6 +32,9 @@ from parsers.pdf_parser import parse_pdf  # noqa: E402
 from rag import index_document, query as rag_query  # noqa: E402
 from vlm.client import SUPPORTED_MODELS  # noqa: E402
 
+# Keys injected by the LLM schema but not rendered as note content
+_NOTE_INTERNAL_KEYS: frozenset[str] = frozenset({"schema_version", "confidence", "errors", "starter prompts"})
+
 # ---------------------------------------------------------------------------
 # Global CSS — light theme styles for all custom components
 # ---------------------------------------------------------------------------
@@ -652,8 +655,6 @@ def _normalize_note_markdown(note_md: str | dict) -> str:
 
 def _dict_to_markdown(data: dict) -> str:
     """Convert a dict to markdown, handling multiple LLM output patterns."""
-    internal_keys = {"schema_version", "confidence", "errors", "starter prompts"}
-
     # Case 1: {"sections": [{"title": ..., "content": ...}]}
     sections = data.get("sections", [])
     if isinstance(sections, list) and sections:
@@ -717,7 +718,7 @@ def _dict_to_markdown(data: dict) -> str:
 
 def _regex_extract_sections(text: str) -> str:
     """Fallback: extract 'key': 'value' pairs via regex when json.loads fails."""
-    internal_keys = {"schema_version", "confidence", "errors", "starter prompts"}
+    internal_keys = _NOTE_INTERNAL_KEYS
     pairs = re.findall(r'"(#{1,3}\s+[^"]+?)"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
     if not pairs:
         pairs = re.findall(r'"([^"]+?)"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
@@ -837,7 +838,7 @@ def _show_image_lightbox(file_name: str, image_bytes: bytes, suffix: str, key_pr
         st.rerun()
 
 
-def _extract_image_topic(doc) -> str | None:
+def _extract_image_topic(doc: "Document") -> str | None:
     """Extract a short topic hint from image-derived blocks."""
     ignored_prefixes = ("title:", "type:", "components:", "relationships:", "flow:")
     rejected_openers = (
@@ -895,7 +896,7 @@ def _is_code_like_topic(topic: str | None) -> bool:
     return False
 
 
-def _build_image_question_suggestions(doc) -> list[str]:
+def _build_image_question_suggestions(doc: "Document") -> list[str]:
     """Create image-aware starter questions from parsed image hints."""
     topic = _extract_image_topic(doc)
     topic_is_code_like = _is_code_like_topic(topic)
@@ -994,7 +995,7 @@ def _build_image_question_suggestions(doc) -> list[str]:
     return deduped
 
 
-def _build_document_question_suggestions(doc, result: dict) -> list[str]:
+def _build_document_question_suggestions(doc: "Document", result: dict) -> list[str]:
     """Create note/document-aware starter questions for PDF and ipynb uploads."""
     title = (result.get("title") or "").strip()
     summary = (result.get("summary") or "").strip()
@@ -1079,7 +1080,7 @@ def _render_source_block_expanders(source_blocks: list[dict]) -> None:
             st.text(str(src.get("content_preview", "")))
 
 
-def _render_qa_panel(doc, result: dict, llm_model: str, is_image: bool, chat_height: int) -> None:
+def _render_qa_panel(doc: "Document", result: dict, llm_model: str, is_image: bool, chat_height: int) -> None:
     """Render the Q&A area with optional image-specific starter prompts."""
     st.markdown("#### 💬 Q&A")
     qa_subject = "이미지" if is_image else "문서"
@@ -1372,6 +1373,10 @@ if active_tab == "📝 학습 노트":
     difficulty = result.get("difficulty_level")
     read_time = result.get("estimated_read_time_min")
     errors = result.get("errors") or []
+
+    if errors:
+        for err in errors:
+            st.warning(str(err))
 
     if not is_image:
         # Title
