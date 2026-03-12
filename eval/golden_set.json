@@ -1,149 +1,156 @@
 {
-  "version": "1.0.0",
-  "description": "Golden QA set for CatchUp RAG evaluation (CU-09)",
-  "created_at": "2026-03-11",
+  "version": "2.0.0",
+  "description": "Golden QA set for CatchUp RAG evaluation (CU-09) — based on real book excerpts",
+  "created_at": "2026-03-12",
   "total": 15,
+  "sources": {
+    "deep_learning_ch3.pdf": "밑바닥부터 시작하는 딥러닝 Ch.3 신경망 (사이토 고키, Korean)",
+    "little_book_ch3.pdf": "The Little Book of Deep Learning Ch.3 Training (Fleuret, English)",
+    "d2l_ch4.pdf": "Dive into Deep Learning Ch.4 Multilayer Perceptrons (Zhang et al., English)",
+    "llm_app_ch3.pdf": "LLM 기반 AI 앱 개발 Ch.3 ChatGPT API (요시다·오시마, Korean)",
+    "git_github_ch3.pdf": "만들면서 배우는 Git+GitHub 입문 Ch.3 로컬 저장소 (윤웅식, Korean)"
+  },
   "tiers": {
-    "1_single_fact": "Basic factual retrieval - both baseline and CatchUp should answer",
-    "2_table_numeric": "Table/numeric interpretation - baseline degrades here",
-    "3_cross_document": "Cross-document reasoning - CatchUp killer feature",
-    "4_code_diagram": "Code/diagram dependent - only VLM parsing can answer"
+    "1_single_fact": "Basic factual retrieval from plain text — both baseline and CatchUp should answer",
+    "2_code_numeric": "Code output / numeric value extraction — baseline degrades due to lost structure",
+    "3_cross_document": "Cross-document reasoning — CatchUp killer feature; baseline has no global context",
+    "4_visual_diagram": "Figure / diagram interpretation — requires VLM; both text pipelines fail here"
   },
   "items": [
     {
       "id": "gs_001",
       "tier": 1,
-      "question": "What is the definition of gradient descent?",
-      "expected_answer": "Gradient descent is an iterative optimization algorithm that minimizes a loss function by updating parameters in the direction opposite to the gradient, scaled by the learning rate.",
-      "expected_sources": ["deep_learning_basics.pdf"],
+      "question": "What is the learning rate in gradient descent, and what problems arise when it is too small or too large?",
+      "expected_answer": "The learning rate η is a meta-parameter that modulates how quickly the minimization proceeds. If it is too small, optimization is slow and may be trapped in a local minimum early. If it is too large, the optimization may bounce around a good minimum and never descend into it.",
+      "expected_sources": ["little_book_ch3.pdf"],
       "document_format": "pdf",
-      "notes": "Single-fact retrieval from introductory ML material"
+      "notes": "Concept definition with two contrasting failure modes; appears clearly in Ch.3 text"
     },
     {
       "id": "gs_002",
       "tier": 1,
-      "question": "What is overfitting in machine learning?",
-      "expected_answer": "Overfitting occurs when a model learns the training data too well, including noise and outliers, resulting in poor generalization to unseen data.",
-      "expected_sources": ["ml_tutorial.ipynb"],
-      "document_format": "ipynb",
-      "notes": "Single-fact retrieval from notebook tutorial"
+      "question": "How is the sigmoid function implemented in Python using NumPy, and what is its advantage over a scalar-only step function implementation?",
+      "expected_answer": "The sigmoid function is implemented as: def sigmoid(x): return 1 / (1 + np.exp(-x)). It correctly handles NumPy arrays via broadcasting, producing outputs such as [0.269, 0.731, 0.881] for inputs [-1.0, 1.0, 2.0]. The scalar step function cannot accept NumPy arrays as input.",
+      "expected_sources": ["deep_learning_ch3.pdf"],
+      "document_format": "pdf",
+      "notes": "Definition + code from Ch.3 신경망; plain text extraction is sufficient here"
     },
     {
       "id": "gs_003",
       "tier": 1,
-      "question": "What does the ReLU activation function do?",
-      "expected_answer": "ReLU (Rectified Linear Unit) outputs the input directly if it is positive, otherwise it outputs zero: f(x) = max(0, x). It introduces non-linearity while avoiding the vanishing gradient problem.",
-      "expected_sources": ["deep_learning_basics.pdf"],
+      "question": "Why does the Chat Completions API require including all past conversation history in each API request?",
+      "expected_answer": "Unlike the ChatGPT web interface, the Chat Completions API itself has no memory of previous conversations. To produce context-aware responses, the caller must include all prior message turns with their roles (system, user, assistant) in every request.",
+      "expected_sources": ["llm_app_ch3.pdf"],
       "document_format": "pdf",
-      "notes": "Definition-style factual question"
+      "notes": "Factual explanation in Ch.3 API section; no table or figure dependency"
     },
     {
       "id": "gs_004",
       "tier": 1,
-      "question": "What is the purpose of a validation set during model training?",
-      "expected_answer": "A validation set is used to tune hyperparameters and monitor model performance during training without touching the test set, helping detect overfitting early.",
-      "expected_sources": ["ml_tutorial.ipynb"],
-      "document_format": "ipynb",
-      "notes": "Concept definition from training workflow section"
+      "question": "What is mini-batch stochastic gradient descent (SGD), and why is it more efficient than computing the full gradient over the entire dataset?",
+      "expected_answer": "Mini-batch SGD updates parameters from a partial sum (mini-batch) of the full gradient rather than the entire dataset. Because any partial sum is an unbiased estimator of the full gradient, this performs more parameter updates per unit of computation. Due to data redundancy, this is a far more efficient strategy than full-batch gradient descent.",
+      "expected_sources": ["little_book_ch3.pdf"],
+      "document_format": "pdf",
+      "notes": "Section 3.3 SGD explanation; definitional question answerable from plain text"
     },
     {
       "id": "gs_005",
       "tier": 2,
-      "question": "What accuracy did the ResNet-50 model achieve on the ImageNet benchmark?",
-      "expected_answer": "ResNet-50 achieved 76.1% top-1 accuracy and 92.9% top-5 accuracy on the ImageNet benchmark.",
-      "expected_sources": ["model_comparison_results.pdf"],
+      "question": "In the d2l dropout MLP example, what are the exact values of num_inputs, num_hiddens1, num_hiddens2, num_outputs, dropout1, and dropout2?",
+      "expected_answer": "num_inputs=784, num_hiddens1=256, num_hiddens2=256, num_outputs=10, dropout1=0.2 (applied after the first hidden layer), dropout2=0.5 (applied after the second hidden layer).",
+      "expected_sources": ["d2l_ch4.pdf"],
       "document_format": "pdf",
-      "notes": "Numeric value extraction from results table; baseline PyPDF struggles with table structure"
+      "notes": "Tier 2: six specific constants from code block; PyPDF loses code structure and may concatenate or mangle variable assignments"
     },
     {
       "id": "gs_006",
       "tier": 2,
-      "question": "How many parameters does the BERT-base model have?",
-      "expected_answer": "BERT-base has 110 million parameters.",
-      "expected_sources": ["transformer_architectures.pdf"],
+      "question": "What are the three outputs produced by the dropout_layer function in d2l when applied to the 2×8 matrix [[0..7],[8..15]] with dropout probabilities 0, 0.5, and 1.0 respectively?",
+      "expected_answer": "dropout=0: original values unchanged [[0,1,2,3,4,5,6,7],[8,9,10,11,12,13,14,15]]. dropout=0.5: surviving values doubled, zeros elsewhere, e.g. [[0,2,4,6,8,10,12,14],[0,18,20,0,0,0,28,0]]. dropout=1.0: all zeros [[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0]].",
+      "expected_sources": ["d2l_ch4.pdf"],
       "document_format": "pdf",
-      "notes": "Numeric fact from a parameters table; table parsing quality matters"
+      "notes": "Tier 2: code cell output table; PyPDF often strips whitespace-aligned columns making numeric output unreadable"
     },
     {
       "id": "gs_007",
       "tier": 2,
-      "question": "What is the training loss after epoch 10 shown in the experiment log?",
-      "expected_answer": "The training loss after epoch 10 is 0.0842, with a corresponding validation loss of 0.1231.",
-      "expected_sources": ["experiment_log.ipynb"],
-      "document_format": "ipynb",
-      "notes": "Numeric extraction from a structured output cell in a notebook"
+      "question": "What is the L2 norm of the weight vector w after training the d2l weight decay model with lambd=0 (no regularization), and what does this value indicate?",
+      "expected_answer": "The L2 norm of w is 13.259391 after training without regularization (lambd=0). This large value indicates severe overfitting: the weights grow unconstrained to memorize training data, including noise, at the cost of generalization to unseen data.",
+      "expected_sources": ["d2l_ch4.pdf"],
+      "document_format": "pdf",
+      "notes": "Tier 2: single numeric output printed after a code cell; PyPDF may not preserve the association between 'lambd=0' and the printed L2 norm value"
     },
     {
       "id": "gs_008",
       "tier": 2,
-      "question": "Which optimizer achieved the lowest test error rate in the ablation study?",
-      "expected_answer": "Adam optimizer achieved the lowest test error rate of 3.4% compared to SGD (4.1%) and RMSProp (3.9%) in the ablation study.",
-      "expected_sources": ["model_comparison_results.pdf"],
+      "question": "In the Git+GitHub book, what is the inline commit method for writing commit messages, what is the exact command syntax, and what is its key limitation?",
+      "expected_answer": "The inline method uses git commit -m '커밋 메시지' to enter the commit message directly on the command line without opening vim. For staging and committing tracked files at once, git commit -am '메시지' can be used. The key limitation is that double quotes cannot be used within the commit message with this method.",
+      "expected_sources": ["git_github_ch3.pdf"],
       "document_format": "pdf",
-      "notes": "Comparative numeric question requiring table row comparison"
+      "notes": "Tier 2: CLI code block with inline note; command syntax and the constraint about double quotes both require preserving code-block context"
     },
     {
       "id": "gs_009",
       "tier": 3,
-      "question": "How does the attention mechanism described in the transformer architecture document relate to the memory efficiency techniques discussed in the optimization tutorial?",
-      "expected_answer": "The multi-head attention in transformers requires O(n^2) memory for sequence length n. The optimization tutorial addresses this via gradient checkpointing and mixed-precision training, which are essential for training transformers on long sequences.",
-      "expected_sources": ["transformer_architectures.pdf", "optimization_tutorial.pdf"],
+      "question": "Why is the sigmoid function described in deep_learning_ch3 more suitable for use with the gradient descent update rule in little_book_ch3 than the step function?",
+      "expected_answer": "Gradient descent requires computing ∇L|w(wn) at every step (update rule: wn+1 = wn − η∇L|w(wn) from little_book). The sigmoid σ(x) = 1/(1+exp(-x)) is smooth and continuously differentiable everywhere, yielding meaningful gradients. The step function is flat almost everywhere with a discontinuity at x=0, so its gradient is zero almost everywhere, making gradient-based optimization impossible.",
+      "expected_sources": ["deep_learning_ch3.pdf", "little_book_ch3.pdf"],
       "document_format": "pdf",
-      "notes": "Cross-document reasoning linking architecture constraints to optimization strategies"
+      "notes": "Tier 3: requires linking gradient descent formula (little_book) to activation function differentiability (deep_learning); neither document alone answers the question"
     },
     {
       "id": "gs_010",
       "tier": 3,
-      "question": "How does the data preprocessing pipeline described in the notebook complement the model architecture outlined in the PDF?",
-      "expected_answer": "The notebook applies tokenization and padding to sequences up to 512 tokens, which directly matches the maximum sequence length constraint of the BERT architecture described in the PDF, ensuring no information is lost at the model boundary.",
-      "expected_sources": ["ml_tutorial.ipynb", "transformer_architectures.pdf"],
-      "document_format": "mixed",
-      "notes": "Cross-format reasoning linking notebook preprocessing to PDF architecture spec"
+      "question": "How do the weight decay overfitting results in d2l_ch4 (L2 norm of w=13.26 with lambd=0) connect to the training protocol recommendations in little_book_ch3?",
+      "expected_answer": "d2l shows that training without regularization (lambd=0) yields L2 norm of w=13.259391 — a textbook overfitting case where training loss drops but test loss stays high. little_book's training protocols specify that meta-parameters, including regularization terms in the loss, must be tuned using a validation set disjoint from both training and test sets. The d2l experiment confirms this: without regularization meta-parameter tuning, weights grow without bound and the model overfits.",
+      "expected_sources": ["d2l_ch4.pdf", "little_book_ch3.pdf"],
+      "document_format": "pdf",
+      "notes": "Tier 3: requires correlating a specific numeric result (d2l) with a conceptual framework (little_book training protocols); cross-document reasoning"
     },
     {
       "id": "gs_011",
       "tier": 3,
-      "question": "Based on the evaluation metrics in the results PDF and the training curves in the notebook, at what epoch did the model begin to overfit?",
-      "expected_answer": "According to the training curves in the notebook, the validation loss starts increasing after epoch 15 while training loss continues to decrease, which corresponds to the test accuracy plateau at 87.3% noted in the results PDF.",
-      "expected_sources": ["experiment_log.ipynb", "model_comparison_results.pdf"],
-      "document_format": "mixed",
-      "notes": "Cross-document diagnosis requiring correlation between numerical trends"
+      "question": "How does the Chat Completions API message structure (system/user/assistant roles) in llm_app_ch3 reflect the causal autoregressive architecture described in little_book_ch3?",
+      "expected_answer": "little_book defines a causal model where the output at position t depends only on inputs x1,...,xt-1. The Chat Completions API requires manually including all prior message turns in every request because the underlying model is causal and autoregressive — it generates each token conditioned on all preceding tokens. The system/user/assistant role sequence in the messages array encodes this ordered, left-to-right conversational history that the causal model processes.",
+      "expected_sources": ["llm_app_ch3.pdf", "little_book_ch3.pdf"],
+      "document_format": "pdf",
+      "notes": "Tier 3: links API design (llm_app) to theoretical model architecture (little_book); answer requires synthesizing causal model definition with API statelessness"
     },
     {
       "id": "gs_012",
       "tier": 3,
-      "question": "How do the regularization techniques introduced in the deep learning basics document apply to the specific model trained in the experiment log notebook?",
-      "expected_answer": "The deep learning basics document introduces dropout (rate 0.3) and L2 weight decay as regularization strategies. The experiment log notebook applies exactly these settings: dropout=0.3 and weight_decay=1e-4, showing a 5% reduction in test error compared to the no-regularization baseline.",
-      "expected_sources": ["deep_learning_basics.pdf", "experiment_log.ipynb"],
-      "document_format": "mixed",
-      "notes": "Cross-document application of concepts from theory to practice"
+      "question": "The d2l_ch4 dropout MLP uses ReLU activations (npx.relu) rather than sigmoid. Based on deep_learning_ch3's discussion of activation functions, why is ReLU preferred in a multi-layer network?",
+      "expected_answer": "deep_learning_ch3 explains that sigmoid squashes outputs to (0,1) and has near-zero gradients for large input magnitudes, causing vanishing gradients in deep networks. The d2l MLP has 784→256→256→10 layers; with sigmoid, gradients would shrink through each layer making early layers learn very slowly. ReLU (f(x)=max(0,x)) maintains gradient magnitude for positive inputs, enabling effective backpropagation across multiple layers.",
+      "expected_sources": ["d2l_ch4.pdf", "deep_learning_ch3.pdf"],
+      "document_format": "pdf",
+      "notes": "Tier 3: requires applying activation-function theory (deep_learning) to a specific architectural choice (d2l); vanishing gradient connection"
     },
     {
       "id": "gs_013",
       "tier": 4,
-      "question": "What does the training loop shown in the code cell do step by step?",
-      "expected_answer": "The training loop iterates over mini-batches, performs a forward pass to compute predictions, calculates the cross-entropy loss, calls loss.backward() for backpropagation, clips gradients to max norm 1.0 to prevent explosion, and then calls optimizer.step() to update weights before zeroing gradients with optimizer.zero_grad().",
-      "expected_sources": ["ml_tutorial.ipynb"],
-      "document_format": "ipynb",
-      "notes": "Code comprehension question; requires accurate code block parsing from notebook"
+      "question": "According to Figure 3.2 in little_book_ch3 (the gradient descent illustration), what is the geometric relationship between the gradient vector ∇L|w(w) and the level curves of the loss function L(w)?",
+      "expected_answer": "Figure 3.2 shows that at every point w, the gradient ∇L|w(w) is perpendicular (orthogonal) to the level curves of L(w) and points in the direction of steepest increase of L. Gradient descent subtracts a fraction η of this gradient at each step, resulting in a trajectory that follows the steepest descent — moving downhill across level curves toward the minimum.",
+      "expected_sources": ["little_book_ch3.pdf"],
+      "document_format": "pdf",
+      "notes": "Tier 4: answer depends on reading Figure 3.2; text around figure only says 'as illustrated in Figure 3.2' — full answer requires VLM interpretation of the figure"
     },
     {
       "id": "gs_014",
       "tier": 4,
-      "question": "What neural network architecture is depicted in the system diagram?",
-      "expected_answer": "The diagram shows a U-Net architecture with an encoder path that progressively halves spatial dimensions while doubling channels (64→128→256→512), a bottleneck layer, and a symmetric decoder path with skip connections that concatenate encoder feature maps at each resolution level.",
-      "expected_sources": ["architecture_diagram.png"],
-      "document_format": "png",
-      "notes": "Diagram interpretation requiring VLM parsing; PyPDF/text extraction cannot answer this"
+      "question": "Describe the shape and key features of the step function graph (그림 3-6) in deep_learning_ch3 and explain why it is named a 'step' function.",
+      "expected_answer": "The graph (generated by matplotlib) shows a flat line at y=0 for all x<0 and a flat line at y=1 for all x≥0, with an abrupt vertical jump at x=0. The x-axis spans -5 to 5 and the y-axis from -0.1 to 1.1. It is called a 'step' function because the output jumps sharply from 0 to 1 like a staircase step, unlike the smooth sigmoid curve.",
+      "expected_sources": ["deep_learning_ch3.pdf"],
+      "document_format": "pdf",
+      "notes": "Tier 4: the code that generates the graph is extractable, but the actual visual description requires interpreting 그림 3-6; VLM needed for full answer"
     },
     {
       "id": "gs_015",
       "tier": 4,
-      "question": "What does the confusion matrix in the results figure show about class imbalance?",
-      "expected_answer": "The confusion matrix shows that the model correctly classifies 94% of the majority class (class 0) but only 61% of the minority class (class 2), indicating the model is biased toward the majority class due to the imbalanced training distribution of approximately 8:1 ratio.",
-      "expected_sources": ["model_comparison_results.pdf"],
+      "question": "According to Figure 3.3 in llm_app_ch3 (OpenAI model and API mapping diagram), which models use the Chat Completions API and which use the legacy Completions API?",
+      "expected_answer": "Chat Completions API (/v1/chat/completions): GPT-4 series (gpt-4, gpt-4-32k) and GPT-3.5 series (gpt-3.5-turbo, gpt-3.5-turbo-16k). Legacy Completions API (/v1/completions): GPT-3 series including text-davinci-003, text-davinci-002, text-curie-001, text-babbage-001, and text-ada-001.",
+      "expected_sources": ["llm_app_ch3.pdf"],
       "document_format": "pdf",
-      "notes": "Figure interpretation within a PDF; requires VLM to read embedded chart correctly"
+      "notes": "Tier 4: the answer is encoded in a figure (그림 3.3); surrounding text only mentions the diagram exists — extracting which model maps to which API requires VLM"
     }
   ]
 }

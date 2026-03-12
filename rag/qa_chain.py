@@ -107,6 +107,77 @@ def _get_openai_embedding(text: str) -> tuple[list[float], int]:
     return resp.data[0].embedding, resp.usage.total_tokens
 
 
+def _expand_with_adjacent_blocks(
+    collection: Any,
+    hit_metadatas: list[dict],
+    hit_contents: list[str],
+    context_window: int = 2,
+) -> list[tuple[dict, str]]:
+    """Expand top-k hits by fetching adjacent blocks (±context_window) from the same document.
+
+    Each hit block is augmented with its neighbours so the LLM receives a wider
+    contiguous passage. Blocks from different documents remain separated.
+    Deduplication is done by (document_id, block_order) key.
+
+    Args:
+        collection: ChromaDB collection to fetch from.
+        hit_metadatas: Metadata dicts from the top-k query results.
+        hit_contents: Text content corresponding to hit_metadatas.
+        context_window: Number of blocks to expand in each direction (default 2).
+
+    Returns:
+        List of (metadata, content) tuples sorted by (document_id, block_order),
+        including both original hits and their neighbours.
+    """
+    # Build fetch targets: doc_id → set of block_orders to retrieve
+    fetch_targets: dict[str, set[int]] = {}
+    for meta in hit_metadatas:
+        doc_id = meta.get("document_id", "")
+        if not doc_id:
+            continue
+        order = int(meta.get("block_order", 0))
+        orders = fetch_targets.setdefault(doc_id, set())
+        for delta in range(-context_window, context_window + 1):
+            adj = order + delta
+            if adj >= 0:
+                orders.add(adj)
+
+    # Seed seen set with original hits
+    seen: set[str] = set()
+    expanded: list[tuple[dict, str]] = []
+    for meta, content in zip(hit_metadatas, hit_contents):
+        key = f"{meta.get('document_id', '')}:{meta.get('block_order', 0)}"
+        if key not in seen:
+            seen.add(key)
+            expanded.append((meta, content))
+
+    # Fetch adjacent blocks from ChromaDB
+    for doc_id, orders in fetch_targets.items():
+        try:
+            result = collection.get(
+                where={"$and": [
+                    {"document_id": {"$eq": doc_id}},
+                    {"block_order": {"$in": sorted(orders)}},
+                ]},
+                include=["documents", "metadatas"],
+            )
+        except Exception:
+            LOGGER.debug("Adjacent block fetch failed for doc_id=%s", doc_id)
+            continue
+
+        fetched_contents: list[str] = result.get("documents") or []
+        fetched_metas: list[dict] = result.get("metadatas") or []
+        for meta, content in zip(fetched_metas, fetched_contents):
+            key = f"{meta.get('document_id', '')}:{meta.get('block_order', 0)}"
+            if key not in seen:
+                seen.add(key)
+                expanded.append((meta, content))
+
+    # Sort for coherent context: group by document, ordered within document
+    expanded.sort(key=lambda x: (x[0].get("document_id", ""), int(x[0].get("block_order", 0))))
+    return expanded
+
+
 def _is_document_indexed(collection: Any, document_id: str, expected_block_count: int) -> bool:
     """Return True only if all expected blocks for this document_id are already stored.
 
@@ -358,24 +429,33 @@ def query(question: str, top_k: int = 5, model: str = "gpt-4o-mini") -> QAResult
             output_tokens=0,
         )
 
-    # Build source blocks and context string
+    # Expand hits with adjacent blocks for wider context coverage
+    expanded = _expand_with_adjacent_blocks(collection, metadatas, contents)
+
+    # Build source blocks (original top-k hits only) and context string (expanded)
+    hit_keys = {
+        f"{meta.get('document_id', '')}:{meta.get('block_order', 0)}"
+        for meta in metadatas
+    }
     source_blocks: list[SourceBlock] = []
     context_parts: list[str] = []
 
-    for i, content in enumerate(contents):
-        meta = metadatas[i] if i < len(metadatas) else {}
+    for meta, content in expanded:
+        key = f"{meta.get('document_id', '')}:{meta.get('block_order', 0)}"
         page = meta.get("page")
         cell_index = meta.get("cell_index")
 
-        source_blocks.append(SourceBlock(
-            document_id=meta.get("document_id", ""),
-            source=meta.get("source", ""),
-            block_order=meta.get("block_order", 0),
-            block_type=meta.get("block_type", ""),
-            content_preview=content[:200],
-            page=page,
-            cell_index=cell_index,
-        ))
+        # source_blocks tracks original retrieved hits only
+        if key in hit_keys:
+            source_blocks.append(SourceBlock(
+                document_id=meta.get("document_id", ""),
+                source=meta.get("source", ""),
+                block_order=meta.get("block_order", 0),
+                block_type=meta.get("block_type", ""),
+                content_preview=content[:200],
+                page=page,
+                cell_index=cell_index,
+            ))
 
         ref = f"[{meta.get('source', 'unknown')}]"
         if page is not None:
