@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Optional
 
 from eval.baseline import query_baseline
+from prompts.eval_judge import JUDGE_SYSTEM_PROMPT, judge_user_prompt
 from rag.qa_chain import query as query_catchup
 from utils.logging import log_api_call
 
@@ -165,21 +166,11 @@ def _llm_judge_score(
     """
     from rag.qa_chain import _call_openai  # lazy import to avoid circular issues
 
-    system_prompt = (
-        "You are an answer quality judge. Given a question, a reference answer, and a candidate answer, "
-        "determine if the candidate answer is correct and sufficiently complete.\n"
-        "Respond with exactly one word: CORRECT or INCORRECT."
-    )
-    user_prompt = (
-        f"Question: {question}\n\n"
-        f"Reference answer: {expected}\n\n"
-        f"Candidate answer: {actual}\n\n"
-        "Is the candidate answer correct and sufficiently complete?"
-    )
-
     try:
         t0 = time.perf_counter()
-        raw, input_tokens, output_tokens = _call_openai(model, system_prompt, user_prompt)
+        raw, input_tokens, output_tokens = _call_openai(
+            model, JUDGE_SYSTEM_PROMPT, judge_user_prompt(question, expected, actual)
+        )
         latency_ms = (time.perf_counter() - t0) * 1000
         log_api_call(
             model=model,
@@ -190,8 +181,9 @@ def _llm_judge_score(
             cost_usd=0.0,
             success=True,
         )
+        # Use exact match to avoid "INCORRECT" being treated as containing "CORRECT"
         verdict = raw.strip().upper()
-        return 1.0 if "CORRECT" in verdict else 0.0
+        return 1.0 if verdict == "CORRECT" else 0.0
     except Exception as exc:
         LOGGER.warning("LLM judge failed (%s), falling back to keyword score: %s", model, exc)
         log_api_call(

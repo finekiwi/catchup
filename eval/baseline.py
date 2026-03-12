@@ -37,6 +37,15 @@ LOGGER = logging.getLogger(__name__)
 BASELINE_COLLECTION = "catchup_baseline"
 _EMBED_COST_PER_1M_USD = 0.02  # USD per 1M tokens for text-embedding-3-small
 
+# Baseline only supports OpenAI models — non-OpenAI providers use _call_openai internally
+_SUPPORTED_BASELINE_MODELS: frozenset[str] = frozenset({
+    "gpt-4o-mini",
+    "gpt-4o",
+    "gpt-4.1-mini",
+    "gpt-4.1-nano",
+    "gpt-5-nano",
+})
+
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -264,7 +273,16 @@ def query_baseline(
 
     Returns:
         QAResult identical in schema to the CatchUp pipeline output.
+
+    Raises:
+        ValueError: If model is not an OpenAI model supported by the baseline.
     """
+    if model not in _SUPPORTED_BASELINE_MODELS:
+        raise ValueError(
+            f"Baseline pipeline only supports OpenAI models. Got: {model!r}. "
+            f"Supported: {sorted(_SUPPORTED_BASELINE_MODELS)}"
+        )
+
     t_total = time.perf_counter()
 
     collection = _get_baseline_collection()

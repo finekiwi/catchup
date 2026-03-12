@@ -268,6 +268,41 @@ def test_keyword_score_empty_expected():
 # ===========================================================================
 
 
+def test_llm_judge_score_incorrect_not_pass(monkeypatch):
+    """_llm_judge_score returns 0.0 when judge responds INCORRECT.
+
+    Regression for substring bug: 'CORRECT' in 'INCORRECT' == True.
+    The fix uses exact match (verdict == 'CORRECT').
+    """
+    from eval.before_after import _llm_judge_score
+
+    # Mock _call_openai to return "INCORRECT" — old bug would have returned 1.0
+    monkeypatch.setattr(
+        "eval.before_after._call_openai" if hasattr(ba_module, "_call_openai") else "rag.qa_chain._call_openai",
+        lambda model, system, user: ("INCORRECT", 10, 5),
+        raising=False,
+    )
+    # Patch at the source where it's lazily imported inside _llm_judge_score
+    with __import__("unittest.mock", fromlist=["patch"]).patch(
+        "rag.qa_chain._call_openai", return_value=("INCORRECT", 10, 5)
+    ):
+        monkeypatch.setattr("eval.before_after.log_api_call", lambda **kw: None)
+        score = _llm_judge_score("What is X?", "expected answer", "candidate answer")
+
+    assert score == 0.0, "INCORRECT judge response must score 0.0 (exact match fix)"
+
+
+def test_query_baseline_unsupported_model():
+    """query_baseline raises ValueError for non-OpenAI models."""
+    from eval.baseline import query_baseline
+
+    with pytest.raises(ValueError, match="OpenAI models"):
+        query_baseline("question", model="claude-sonnet-4-6")
+
+    with pytest.raises(ValueError, match="OpenAI models"):
+        query_baseline("question", model="gemini-3-flash-preview")
+
+
 def test_score_answer_high_keyword_skips_llm(monkeypatch):
     """_score_answer returns 1.0 without calling the LLM when keyword score >= 0.7."""
     llm_called = []

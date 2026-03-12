@@ -193,11 +193,18 @@ def _evaluate_single_case(
     Returns:
         CaseResult with all metric scores populated.
     """
+    # Annotate retrieval_context with source filenames so the citation metric can
+    # verify that source references in the actual answer match retrieved chunks.
+    annotated_contexts = list(case.retrieved_contexts)
+    if case.sources:
+        sources_note = "Expected source files: " + ", ".join(case.sources)
+        annotated_contexts = [sources_note] + annotated_contexts
+
     test_case = LLMTestCase(
         input=case.question,
         actual_output=case.actual_answer,
         expected_output=case.expected_answer,
-        retrieval_context=case.retrieved_contexts,
+        retrieval_context=annotated_contexts,
     )
 
     faithfulness_score = 0.0
