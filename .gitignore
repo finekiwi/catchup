@@ -214,11 +214,17 @@ catchup-v2-collaboration-strategy.md
 
 # Runtime data
 data/logs/
+data/chroma/
+data/golden/
+data/parsed/
 refs/
 
 # Internal tooling
 .github/
 scripts/
+!scripts/
+scripts/*
+!scripts/pr-review-comment.sh
 
 # macOS
 .DS_Store
