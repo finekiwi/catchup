@@ -118,18 +118,13 @@ def _send_to_langfuse(client, payload: dict, session_id: Optional[str] = None) -
         # session_id: explicit arg takes priority, then thread-local from langfuse_session()
         effective_sid = session_id or getattr(_local, "session_id", None)
 
-        # Root span acts as the trace container. session_id is propagated to all
-        # children via propagate_attributes INSIDE the root span, then the generation
-        # is created as a child using root_span.start_as_current_observation().
+        # propagate_attributes goes INSIDE the outer span: it sets session_id on the
+        # currently active span (root_span) AND propagates to all child observations.
         with client.start_as_current_observation(
             as_type="span",
             name=payload["stage"],
         ) as root_span:
-            ctx = (
-                propagate_attributes(session_id=effective_sid)
-                if effective_sid
-                else nullcontext()
-            )
+            ctx = propagate_attributes(session_id=effective_sid) if effective_sid else nullcontext()
             with ctx:
                 with root_span.start_as_current_observation(
                     as_type="generation",
@@ -151,6 +146,8 @@ def _send_to_langfuse(client, payload: dict, session_id: Optional[str] = None) -
                             "error": payload["error"],
                         },
                     )
+
+        client.flush()
 
     except Exception as exc:
         LOGGER.warning("Langfuse generation send failed: %s", exc)
