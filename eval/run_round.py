@@ -40,7 +40,7 @@ _DEFAULT_MODEL = "gpt-4o-mini"
 
 def run_before_after(round_num: int, model: str) -> Path:
     """Run before_after comparison and save to round-tagged file."""
-    from eval.before_after import run_comparison, save_report, ComparisonReport
+    from eval.before_after import run_comparison, ComparisonReport
 
     LOGGER.info("=== Before/After (Round %d) ===", round_num)
     report: ComparisonReport = run_comparison(golden_set_path=_GOLDEN_PATH, model=model)
