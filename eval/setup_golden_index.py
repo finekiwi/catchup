@@ -1,11 +1,12 @@
-"""Index golden set documents into both baseline and CatchUp collections.
+"""Index golden set documents into baseline and CatchUp collections.
 
 Run this once before executing before_after.py:
     python -m eval.setup_golden_index
 
-Documents are read from data/golden/. Both collections are populated:
-  - catchup_baseline: PyPDF flat extraction (via eval.baseline.index_baseline)
-  - catchup_rag:      CatchUp structured parsing (via parsers.pdf_parser + rag.qa_chain)
+Documents are read from data/golden/. Three collections are populated:
+  - catchup_baseline:      PyPDF flat extraction, 1000-char chunks
+  - catchup_rag:           CatchUp structured parsing, Docling block-level (variable size)
+  - catchup_rag_chunked:   CatchUp structured parsing, rechunked to 1000-char (fair comparison)
 """
 
 from __future__ import annotations
@@ -49,6 +50,24 @@ def index_all_catchup() -> None:
     LOGGER.info("CatchUp indexing complete.")
 
 
+def index_all_catchup_chunked() -> None:
+    """Parse and index all PDFs using CatchUp parsing + rechunked (1000-char) chunks."""
+    from parsers.pdf_parser import parse_pdf
+    from rag.qa_chain import index_document_chunked
+
+    pdfs = sorted(GOLDEN_DIR.glob("*.pdf"))
+    LOGGER.info("Indexing %d PDFs into CatchUp-chunked collection...", len(pdfs))
+    for pdf in pdfs:
+        LOGGER.info("  catchup-chunked: %s", pdf.name)
+        try:
+            doc = parse_pdf(str(pdf))
+            index_document_chunked(doc)
+            LOGGER.info("    -> %d blocks parsed, rechunked and indexed", len(doc.blocks))
+        except Exception:
+            LOGGER.exception("Failed to index %s via CatchUp-chunked pipeline", pdf.name)
+    LOGGER.info("CatchUp-chunked indexing complete.")
+
+
 def main() -> None:
     if not GOLDEN_DIR.exists():
         raise FileNotFoundError(f"Golden documents directory not found: {GOLDEN_DIR}")
@@ -61,6 +80,7 @@ def main() -> None:
 
     index_all_baseline()
     index_all_catchup()
+    index_all_catchup_chunked()
 
     LOGGER.info("All documents indexed. Run: python -m eval.before_after")
 

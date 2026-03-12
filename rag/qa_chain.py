@@ -25,8 +25,13 @@ load_dotenv()
 LOGGER = logging.getLogger(__name__)
 
 RAG_COLLECTION_NAME = "catchup_rag"
+RAG_CHUNKED_COLLECTION_NAME = "catchup_rag_chunked"
 EMBED_MODEL = "text-embedding-3-small"
 _EMBED_COST_PER_1M_USD = 0.02  # USD per 1M tokens for text-embedding-3-small
+
+# HybridChunker max_tokens for controlled comparison with baseline
+# cl100k_base: ~4 chars/token → 500 tokens ≈ 2000 chars
+_RECHUNK_MAX_TOKENS = 500
 
 # ---------------------------------------------------------------------------
 # Model registry — mirrors note_generator.py
@@ -88,14 +93,110 @@ def _compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     )
 
 
-def _get_rag_collection() -> Optional[Any]:
-    """Get or create the RAG ChromaDB collection."""
+def _get_rag_collection(name: str = RAG_COLLECTION_NAME) -> Optional[Any]:
+    """Get or create a RAG ChromaDB collection by name."""
     try:
         client = _build_client()
-        return client.get_or_create_collection(name=RAG_COLLECTION_NAME)
+        return client.get_or_create_collection(name=name)
     except Exception:
-        LOGGER.exception("Failed to initialize RAG ChromaDB collection")
+        LOGGER.exception("Failed to initialize RAG ChromaDB collection: %s", name)
         return None
+
+
+def rechunk_blocks(
+    document: "Document",
+    max_tokens: int = _RECHUNK_MAX_TOKENS,
+) -> list[tuple[str, dict]]:
+    """Chunk a Document using Docling HybridChunker for fair comparison with baseline.
+
+    Loads the cached DoclingDocument (saved by pdf_parser.py at parse time) and runs
+    HybridChunker with an OpenAI tiktoken tokenizer. Falls back to flat block iteration
+    if the DoclingDocument cache is unavailable.
+
+    Args:
+        document: Parsed CatchUp Document (used for source/id metadata and fallback).
+        max_tokens: Maximum tokens per chunk (default 300 ≈ 1200 chars for cl100k_base).
+
+    Returns:
+        List of (chunk_text, metadata_dict) tuples in document order.
+    """
+    from pathlib import Path as _Path
+    from utils.cache import load_docling_doc
+
+    # Attempt to load cached DoclingDocument for HybridChunker
+    dl_doc = None
+    # Reconstruct the original file path from source name via known golden dir
+    # (cache lookup is hash-based; we search data/golden/ for a matching filename)
+    for candidate_dir in ("data/golden", "data"):
+        candidate = _Path(candidate_dir) / document.source
+        if candidate.exists():
+            dl_doc = load_docling_doc(candidate)
+            if dl_doc is not None:
+                break
+
+    if dl_doc is not None:
+        try:
+            import tiktoken
+            from docling_core.transforms.chunker import HybridChunker
+            from docling_core.transforms.chunker.tokenizer.openai import OpenAITokenizer
+
+            enc = tiktoken.get_encoding("cl100k_base")
+            tok = OpenAITokenizer(tokenizer=enc, max_tokens=max_tokens)
+            chunker = HybridChunker(tokenizer=tok)
+
+            chunks: list[tuple[str, dict]] = []
+            for i, chunk in enumerate(chunker.chunk(dl_doc)):
+                text = chunk.text.strip()
+                if not text:
+                    continue
+                # Extract page from first doc_item provenance if available
+                page: Optional[int] = None
+                doc_items = getattr(chunk.meta, "doc_items", []) or []
+                if doc_items:
+                    prov = getattr(doc_items[0], "prov", None)
+                    if prov:
+                        first = prov[0] if isinstance(prov, list) else prov
+                        try:
+                            page = int(getattr(first, "page_no", None) or 0) or None
+                        except (TypeError, ValueError):
+                            pass
+                meta: dict[str, Any] = {
+                    "document_id": document.id,
+                    "source": document.source,
+                    "block_order": i,
+                    "block_type": "text",
+                    "chunk_index": i,
+                }
+                if page is not None:
+                    meta["page"] = page
+                chunks.append((text, meta))
+
+            LOGGER.info(
+                "HybridChunker: %d chunks from %s (max_tokens=%d)",
+                len(chunks), document.source, max_tokens,
+            )
+            return chunks
+
+        except Exception as exc:
+            LOGGER.warning("HybridChunker failed for %s, falling back: %s", document.source, exc)
+
+    # Fallback: flat block iteration (original behaviour)
+    LOGGER.warning("rechunk_blocks: DoclingDocument not cached for %s — using flat blocks", document.source)
+    flat: list[tuple[str, dict]] = []
+    for block in document.blocks:
+        content = block.content.strip()
+        if not content:
+            continue
+        meta = {
+            "document_id": document.id,
+            "source": document.source,
+            "block_order": block.order,
+            "block_type": block.type.value,
+        }
+        if block.metadata.page is not None:
+            meta["page"] = block.metadata.page
+        flat.append((content, meta))
+    return flat
 
 
 def _get_openai_embedding(text: str) -> tuple[list[float], int]:
@@ -335,6 +436,218 @@ def index_document(document: Document) -> None:
             )
 
 
+def index_document_chunked(document: Document) -> None:
+    """Embed and store rechunked blocks of a Document in the chunked RAG collection.
+
+    Same as index_document() but applies rechunk_blocks() first so chunk sizes
+    match the baseline (1000 chars, 100 overlap). Use this for controlled comparison.
+
+    Args:
+        document: Source Document whose blocks will be rechunked, embedded, and stored.
+    """
+    collection = _get_rag_collection(RAG_CHUNKED_COLLECTION_NAME)
+    if collection is None:
+        LOGGER.error("Chunked RAG collection unavailable — skipping document id=%s", document.id)
+        return
+
+    chunks = rechunk_blocks(document)
+    if not chunks:
+        LOGGER.warning("No chunks produced for document id=%s", document.id)
+        return
+
+    # Skip if already fully indexed
+    try:
+        existing = collection.get(where={"document_id": document.id})
+        if len(existing.get("ids", [])) >= len(chunks):
+            LOGGER.info("Chunked document id=%s already indexed, skipping", document.id)
+            return
+    except Exception:
+        pass
+
+    for idx, (content, metadata) in enumerate(chunks):
+        t0 = time.perf_counter()
+        try:
+            vector, total_tokens = _get_openai_embedding(content)
+            latency_ms = (time.perf_counter() - t0) * 1000
+            log_api_call(
+                model=EMBED_MODEL,
+                stage="rag_embed_chunked",
+                input_tokens=total_tokens,
+                output_tokens=0,
+                latency_ms=latency_ms,
+                cost_usd=total_tokens * _EMBED_COST_PER_1M_USD / 1_000_000,
+                success=True,
+            )
+        except Exception as exc:
+            LOGGER.warning("Embedding failed for chunk %d, document id=%s: %s", idx, document.id, exc)
+            log_api_call(
+                model=EMBED_MODEL,
+                stage="rag_embed_chunked",
+                input_tokens=0,
+                output_tokens=0,
+                latency_ms=(time.perf_counter() - t0) * 1000,
+                cost_usd=0.0,
+                success=False,
+                error=str(exc),
+            )
+            continue
+
+        try:
+            collection.upsert(
+                ids=[f"{document.id}:chunk:{idx}"],
+                documents=[content],
+                metadatas=[metadata],
+                embeddings=[vector],
+            )
+        except Exception:
+            LOGGER.exception("Failed to upsert chunk %d, document id=%s", idx, document.id)
+
+
+def query_chunked(question: str, top_k: int = 5, model: str = "gpt-4o-mini") -> QAResult:
+    """Answer a question using rechunked CatchUp RAG (1000-char chunks, no adjacent expansion).
+
+    Identical control conditions to baseline: same chunk size, same top_k, same LLM.
+    Only variable vs baseline: Docling structured parsing vs PyPDF flat extraction.
+
+    Args:
+        question: Natural language question.
+        top_k: Number of chunks to retrieve.
+        model: LLM model identifier. Must be in SUPPORTED_MODELS.
+
+    Returns:
+        QAResult with answer, source_blocks, model name, latency, and token usage.
+    """
+    if model not in _MODEL_REGISTRY:
+        raise ValueError(f"Unsupported model: {model!r}. Choose from: {SUPPORTED_MODELS}")
+
+    t_total = time.perf_counter()
+
+    collection = _get_rag_collection(RAG_CHUNKED_COLLECTION_NAME)
+    if collection is None or collection.count() == 0:
+        return QAResult(
+            question=question,
+            answer="No chunked documents indexed. Run index_document_chunked() first.",
+            source_blocks=[],
+            model=model,
+            latency_ms=(time.perf_counter() - t_total) * 1000,
+            input_tokens=0,
+            output_tokens=0,
+        )
+
+    # Embed question
+    try:
+        t_embed = time.perf_counter()
+        question_vector, embed_tokens = _get_openai_embedding(question)
+        log_api_call(
+            model=EMBED_MODEL,
+            stage="rag_embed_chunked",
+            input_tokens=embed_tokens,
+            output_tokens=0,
+            latency_ms=(time.perf_counter() - t_embed) * 1000,
+            cost_usd=embed_tokens * _EMBED_COST_PER_1M_USD / 1_000_000,
+            success=True,
+        )
+    except Exception as exc:
+        LOGGER.error("Failed to embed question (chunked): %s", exc)
+        return QAResult(
+            question=question,
+            answer="질문 처리에 실패했습니다.",
+            source_blocks=[],
+            model=model,
+            latency_ms=(time.perf_counter() - t_total) * 1000,
+            input_tokens=0,
+            output_tokens=0,
+        )
+
+    # Search
+    try:
+        n_results = min(top_k, collection.count())
+        raw_results = collection.query(
+            query_embeddings=[question_vector],
+            n_results=n_results,
+            include=["documents", "metadatas", "distances"],
+        )
+    except Exception:
+        LOGGER.exception("Chunked ChromaDB search failed")
+        raw_results = {}
+
+    ids = (raw_results.get("ids") or [[]])[0]
+    contents = (raw_results.get("documents") or [[]])[0]
+    metadatas = (raw_results.get("metadatas") or [[]])[0]
+
+    if not ids:
+        return QAResult(
+            question=question,
+            answer="관련 문서를 찾지 못했습니다.",
+            source_blocks=[],
+            model=model,
+            latency_ms=(time.perf_counter() - t_total) * 1000,
+            input_tokens=0,
+            output_tokens=0,
+        )
+
+    source_blocks: list[SourceBlock] = []
+    context_parts: list[str] = []
+    for i, content in enumerate(contents):
+        meta = metadatas[i] if i < len(metadatas) else {}
+        page = meta.get("page")
+        cell_index = meta.get("cell_index")
+        source_blocks.append(SourceBlock(
+            document_id=meta.get("document_id", ""),
+            source=meta.get("source", ""),
+            block_order=meta.get("block_order", 0),
+            block_type=meta.get("block_type", ""),
+            content_preview=content[:200],
+            page=page,
+            cell_index=cell_index,
+        ))
+        ref = f"[{meta.get('source', 'unknown')}]"
+        if page is not None:
+            ref += f" page {page}"
+        elif cell_index is not None:
+            ref += f" cell {cell_index}"
+        context_parts.append(f"{ref}\n{content}")
+
+    context = "\n\n---\n\n".join(context_parts)
+    user_content = f"Context:\n{context}\n\nQuestion: {question}"
+
+    provider = _MODEL_REGISTRY.get(model, {}).get("provider", "openai")
+    call_fn = _PROVIDER_DISPATCH.get(provider)
+
+    try:
+        t_llm = time.perf_counter()
+        raw_answer, input_tokens, output_tokens = call_fn(model, PROMPT, user_content)
+        log_api_call(
+            model=model,
+            stage="rag_generate_chunked",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            latency_ms=(time.perf_counter() - t_llm) * 1000,
+            cost_usd=_compute_cost(model, input_tokens, output_tokens),
+            success=True,
+        )
+        return QAResult(
+            question=question,
+            answer=raw_answer.strip(),
+            source_blocks=source_blocks,
+            model=model,
+            latency_ms=(time.perf_counter() - t_total) * 1000,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+    except Exception as exc:
+        LOGGER.error("Chunked LLM generation failed: %s", exc)
+        return QAResult(
+            question=question,
+            answer="답변 생성에 실패했습니다.",
+            source_blocks=source_blocks,
+            model=model,
+            latency_ms=(time.perf_counter() - t_total) * 1000,
+            input_tokens=0,
+            output_tokens=0,
+        )
+
+
 def query(question: str, top_k: int = 5, model: str = "gpt-4o-mini") -> QAResult:
     """Answer a question using RAG: embed question → search ChromaDB → generate answer with LLM.
 
@@ -531,4 +844,10 @@ def query(question: str, top_k: int = 5, model: str = "gpt-4o-mini") -> QAResult
         )
 
 
-__all__ = ["index_document", "query", "QAResult", "SourceBlock", "SUPPORTED_MODELS"]
+__all__ = [
+    "index_document", "index_document_chunked",
+    "query", "query_chunked",
+    "rechunk_blocks",
+    "QAResult", "SourceBlock", "SUPPORTED_MODELS",
+    "RAG_COLLECTION_NAME", "RAG_CHUNKED_COLLECTION_NAME",
+]

@@ -3,6 +3,7 @@
 Metrics:
   - Faithfulness: hallucination control via propositional decomposition
   - ContextPrecision: relevance of top-k retrieved blocks
+  - ContextRecall: fraction of GT-relevant info covered by retrieved blocks
   - Citation Accuracy (G-Eval custom): source metadata accuracy in answers
 """
 
@@ -19,7 +20,7 @@ from typing import Optional
 from utils.logging import log_api_call
 
 try:
-    from deepeval.metrics import FaithfulnessMetric, ContextualPrecisionMetric, GEval
+    from deepeval.metrics import FaithfulnessMetric, ContextualPrecisionMetric, ContextualRecallMetric, GEval
     from deepeval.test_case import LLMTestCase, LLMTestCaseParams
 except ImportError as _deepeval_err:
     raise ImportError(
@@ -92,8 +93,9 @@ class CaseResult:
         question: The original question.
         faithfulness_score: Score in [0, 1] measuring hallucination control.
         context_precision_score: Score in [0, 1] measuring retrieval relevance.
+        context_recall_score: Score in [0, 1] measuring GT coverage by retrieved blocks.
         citation_score: Score in [0, 1] measuring source citation accuracy.
-        overall_score: Arithmetic mean of the three metric scores.
+        overall_score: Arithmetic mean of the four metric scores.
         passed: True if overall_score >= pass threshold.
         tier: Tier level from golden set (1-4).
         error: Error message if evaluation failed for this case.
@@ -103,6 +105,7 @@ class CaseResult:
     question: str
     faithfulness_score: float
     context_precision_score: float
+    context_recall_score: float
     citation_score: float
     overall_score: float
     passed: bool
@@ -118,6 +121,7 @@ class EvalReport:
         overall_score: Macro-average of all case overall_scores.
         faithfulness_score: Macro-average faithfulness across cases.
         context_precision_score: Macro-average context precision across cases.
+        context_recall_score: Macro-average context recall across cases.
         citation_score: Macro-average citation accuracy across cases.
         per_case_results: Detailed results for each evaluated case.
         total_cases: Total number of cases evaluated.
@@ -130,6 +134,7 @@ class EvalReport:
     overall_score: float
     faithfulness_score: float
     context_precision_score: float
+    context_recall_score: float
     citation_score: float
     per_case_results: list[CaseResult]
     total_cases: int
@@ -189,6 +194,7 @@ def _evaluate_single_case(
     case: EvalCase,
     faithfulness_metric: FaithfulnessMetric,
     context_precision_metric: ContextualPrecisionMetric,
+    context_recall_metric: ContextualRecallMetric,
     citation_metric: GEval,
 ) -> CaseResult:
     """Run all three metrics against one EvalCase and return a CaseResult.
@@ -217,6 +223,7 @@ def _evaluate_single_case(
 
     faithfulness_score = 0.0
     context_precision_score = 0.0
+    context_recall_score = 0.0
     citation_score = 0.0
     error_msg: Optional[str] = None
 
@@ -235,19 +242,27 @@ def _evaluate_single_case(
         error_msg = (error_msg or "") + f" context_precision: {exc}"
 
     try:
+        context_recall_metric.measure(test_case)
+        context_recall_score = context_recall_metric.score or 0.0
+    except Exception as exc:
+        LOGGER.warning("ContextRecall metric failed for case %s: %s", case.case_id, exc)
+        error_msg = (error_msg or "") + f" context_recall: {exc}"
+
+    try:
         citation_metric.measure(test_case)
         citation_score = citation_metric.score or 0.0
     except Exception as exc:
         LOGGER.warning("Citation metric failed for case %s: %s", case.case_id, exc)
         error_msg = (error_msg or "") + f" citation: {exc}"
 
-    overall = (faithfulness_score + context_precision_score + citation_score) / 3.0
+    overall = (faithfulness_score + context_precision_score + context_recall_score + citation_score) / 4.0
 
     return CaseResult(
         case_id=case.case_id,
         question=case.question,
         faithfulness_score=round(faithfulness_score, 4),
         context_precision_score=round(context_precision_score, 4),
+        context_recall_score=round(context_recall_score, 4),
         citation_score=round(citation_score, 4),
         overall_score=round(overall, 4),
         passed=overall >= _PASS_THRESHOLD,
@@ -298,6 +313,11 @@ def run_evaluation(cases: list[EvalCase], model: str = "gpt-4o-mini") -> EvalRep
         model=judge_model,
         include_reason=True,
     )
+    context_recall_metric = ContextualRecallMetric(
+        threshold=_PASS_THRESHOLD,
+        model=judge_model,
+        include_reason=True,
+    )
     citation_metric = _build_citation_metric(judge_model)
 
     per_case_results: list[CaseResult] = []
@@ -306,7 +326,7 @@ def run_evaluation(cases: list[EvalCase], model: str = "gpt-4o-mini") -> EvalRep
     for case in cases:
         LOGGER.debug("Evaluating case %s", case.case_id)
         result = _evaluate_single_case(
-            case, faithfulness_metric, context_precision_metric, citation_metric
+            case, faithfulness_metric, context_precision_metric, context_recall_metric, citation_metric
         )
         per_case_results.append(result)
 
@@ -316,6 +336,7 @@ def run_evaluation(cases: list[EvalCase], model: str = "gpt-4o-mini") -> EvalRep
     n = len(per_case_results)
     agg_faithfulness = sum(r.faithfulness_score for r in per_case_results) / n
     agg_precision = sum(r.context_precision_score for r in per_case_results) / n
+    agg_recall = sum(r.context_recall_score for r in per_case_results) / n
     agg_citation = sum(r.citation_score for r in per_case_results) / n
     agg_overall = sum(r.overall_score for r in per_case_results) / n
     passed = sum(1 for r in per_case_results if r.passed)
@@ -335,6 +356,7 @@ def run_evaluation(cases: list[EvalCase], model: str = "gpt-4o-mini") -> EvalRep
         overall_score=round(agg_overall, 4),
         faithfulness_score=round(agg_faithfulness, 4),
         context_precision_score=round(agg_precision, 4),
+        context_recall_score=round(agg_recall, 4),
         citation_score=round(agg_citation, 4),
         per_case_results=per_case_results,
         total_cases=n,
@@ -344,10 +366,10 @@ def run_evaluation(cases: list[EvalCase], model: str = "gpt-4o-mini") -> EvalRep
     )
 
     LOGGER.info(
-        "Evaluation complete: overall=%.4f, faithfulness=%.4f, precision=%.4f, citation=%.4f, passed=%d/%d",
+        "Evaluation complete: overall=%.4f, faithfulness=%.4f, precision=%.4f, recall=%.4f, citation=%.4f, passed=%d/%d",
         report.overall_score, report.faithfulness_score,
-        report.context_precision_score, report.citation_score,
-        passed, n,
+        report.context_precision_score, report.context_recall_score,
+        report.citation_score, passed, n,
     )
     return report
 

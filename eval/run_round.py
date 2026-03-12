@@ -71,10 +71,15 @@ def run_before_after(round_num: int, model: str) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def _build_eval_cases(model: str) -> list:
-    """Build EvalCase list by running CatchUp pipeline on golden set questions."""
+def _build_eval_cases(query_fn, label: str, model: str) -> list:
+    """Build EvalCase list by running a pipeline query function on golden set questions.
+
+    Args:
+        query_fn: Callable(question, top_k, model) -> QAResult.
+        label: Human-readable pipeline label for logging (e.g., "CatchUp", "Baseline").
+        model: LLM model identifier passed to query_fn.
+    """
     from eval.evaluator import EvalCase
-    from rag.qa_chain import query as query_catchup
 
     golden_data = json.loads(_GOLDEN_PATH.read_text(encoding="utf-8"))
     items = golden_data.get("items", [])
@@ -86,9 +91,9 @@ def _build_eval_cases(model: str) -> list:
         case_id = item.get("id", "unknown")
         tier = item.get("tier", 0)
 
-        LOGGER.info("  DeepEval: querying %s", case_id)
+        LOGGER.info("  DeepEval [%s]: querying %s", label, case_id)
         try:
-            result = query_catchup(question, top_k=5, model=model)
+            result = query_fn(question, top_k=5, model=model)
             actual_answer = result.answer
             retrieved_contexts = [
                 f"[{sb.source}]\n{sb.content_preview}"
@@ -96,7 +101,7 @@ def _build_eval_cases(model: str) -> list:
             ]
             sources = [sb.source for sb in result.source_blocks]
         except Exception as exc:
-            LOGGER.warning("CatchUp query failed for %s: %s", case_id, exc)
+            LOGGER.warning("%s query failed for %s: %s", label, case_id, exc)
             actual_answer = f"[ERROR] {exc}"
             retrieved_contexts = []
             sources = []
@@ -114,30 +119,48 @@ def _build_eval_cases(model: str) -> list:
     return cases
 
 
-def run_deepeval(round_num: int, model: str) -> Path:
-    """Run DeepEval metrics on CatchUp pipeline outputs and save to round-tagged file."""
+def run_deepeval(round_num: int, model: str) -> dict[str, Path]:
+    """Run DeepEval metrics on both CatchUp and Baseline pipelines.
+
+    Returns a dict with keys 'catchup' and 'baseline' mapping to output paths.
+    """
     from eval.evaluator import run_evaluation, EvalReport
     from dataclasses import asdict as dc_asdict
-
-    LOGGER.info("=== DeepEval (Round %d) ===", round_num)
-
-    cases = _build_eval_cases(model)
-    report: EvalReport = run_evaluation(cases, model=model)
+    from rag.qa_chain import query as query_catchup, query_chunked as query_catchup_chunked
+    from eval.baseline import query_baseline
 
     _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    out_path = _OUTPUT_DIR / f"deepeval_round{round_num}_{ts}.json"
+    out_paths: dict[str, Path] = {}
 
-    out_path.write_text(json.dumps(dc_asdict(report), indent=2, ensure_ascii=False), encoding="utf-8")
-    LOGGER.info("DeepEval report saved to %s", out_path)
+    pipelines = [
+        ("CatchUp", query_catchup),
+        ("CatchUp-Chunked", query_catchup_chunked),
+        ("Baseline", query_baseline),
+    ]
 
-    print(f"\n=== DeepEval Round {round_num} ===")
-    print(f"Faithfulness:       {report.faithfulness_score:.4f}")
-    print(f"Context Precision:  {report.context_precision_score:.4f}")
-    print(f"Citation Accuracy:  {report.citation_score:.4f}")
-    print(f"Overall:            {report.overall_score:.4f}")
-    print(f"Passed:             {report.passed_cases}/{report.total_cases}")
-    return out_path
+    for label, query_fn in pipelines:
+        LOGGER.info("=== DeepEval %s (Round %d) ===", label, round_num)
+
+        cases = _build_eval_cases(query_fn, label, model)
+        report: EvalReport = run_evaluation(cases, model=model)
+
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        slug = label.lower()
+        out_path = _OUTPUT_DIR / f"deepeval_{slug}_round{round_num}_{ts}.json"
+        out_path.write_text(json.dumps(dc_asdict(report), indent=2, ensure_ascii=False), encoding="utf-8")
+        LOGGER.info("DeepEval [%s] report saved to %s", label, out_path)
+
+        print(f"\n=== DeepEval {label} Round {round_num} ===")
+        print(f"Faithfulness:       {report.faithfulness_score:.4f}")
+        print(f"Context Precision:  {report.context_precision_score:.4f}")
+        print(f"Context Recall:     {report.context_recall_score:.4f}")
+        print(f"Citation Accuracy:  {report.citation_score:.4f}")
+        print(f"Overall:            {report.overall_score:.4f}")
+        print(f"Passed:             {report.passed_cases}/{report.total_cases}")
+
+        out_paths[slug] = out_path
+
+    return out_paths
 
 
 # ---------------------------------------------------------------------------
@@ -163,15 +186,30 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     LOGGER.info("Starting Round %d evaluation (model=%s)", args.round, args.model)
 
+    from utils.logging import langfuse_session, _get_langfuse_client
+
     results: dict[str, str] = {}
 
-    if not args.skip_before_after:
-        ba_path = run_before_after(args.round, args.model)
-        results["before_after"] = str(ba_path)
+    lf = _get_langfuse_client()
 
-    if not args.skip_deepeval:
-        de_path = run_deepeval(args.round, args.model)
-        results["deepeval"] = str(de_path)
+    with langfuse_session(f"eval-round-{args.round}"):
+        if lf is not None:
+            lf.set_current_trace_io(
+                input={"round": args.round, "model": args.model},
+            )
+
+        if not args.skip_before_after:
+            ba_path = run_before_after(args.round, args.model)
+            results["before_after"] = str(ba_path)
+
+        if not args.skip_deepeval:
+            de_paths = run_deepeval(args.round, args.model)
+            for slug, path in de_paths.items():
+                results[f"deepeval_{slug}"] = str(path)
+
+        if lf is not None:
+            lf.set_current_trace_io(output=results)
+            lf.flush()
 
     print(f"\nRound {args.round} complete. Output files:")
     for key, path in results.items():
