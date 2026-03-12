@@ -1,0 +1,149 @@
+{
+  "version": "1.0.0",
+  "description": "Golden QA set for CatchUp RAG evaluation (CU-09)",
+  "created_at": "2026-03-11",
+  "total": 15,
+  "tiers": {
+    "1_single_fact": "Basic factual retrieval - both baseline and CatchUp should answer",
+    "2_table_numeric": "Table/numeric interpretation - baseline degrades here",
+    "3_cross_document": "Cross-document reasoning - CatchUp killer feature",
+    "4_code_diagram": "Code/diagram dependent - only VLM parsing can answer"
+  },
+  "items": [
+    {
+      "id": "gs_001",
+      "tier": 1,
+      "question": "What is the definition of gradient descent?",
+      "expected_answer": "Gradient descent is an iterative optimization algorithm that minimizes a loss function by updating parameters in the direction opposite to the gradient, scaled by the learning rate.",
+      "expected_sources": ["deep_learning_basics.pdf"],
+      "document_format": "pdf",
+      "notes": "Single-fact retrieval from introductory ML material"
+    },
+    {
+      "id": "gs_002",
+      "tier": 1,
+      "question": "What is overfitting in machine learning?",
+      "expected_answer": "Overfitting occurs when a model learns the training data too well, including noise and outliers, resulting in poor generalization to unseen data.",
+      "expected_sources": ["ml_tutorial.ipynb"],
+      "document_format": "ipynb",
+      "notes": "Single-fact retrieval from notebook tutorial"
+    },
+    {
+      "id": "gs_003",
+      "tier": 1,
+      "question": "What does the ReLU activation function do?",
+      "expected_answer": "ReLU (Rectified Linear Unit) outputs the input directly if it is positive, otherwise it outputs zero: f(x) = max(0, x). It introduces non-linearity while avoiding the vanishing gradient problem.",
+      "expected_sources": ["deep_learning_basics.pdf"],
+      "document_format": "pdf",
+      "notes": "Definition-style factual question"
+    },
+    {
+      "id": "gs_004",
+      "tier": 1,
+      "question": "What is the purpose of a validation set during model training?",
+      "expected_answer": "A validation set is used to tune hyperparameters and monitor model performance during training without touching the test set, helping detect overfitting early.",
+      "expected_sources": ["ml_tutorial.ipynb"],
+      "document_format": "ipynb",
+      "notes": "Concept definition from training workflow section"
+    },
+    {
+      "id": "gs_005",
+      "tier": 2,
+      "question": "What accuracy did the ResNet-50 model achieve on the ImageNet benchmark?",
+      "expected_answer": "ResNet-50 achieved 76.1% top-1 accuracy and 92.9% top-5 accuracy on the ImageNet benchmark.",
+      "expected_sources": ["model_comparison_results.pdf"],
+      "document_format": "pdf",
+      "notes": "Numeric value extraction from results table; baseline PyPDF struggles with table structure"
+    },
+    {
+      "id": "gs_006",
+      "tier": 2,
+      "question": "How many parameters does the BERT-base model have?",
+      "expected_answer": "BERT-base has 110 million parameters.",
+      "expected_sources": ["transformer_architectures.pdf"],
+      "document_format": "pdf",
+      "notes": "Numeric fact from a parameters table; table parsing quality matters"
+    },
+    {
+      "id": "gs_007",
+      "tier": 2,
+      "question": "What is the training loss after epoch 10 shown in the experiment log?",
+      "expected_answer": "The training loss after epoch 10 is 0.0842, with a corresponding validation loss of 0.1231.",
+      "expected_sources": ["experiment_log.ipynb"],
+      "document_format": "ipynb",
+      "notes": "Numeric extraction from a structured output cell in a notebook"
+    },
+    {
+      "id": "gs_008",
+      "tier": 2,
+      "question": "Which optimizer achieved the lowest test error rate in the ablation study?",
+      "expected_answer": "Adam optimizer achieved the lowest test error rate of 3.4% compared to SGD (4.1%) and RMSProp (3.9%) in the ablation study.",
+      "expected_sources": ["model_comparison_results.pdf"],
+      "document_format": "pdf",
+      "notes": "Comparative numeric question requiring table row comparison"
+    },
+    {
+      "id": "gs_009",
+      "tier": 3,
+      "question": "How does the attention mechanism described in the transformer architecture document relate to the memory efficiency techniques discussed in the optimization tutorial?",
+      "expected_answer": "The multi-head attention in transformers requires O(n^2) memory for sequence length n. The optimization tutorial addresses this via gradient checkpointing and mixed-precision training, which are essential for training transformers on long sequences.",
+      "expected_sources": ["transformer_architectures.pdf", "optimization_tutorial.pdf"],
+      "document_format": "pdf",
+      "notes": "Cross-document reasoning linking architecture constraints to optimization strategies"
+    },
+    {
+      "id": "gs_010",
+      "tier": 3,
+      "question": "How does the data preprocessing pipeline described in the notebook complement the model architecture outlined in the PDF?",
+      "expected_answer": "The notebook applies tokenization and padding to sequences up to 512 tokens, which directly matches the maximum sequence length constraint of the BERT architecture described in the PDF, ensuring no information is lost at the model boundary.",
+      "expected_sources": ["ml_tutorial.ipynb", "transformer_architectures.pdf"],
+      "document_format": "mixed",
+      "notes": "Cross-format reasoning linking notebook preprocessing to PDF architecture spec"
+    },
+    {
+      "id": "gs_011",
+      "tier": 3,
+      "question": "Based on the evaluation metrics in the results PDF and the training curves in the notebook, at what epoch did the model begin to overfit?",
+      "expected_answer": "According to the training curves in the notebook, the validation loss starts increasing after epoch 15 while training loss continues to decrease, which corresponds to the test accuracy plateau at 87.3% noted in the results PDF.",
+      "expected_sources": ["experiment_log.ipynb", "model_comparison_results.pdf"],
+      "document_format": "mixed",
+      "notes": "Cross-document diagnosis requiring correlation between numerical trends"
+    },
+    {
+      "id": "gs_012",
+      "tier": 3,
+      "question": "How do the regularization techniques introduced in the deep learning basics document apply to the specific model trained in the experiment log notebook?",
+      "expected_answer": "The deep learning basics document introduces dropout (rate 0.3) and L2 weight decay as regularization strategies. The experiment log notebook applies exactly these settings: dropout=0.3 and weight_decay=1e-4, showing a 5% reduction in test error compared to the no-regularization baseline.",
+      "expected_sources": ["deep_learning_basics.pdf", "experiment_log.ipynb"],
+      "document_format": "mixed",
+      "notes": "Cross-document application of concepts from theory to practice"
+    },
+    {
+      "id": "gs_013",
+      "tier": 4,
+      "question": "What does the training loop shown in the code cell do step by step?",
+      "expected_answer": "The training loop iterates over mini-batches, performs a forward pass to compute predictions, calculates the cross-entropy loss, calls loss.backward() for backpropagation, clips gradients to max norm 1.0 to prevent explosion, and then calls optimizer.step() to update weights before zeroing gradients with optimizer.zero_grad().",
+      "expected_sources": ["ml_tutorial.ipynb"],
+      "document_format": "ipynb",
+      "notes": "Code comprehension question; requires accurate code block parsing from notebook"
+    },
+    {
+      "id": "gs_014",
+      "tier": 4,
+      "question": "What neural network architecture is depicted in the system diagram?",
+      "expected_answer": "The diagram shows a U-Net architecture with an encoder path that progressively halves spatial dimensions while doubling channels (64→128→256→512), a bottleneck layer, and a symmetric decoder path with skip connections that concatenate encoder feature maps at each resolution level.",
+      "expected_sources": ["architecture_diagram.png"],
+      "document_format": "png",
+      "notes": "Diagram interpretation requiring VLM parsing; PyPDF/text extraction cannot answer this"
+    },
+    {
+      "id": "gs_015",
+      "tier": 4,
+      "question": "What does the confusion matrix in the results figure show about class imbalance?",
+      "expected_answer": "The confusion matrix shows that the model correctly classifies 94% of the majority class (class 0) but only 61% of the minority class (class 2), indicating the model is biased toward the majority class due to the imbalanced training distribution of approximately 8:1 ratio.",
+      "expected_sources": ["model_comparison_results.pdf"],
+      "document_format": "pdf",
+      "notes": "Figure interpretation within a PDF; requires VLM to read embedded chart correctly"
+    }
+  ]
+}
