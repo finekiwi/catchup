@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import html
 import json
 import os
 import re
@@ -167,6 +169,169 @@ _GLOBAL_CSS = """\
     color: #7A6555;
     font-size: 0.93rem;
     line-height: 1.7;
+}
+
+/* ── Image learning workspace ─────────────────────────────────────────── */
+.image-note-card {
+    background: linear-gradient(180deg, #FDF8F3 0%, #F8F1E8 100%);
+    border: 1px solid #E5D9CD;
+    border-radius: 18px;
+    padding: 1.2em;
+    box-shadow: 0 8px 24px rgba(61, 46, 36, 0.10);
+}
+.image-note-lead {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 1em;
+}
+.image-note-kicker {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #A89585;
+    margin-bottom: 0.45em;
+}
+.image-note-title {
+    font-family: 'DM Serif Display', 'Times New Roman', serif;
+    font-size: 1.35rem;
+    line-height: 1.2;
+    color: #3D2E24;
+    margin: 0;
+}
+.image-note-copy {
+    color: #7A6555;
+    font-size: 0.9rem;
+    line-height: 1.7;
+    margin: 0.5em 0 0;
+}
+.image-note-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 11px;
+    border-radius: 999px;
+    background: #F2DDD6;
+    color: #A8432C;
+    border: 1px solid #EACFC5;
+    font-size: 0.76rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+.image-preview-shell {
+    background: #F5EDE4;
+    border: 1px solid #E5D9CD;
+    border-radius: 14px;
+    overflow: hidden;
+}
+.image-preview-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border-bottom: 1px solid #E5D9CD;
+    background: rgba(255, 255, 255, 0.55);
+}
+.image-preview-toolbar-label {
+    color: #3D2E24;
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+.image-preview-toolbar-value {
+    color: #A8432C;
+    font-size: 0.76rem;
+    font-weight: 700;
+}
+.image-preview-scroll {
+    max-height: 620px;
+    overflow: auto;
+    background:
+        linear-gradient(180deg, #FCF7F1 0%, #F5EDE4 100%);
+}
+.image-preview-frame {
+    padding: 14px;
+    background:
+        radial-gradient(circle at top left, rgba(196, 85, 58, 0.08), transparent 32%);
+    min-width: 100%;
+}
+.image-preview-frame img {
+    max-width: none;
+    height: auto;
+    display: block;
+    border-radius: 12px;
+    border: 1px solid #E5D9CD;
+    background: #FFFFFF;
+}
+.image-preview-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border-top: 1px solid #E5D9CD;
+    background: rgba(255, 255, 255, 0.52);
+}
+.image-preview-name {
+    color: #3D2E24;
+    font-size: 0.86rem;
+    font-weight: 600;
+    word-break: break-word;
+}
+.image-preview-hint {
+    color: #7A6555;
+    font-size: 0.76rem;
+    text-align: right;
+}
+.chat-suggestion-card {
+    margin: 0.75em 0 1em;
+    background: #F2DDD6;
+    border: 1px solid #EACFC5;
+    border-radius: 16px;
+    padding: 1em 1.1em 1.05em;
+}
+.chat-suggestion-title {
+    color: #A8432C;
+    font-size: 0.88rem;
+    font-weight: 700;
+    margin-bottom: 0.25em;
+}
+.chat-suggestion-copy {
+    color: #7A6555;
+    font-size: 0.8rem;
+    line-height: 1.55;
+    margin-bottom: 0.65em;
+}
+.chat-suggestion-list {
+    margin: 0;
+    padding-left: 1.05em;
+    color: #3D2E24;
+}
+.chat-suggestion-list li {
+    margin: 0.28em 0;
+    line-height: 1.55;
+    font-size: 0.86rem;
+}
+.lightbox-stage {
+    max-height: 74vh;
+    overflow: auto;
+    padding: 14px;
+    border-radius: 16px;
+    border: 1px solid #E5D9CD;
+    background:
+        radial-gradient(circle at top left, rgba(196, 85, 58, 0.10), transparent 26%),
+        linear-gradient(180deg, #FCF7F1 0%, #F5EDE4 100%);
+}
+.lightbox-stage img {
+    max-width: none;
+    height: auto;
+    display: block;
+    border-radius: 14px;
+    border: 1px solid #E5D9CD;
+    background: #FFFFFF;
+    box-shadow: 0 8px 24px rgba(61, 46, 36, 0.10);
 }
 
 /* ── Meta badges ───────────────────────────────────────────────────────── */
@@ -487,6 +652,8 @@ def _normalize_note_markdown(note_md: str | dict) -> str:
 
 def _dict_to_markdown(data: dict) -> str:
     """Convert a dict to markdown, handling multiple LLM output patterns."""
+    internal_keys = {"schema_version", "confidence", "errors", "starter prompts"}
+
     # Case 1: {"sections": [{"title": ..., "content": ...}]}
     sections = data.get("sections", [])
     if isinstance(sections, list) and sections:
@@ -521,6 +688,8 @@ def _dict_to_markdown(data: dict) -> str:
     # Case 3 & 4: heading keys / arbitrary dict
     lines = []
     for key, value in data.items():
+        if str(key).strip().lower() in internal_keys:
+            continue
         if key.startswith("#"):
             lines.append(key)
         else:
@@ -548,6 +717,7 @@ def _dict_to_markdown(data: dict) -> str:
 
 def _regex_extract_sections(text: str) -> str:
     """Fallback: extract 'key': 'value' pairs via regex when json.loads fails."""
+    internal_keys = {"schema_version", "confidence", "errors", "starter prompts"}
     pairs = re.findall(r'"(#{1,3}\s+[^"]+?)"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
     if not pairs:
         pairs = re.findall(r'"([^"]+?)"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
@@ -556,6 +726,8 @@ def _regex_extract_sections(text: str) -> str:
 
     lines: list[str] = []
     for key, value in pairs:
+        if key.strip().lower() in internal_keys:
+            continue
         if key.startswith("#"):
             lines.append(key)
         else:
@@ -584,6 +756,383 @@ def _render_note_html(note_md: str) -> str:
     clean_md = _downshift_headings(_normalize_note_markdown(note_md))
     html_body = md_lib.markdown(clean_md, extensions=["fenced_code", "tables", "nl2br"])
     return f'<div class="note-wrapper"><div class="note-content">\n{html_body}\n</div></div>'
+
+
+def _image_data_uri(image_bytes: bytes, suffix: str) -> str:
+    """Encode image bytes into a browser-safe data URI."""
+    mime_map = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+    }
+    mime_type = mime_map.get(suffix.lower(), "image/png")
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def _render_image_preview_card(file_name: str, image_bytes: bytes, suffix: str, zoom_percent: int) -> str:
+    """Render the uploaded image inside a styled preview card."""
+    image_uri = _image_data_uri(image_bytes, suffix)
+    safe_name = html.escape(file_name)
+    return (
+        '<div class="image-note-card">'
+        '<div class="image-note-lead">'
+        '<div>'
+        '<div class="image-note-kicker">Image-First Study Mode</div>'
+        f'<h3 class="image-note-title">{safe_name}</h3>'
+        '<p class="image-note-copy">'
+        '이 이미지는 학습 노트 대신 원본 화면을 보면서 바로 질문하는 흐름에 최적화되어 있습니다.'
+        '</p>'
+        '</div>'
+        '<div class="image-note-pill">Q&A Ready</div>'
+        '</div>'
+        '<div class="image-preview-shell">'
+        '<div class="image-preview-toolbar">'
+        '<div class="image-preview-toolbar-label">원본 미리보기</div>'
+        f'<div class="image-preview-toolbar-value">{zoom_percent}% 확대</div>'
+        '</div>'
+        '<div class="image-preview-scroll">'
+        '<div class="image-preview-frame">'
+        f'<img src="{image_uri}" alt="{safe_name}" style="width: {zoom_percent}%;" />'
+        '</div>'
+        '</div>'
+        '<div class="image-preview-meta">'
+        f'<div class="image-preview-name">{safe_name}</div>'
+        '<div class="image-preview-hint">확대 후 스크롤해서 작은 글씨와 세부 영역을 확인하세요.</div>'
+        '</div>'
+        '</div>'
+        '</div>'
+    )
+
+
+def _render_lightbox_image(file_name: str, image_bytes: bytes, suffix: str, zoom_percent: int) -> str:
+    """Render the full-size image viewer content."""
+    image_uri = _image_data_uri(image_bytes, suffix)
+    safe_name = html.escape(file_name)
+    return (
+        '<div class="lightbox-stage">'
+        f'<img src="{image_uri}" alt="{safe_name}" style="width: {zoom_percent}%;" />'
+        '</div>'
+    )
+
+
+@st.dialog("원본 이미지 확대 보기", width="large")
+def _show_image_lightbox(file_name: str, image_bytes: bytes, suffix: str, key_prefix: str) -> None:
+    """Open a large modal image viewer for detailed inspection."""
+    st.caption("작은 글씨나 세부 UI 요소를 확인할 수 있도록 크게 띄웠습니다. 확대 후 스크롤해서 살펴보세요.")
+    zoom_percent = st.slider(
+        "확대 배율",
+        min_value=100,
+        max_value=400,
+        value=220,
+        step=10,
+        key=f"{key_prefix}_lightbox_zoom",
+    )
+    st.markdown(
+        _render_lightbox_image(file_name, image_bytes, suffix, zoom_percent),
+        unsafe_allow_html=True,
+    )
+    if st.button("닫기", use_container_width=True, key=f"{key_prefix}_lightbox_close"):
+        st.rerun()
+
+
+def _extract_image_topic(doc) -> str | None:
+    """Extract a short topic hint from image-derived blocks."""
+    ignored_prefixes = ("title:", "type:", "components:", "relationships:", "flow:")
+    rejected_openers = (
+        "이 코드는",
+        "이 이미지는",
+        "이 화면은",
+        "this code",
+        "this image",
+        "this screen",
+    )
+
+    for block in doc.blocks:
+        candidates: list[str] = []
+        if block.metadata.caption:
+            candidates.append(block.metadata.caption.split("|", 1)[0].strip())
+        candidates.extend(line.strip() for line in block.content.splitlines())
+
+        for candidate in candidates:
+            cleaned = re.sub(r"\s+", " ", candidate).strip(" -:|")
+            if not cleaned:
+                continue
+            if cleaned.lower().startswith(ignored_prefixes):
+                continue
+            if cleaned.lower().startswith(rejected_openers):
+                continue
+            if len(cleaned) < 6:
+                continue
+            if len(cleaned.split()) > 6:
+                continue
+            if any(token in cleaned for token in ("'", '"', "`", "{", "}", "=", ";")):
+                continue
+            if cleaned.endswith(("입니다.", "입니다", "합니다.", "합니다", "다.", "요.")):
+                continue
+            if len(cleaned) > 32:
+                continue
+            return cleaned
+    return None
+
+
+def _is_code_like_topic(topic: str | None) -> bool:
+    """Heuristically detect code identifiers such as classes/functions/snippets."""
+    if not topic:
+        return False
+
+    stripped = topic.strip()
+    if stripped.startswith(("class ", "def ", "function ", "interface ")):
+        return True
+    if any(token in stripped for token in ("()", "::", "->")):
+        return True
+    if "_" in stripped:
+        return True
+    words = stripped.split()
+    if any(word[:1].isupper() and not word.isupper() for word in words):
+        return True
+    return False
+
+
+def _build_image_question_suggestions(doc) -> list[str]:
+    """Create image-aware starter questions from parsed image hints."""
+    topic = _extract_image_topic(doc)
+    topic_is_code_like = _is_code_like_topic(topic)
+    first_block = doc.blocks[0] if doc.blocks else None
+    image_type = None
+    if first_block and first_block.metadata.image_type is not None:
+        image_type = first_block.metadata.image_type.value
+    plain_text = " ".join(
+        filter(
+            None,
+            [
+                *(block.content for block in doc.blocks),
+                *(block.metadata.caption or "" for block in doc.blocks),
+            ],
+        )
+    ).lower()
+
+    suggestions: list[str] = []
+    if any(keyword in plain_text for keyword in ("guardrail", "가드레일", "prompt injection", "프롬프트 인젝션", "jailbreak", "정책", "policy")):
+        if topic:
+            if topic_is_code_like:
+                suggestions.append(f"'{topic}'가 guardrail 흐름에서 어떤 역할을 하는지 설명해줘")
+            else:
+                suggestions.append(f"이 이미지에서 '{topic}'가 왜 중요한지 설명해줘")
+        suggestions.extend([
+            "이 자료에서 guardrail 핵심 원칙이 뭐야?",
+            "어떤 위험이나 공격 시나리오를 막으려는 거야?",
+            "구현 단계나 체크 포인트를 순서대로 설명해줘",
+        ])
+    elif image_type == "code_screenshot":
+        if topic:
+            if topic_is_code_like:
+                suggestions.append(f"'{topic}'의 역할을 쉽게 설명해줘")
+            else:
+                suggestions.append(f"'{topic}' 코드가 하는 일을 쉽게 설명해줘")
+        suggestions.extend([
+            "이 코드의 실행 흐름을 단계별로 설명해줘",
+            "버그나 위험해 보이는 부분이 어디야?",
+            "핵심 함수와 변수 역할을 요약해줘",
+        ])
+    elif image_type == "diagram":
+        if topic:
+            if topic_is_code_like:
+                suggestions.append(f"'{topic}'가 다이어그램에서 어디에 연결되는지 설명해줘")
+            else:
+                suggestions.append(f"'{topic}' 흐름을 처음 보는 사람도 이해하게 설명해줘")
+        suggestions.extend([
+            "각 구성요소 역할을 순서대로 설명해줘",
+            "입력부터 출력까지 어떻게 연결되는지 설명해줘",
+            "병목이나 위험 신호가 있는 부분이 어디야?",
+        ])
+    elif image_type == "text_capture":
+        if topic:
+            if topic_is_code_like:
+                suggestions.append(f"'{topic}'가 문맥상 무엇을 가리키는지 설명해줘")
+            else:
+                suggestions.append(f"'{topic}'가 핵심적으로 말하는 내용을 요약해줘")
+        suggestions.extend([
+            "중요 개념 3가지를 뽑아서 설명해줘",
+            "이 내용을 초보자도 이해하게 풀어서 설명해줘",
+            "시험이나 면접 대비용으로 핵심만 정리해줘",
+        ])
+    elif image_type == "equation":
+        if topic:
+            if topic_is_code_like:
+                suggestions.append(f"'{topic}' 표기가 무엇을 뜻하는지 설명해줘")
+            else:
+                suggestions.append(f"'{topic}' 수식이 의미하는 바를 설명해줘")
+        suggestions.extend([
+            "이 수식의 각 항이 무슨 뜻인지 알려줘",
+            "언제 쓰는 식인지 예시와 함께 설명해줘",
+            "직관적으로 이해할 수 있게 풀어줘",
+        ])
+    else:
+        if topic:
+            if topic_is_code_like:
+                suggestions.append(f"'{topic}'가 이 화면에서 어떤 역할을 하는지 설명해줘")
+            else:
+                suggestions.append(f"이 이미지에서 '{topic}'가 왜 중요한지 설명해줘")
+        suggestions.extend([
+            "이 화면의 핵심 개념이 뭐야?",
+            "중요해 보이는 부분을 위에서 아래로 설명해줘",
+            "질문해야 할 포인트를 먼저 짚어줘",
+        ])
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in suggestions:
+        normalized = item.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+        if len(deduped) == 3:
+            break
+    return deduped
+
+
+def _build_document_question_suggestions(doc, result: dict) -> list[str]:
+    """Create note/document-aware starter questions for PDF and ipynb uploads."""
+    title = (result.get("title") or "").strip()
+    summary = (result.get("summary") or "").strip()
+    key_concepts = [str(item).strip() for item in (result.get("key_concepts") or []) if str(item).strip()]
+    type_counts = Counter(block.type.value for block in doc.blocks)
+
+    suggestions: list[str] = []
+    if key_concepts:
+        primary = key_concepts[0]
+        suggestions.append(f"'{primary}' 개념을 예시와 함께 설명해줘")
+        suggestions.append(f"이 자료에서 '{primary}'가 왜 중요한지 설명해줘")
+    if title and title != doc.source:
+        suggestions.append(f"'{title}' 문서를 3줄로 요약해줘")
+    elif summary:
+        suggestions.append("이 자료의 핵심 내용을 3줄로 요약해줘")
+    else:
+        suggestions.append("이 자료의 핵심 개념 3가지를 뽑아줘")
+
+    if doc.format.value == "ipynb" or type_counts.get("code", 0) > 0:
+        suggestions.append("코드 흐름을 위에서 아래 순서대로 설명해줘")
+    elif type_counts.get("table", 0) > 0:
+        suggestions.append("표에 나온 정보를 어떻게 해석하면 되는지 설명해줘")
+    else:
+        suggestions.append("중요한 부분부터 읽는 순서를 추천해줘")
+
+    suggestions.append("시험이나 면접 대비용으로 꼭 기억할 포인트만 정리해줘")
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in suggestions:
+        normalized = item.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+        if len(deduped) == 3:
+            break
+    return deduped
+
+
+def _render_chat_suggestion_card(suggestions: list[str], copy_text: str) -> str:
+    """Render a compact Q&A suggestion card above the chat panel."""
+    items = "".join(f"<li>{html.escape(question)}</li>" for question in suggestions)
+    return (
+        '<div class="chat-suggestion-card">'
+        '<div class="chat-suggestion-title">질문 예시</div>'
+        f'<div class="chat-suggestion-copy">{html.escape(copy_text)}</div>'
+        f'<ol class="chat-suggestion-list">{items}</ol>'
+        '</div>'
+    )
+
+
+def _serialize_source_blocks(source_blocks: list) -> list[dict]:
+    """Convert retrieved source blocks into session-safe dicts."""
+    serialized: list[dict] = []
+    for block in source_blocks:
+        if isinstance(block, dict):
+            serialized.append(block)
+        else:
+            serialized.append(block.model_dump())
+    return serialized
+
+
+def _render_source_block_expanders(source_blocks: list[dict]) -> None:
+    """Render deduplicated source block expanders under one assistant answer."""
+    if not source_blocks:
+        return
+
+    st.caption("참조 블록")
+    seen: set[str] = set()
+    for src in source_blocks:
+        page = src.get("page")
+        cell_index = src.get("cell_index")
+        loc = f"page {page}" if page is not None else (f"cell {cell_index}" if cell_index is not None else "")
+        dedup_key = f"{src.get('source', '')}:{loc}"
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+        exp_label = f"📄 {src.get('source', 'unknown')}" + (f" · {loc}" if loc else "") + f"  `{src.get('block_type', '')}`"
+        with st.expander(exp_label, expanded=False):
+            st.caption(f"block_order: {src.get('block_order', 0)}")
+            st.text(str(src.get("content_preview", "")))
+
+
+def _render_qa_panel(doc, result: dict, llm_model: str, is_image: bool, chat_height: int) -> None:
+    """Render the Q&A area with optional image-specific starter prompts."""
+    st.markdown("#### 💬 Q&A")
+    qa_subject = "이미지" if is_image else "문서"
+    st.caption(f"{qa_subject}에 대해 질문하세요 · LLM: `{llm_model}`")
+    if is_image:
+        st.markdown(
+            _render_chat_suggestion_card(
+                _build_image_question_suggestions(doc),
+                "이미지 유형과 추출된 구조를 기준으로 바로 물어볼 수 있는 질문입니다.",
+            ),
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            _render_chat_suggestion_card(
+                _build_document_question_suggestions(doc, result),
+                "노트와 문서 구조를 기준으로 바로 이어서 물어볼 수 있는 질문입니다.",
+            ),
+            unsafe_allow_html=True,
+        )
+
+    if "chat_messages" not in st.session_state:
+        st.session_state["chat_messages"] = []
+
+    chat_container = st.container(height=chat_height)
+    with chat_container:
+        for msg in st.session_state["chat_messages"]:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+                if msg["role"] == "assistant":
+                    _render_source_block_expanders(msg.get("source_blocks", []))
+
+        if _pending := st.session_state.pop("_pending_chat", None):
+            with st.chat_message("assistant"):
+                with st.spinner("생각 중..."):
+                    try:
+                        _chat_result = rag_query(_pending, model=llm_model, document_id=doc.id)
+                        _reply = _chat_result.answer
+                        _source_blocks = _serialize_source_blocks(_chat_result.source_blocks)
+                    except Exception as _exc:
+                        _reply = f"오류가 발생했습니다: {_exc}"
+                        _source_blocks = []
+            st.session_state["chat_messages"].append({
+                "role": "assistant",
+                "content": _reply,
+                "source_blocks": _source_blocks,
+            })
+            st.rerun()
+
+    if user_input := st.chat_input("질문을 입력하세요"):
+        st.session_state["chat_messages"].append({"role": "user", "content": user_input})
+        st.session_state["_pending_chat"] = user_input
+        st.rerun()
 
 
 # ===================================================================
@@ -615,12 +1164,28 @@ with st.sidebar:
         vlm_model = st.selectbox("VLM 모델 (이미지)", options=SUPPORTED_MODELS, index=0)
         llm_model = st.selectbox("LLM 모델 (노트/Q&A)", options=SUPPORTED_LLM_MODELS, index=0)
 
+# ===================================================================
+# FILE UPLOAD
+# ===================================================================
+uploaded_file = st.file_uploader(
+    "학습자료를 업로드하세요",
+    type=["pdf", "ipynb", "png", "jpg", "jpeg", "webp"],
+    help="PDF, Jupyter Notebook, 이미지 (PNG/JPG/JPEG/WEBP) 지원",
+)
+
+suffix = os.path.splitext(uploaded_file.name)[1] if uploaded_file else ""
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
+is_image = suffix.lower() in IMAGE_SUFFIXES
+
+with st.sidebar:
     st.markdown("---")
 
     # Pipeline step indicator
     st.caption("파이프라인")
     steps = st.session_state.get("_pipeline_steps", {})
-    step_defs = [("upload", "파일 업로드"), ("parse", "파싱"), ("note", "노트 생성")]
+    step_defs = [("upload", "파일 업로드"), ("parse", "파싱")]
+    if not is_image:
+        step_defs.append(("note", "노트 생성"))
     html_parts = ['<div class="step-indicator">']
     for i, (step_name, label) in enumerate(step_defs):
         done = steps.get(step_name, False)
@@ -649,15 +1214,6 @@ with st.sidebar:
         st.rerun()
 
     st.caption("Built with Streamlit + OpenAI / Anthropic / Google")
-
-# ===================================================================
-# FILE UPLOAD
-# ===================================================================
-uploaded_file = st.file_uploader(
-    "학습자료를 업로드하세요",
-    type=["pdf", "ipynb", "png", "jpg", "jpeg"],
-    help="PDF, Jupyter Notebook, 이미지 (PNG/JPG) 지원",
-)
 
 if uploaded_file is None:
     # Landing state
@@ -691,17 +1247,18 @@ if not st.button("분석 시작", type="primary", use_container_width=False):
 if cache_key in st.session_state:
     doc = st.session_state[doc_cache_key]
     result = st.session_state[cache_key]
+    is_image = st.session_state.get(f"is_image_{cache_key}", False)
     if not st.session_state.get(f"_toast_shown_{cache_key}"):
         st.toast("캐시된 결과를 불러왔습니다", icon="⚡")
         st.session_state[f"_toast_shown_{cache_key}"] = True
 else:
-    suffix = os.path.splitext(uploaded_file.name)[1]
     tmp_path: str | None = None
     doc = None
 
     with st.status("분석 진행 중...", expanded=True) as status:
         # Step 1: Parse
-        status.update(label="1/2 — 파일 파싱 중...", state="running")
+        parse_status_label = "1/1 — 이미지 분석 중..." if is_image else "1/2 — 파일 파싱 중..."
+        status.update(label=parse_status_label, state="running")
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 tmp.write(file_bytes)
@@ -739,19 +1296,23 @@ else:
         st.write(f"파싱 완료 — {doc.block_count}개 블록 추출")
 
         # Step 2: Generate note
-        status.update(label="2/2 — 학습 노트 생성 중...", state="running")
-        try:
-            result = generate_note(doc, model=llm_model)
-        except Exception as exc:
-            st.error(f"노트 생성 실패: {exc}")
-            st.stop()
+        if not is_image:
+            status.update(label="2/2 — 학습 노트 생성 중...", state="running")
+            try:
+                result = generate_note(doc, model=llm_model)
+            except Exception as exc:
+                st.error(f"노트 생성 실패: {exc}")
+                st.stop()
 
-        st.session_state.setdefault("_pipeline_steps", {})["note"] = True
+            st.session_state.setdefault("_pipeline_steps", {})["note"] = True
+        else:
+            result = {}
         status.update(label="분석 완료!", state="complete", expanded=False)
 
     # Cache
     st.session_state[doc_cache_key] = doc
     st.session_state[cache_key] = result
+    st.session_state[f"is_image_{cache_key}"] = is_image
 
 # ===================================================================
 # RAG INDEXING — run once per document (session-cached)
@@ -812,37 +1373,52 @@ if active_tab == "📝 학습 노트":
     read_time = result.get("estimated_read_time_min")
     errors = result.get("errors") or []
 
-    if errors:
-        for err in errors:
-            st.warning(f"노트 생성 경고: {err}")
+    if not is_image:
+        # Title
+        st.markdown(f"### {title}")
 
-    # Title
-    st.markdown(f"### {title}")
+        # Meta badges
+        meta_html = ""
+        if difficulty:
+            meta_html += f'<span class="meta-badge">난이도: {difficulty}</span>'
+        if read_time:
+            meta_html += f'<span class="meta-badge">읽기 시간: {read_time}분</span>'
+        if meta_html:
+            st.markdown(meta_html, unsafe_allow_html=True)
 
-    # Meta badges
-    meta_html = ""
-    if difficulty:
-        meta_html += f'<span class="meta-badge">난이도: {difficulty}</span>'
-    if read_time:
-        meta_html += f'<span class="meta-badge">읽기 시간: {read_time}분</span>'
-    if meta_html:
-        st.markdown(meta_html, unsafe_allow_html=True)
+        # Summary card
+        if summary:
+            st.markdown(f'<div class="summary-card">{summary}</div>', unsafe_allow_html=True)
 
-    # Summary card
-    if summary:
-        st.markdown(f'<div class="summary-card">{summary}</div>', unsafe_allow_html=True)
+        # Key concepts as tags
+        if key_concepts:
+            st.markdown("**핵심 개념**")
+            st.markdown(_render_concept_tags(key_concepts), unsafe_allow_html=True)
 
-    # Key concepts as tags
-    if key_concepts:
-        st.markdown("**핵심 개념**")
-        st.markdown(_render_concept_tags(key_concepts), unsafe_allow_html=True)
+    col_content, col_chat = st.columns([1.12, 1], gap="large")
 
-    # ── Two-column layout: Note (left) | Q&A Chat (right) ────────────
-    col_note, col_chat = st.columns([3, 2])
-
-    # ── Left column: Note content + edit + download ──────────────────
-    with col_note:
-        if note_markdown:
+    with col_content:
+        if is_image:
+            preview_controls, preview_action = st.columns([3, 1])
+            with preview_controls:
+                zoom_percent = st.slider(
+                    "이미지 확대",
+                    min_value=100,
+                    max_value=300,
+                    value=160,
+                    step=10,
+                    key=f"image_zoom_{cache_key}",
+                    help="작은 글씨가 있는 이미지라면 확대 후 스크롤해서 확인하세요.",
+                )
+            with preview_action:
+                st.caption("")
+                if st.button("전체화면 보기", use_container_width=True, key=f"open_image_lightbox_{cache_key}"):
+                    _show_image_lightbox(uploaded_file.name, file_bytes, suffix, cache_key)
+            st.markdown(
+                _render_image_preview_card(uploaded_file.name, file_bytes, suffix, zoom_percent),
+                unsafe_allow_html=True,
+            )
+        elif note_markdown:
             raw_md = _normalize_note_markdown(note_markdown)
             file_stem = Path(doc.source).stem
 
@@ -864,7 +1440,6 @@ if active_tab == "📝 학습 노트":
                 st.markdown(_render_note_html(raw_md), unsafe_allow_html=True)
                 download_md = raw_md
 
-            # Download button
             full_md = f"# {title}\n\n{download_md}"
             st.download_button(
                 label="📥 마크다운 다운로드",
@@ -875,59 +1450,5 @@ if active_tab == "📝 학습 노트":
         else:
             st.info("노트 내용이 없습니다.")
 
-    # ── Right column: Q&A Chat ───────────────────────────────────────
     with col_chat:
-        st.markdown("#### 💬 Q&A")
-        st.caption(f"문서에 대해 질문하세요 · LLM: `{llm_model}`")
-
-        # Initialize chat history
-        if "chat_messages" not in st.session_state:
-            st.session_state["chat_messages"] = []
-
-        # Scrollable chat area
-        chat_container = st.container(height=420)
-        with chat_container:
-            for msg in st.session_state["chat_messages"]:
-                with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
-
-            # Process pending query — runs after user message is already rendered
-            if _pending := st.session_state.pop("_pending_chat", None):
-                with st.chat_message("assistant"):
-                    with st.spinner("생각 중..."):
-                        try:
-                            _chat_result = rag_query(_pending, model=llm_model)
-                            _reply = _chat_result.answer
-                            st.session_state["_chat_last_sources"] = _chat_result.source_blocks
-                        except Exception as _exc:
-                            _reply = f"오류가 발생했습니다: {_exc}"
-                            st.session_state["_chat_last_sources"] = []
-                st.session_state["chat_messages"].append({"role": "assistant", "content": _reply})
-                st.rerun()
-
-        # Chat input — just append user message and rerun immediately
-        if user_input := st.chat_input("질문을 입력하세요"):
-            st.session_state["chat_messages"].append({"role": "user", "content": user_input})
-            st.session_state["_pending_chat"] = user_input
-            st.rerun()
-
-        # Source block expanders from last answer
-        _chat_sources = st.session_state.get("_chat_last_sources", [])
-        if _chat_sources:
-            st.markdown("---")
-            st.caption("**참조 블록**")
-            _seen_exp: set[str] = set()
-            for _src in _chat_sources:
-                _loc = (
-                    f"page {_src.page}" if _src.page is not None
-                    else (f"cell {_src.cell_index}" if _src.cell_index is not None else "")
-                )
-                _dedup_key = f"{_src.source}:{_loc}"
-                if _dedup_key in _seen_exp:
-                    continue
-                _seen_exp.add(_dedup_key)
-                _exp_label = f"📄 {_src.source}" + (f" · {_loc}" if _loc else "") + f"  `{_src.block_type}`"
-                with st.expander(_exp_label, expanded=False):
-                    st.caption(f"block_order: {_src.block_order}")
-                    st.text(_src.content_preview)
-
+        _render_qa_panel(doc, result, llm_model, is_image=is_image, chat_height=560 if is_image else 520)
