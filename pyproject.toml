@@ -21,6 +21,7 @@ dependencies = [
     "markdown>=3.7",
     "langfuse>=4.0.0",
     "pypdf>=6.8.0",
+    "deepeval>=3.8.9",
 ]
 
 [dependency-groups]
