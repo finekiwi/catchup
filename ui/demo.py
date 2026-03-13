@@ -597,6 +597,12 @@ a:hover { color: #A8432C !important; }
     display: flex !important;
     flex-direction: column !important;
 }
+/* Note panel: warm background fills full column height */
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {
+    background: #FDF8F3;
+    border-radius: 14px;
+    padding: 0 0.5rem;
+}
 
 /* ── Chat UI — Claude.ai inspired ──────────────────────────────────────── */
 /* Hide default avatars */
