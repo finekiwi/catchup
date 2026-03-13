@@ -247,6 +247,7 @@ def test_query_filters_to_current_document(monkeypatch):
     content = "Prompt injection is a representative jailbreak risk."
     mock_collection = MagicMock()
     mock_collection.count.return_value = 5
+    mock_collection.get.return_value = {"ids": ["doc-current:0", "doc-current:1", "doc-current:2"]}
     mock_collection.query.return_value = {
         "ids": [["doc-current:0"]],
         "documents": [[content]],

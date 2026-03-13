@@ -689,7 +689,7 @@ def _dict_to_markdown(data: dict) -> str:
     # Case 3 & 4: heading keys / arbitrary dict
     lines = []
     for key, value in data.items():
-        if str(key).strip().lower() in internal_keys:
+        if str(key).strip().lower() in _NOTE_INTERNAL_KEYS:
             continue
         if key.startswith("#"):
             lines.append(key)
