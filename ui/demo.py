@@ -589,16 +589,14 @@ a:hover { color: #A8432C !important; }
     border-left-color: #C4553A !important;
 }
 
-/* ── Panel height sync (min-height only — page scroll untouched) ────────── */
-/* Target only the note/chat column pair via marker sibling */
-#note-chat-cols-marker ~ div [data-testid="stHorizontalBlock"]:first-of-type > [data-testid="stColumn"],
-#note-chat-cols-marker + div > [data-testid="stColumn"] {
-    min-height: calc(100dvh - 300px);
+/* ── Panel height sync ───────────────────────────────────────────────────── */
+/* Stretch both columns to match the taller one (no overflow:hidden) */
+[data-testid="stHorizontalBlock"] {
+    align-items: stretch;
 }
-/* Note panel background fills to column height */
-#note-chat-cols-marker ~ div [data-testid="stHorizontalBlock"]:first-of-type > [data-testid="stColumn"]:first-child {
-    background: #FDF8F3;
-    border-radius: 14px;
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+    display: flex;
+    flex-direction: column;
 }
 /* Chat input sticky at panel bottom */
 [data-testid="stChatInput"] {
@@ -1687,7 +1685,6 @@ if active_tab == "📝 학습 노트":
             st.markdown("**핵심 개념**")
             st.markdown(_render_concept_tags(key_concepts), unsafe_allow_html=True)
 
-    st.markdown('<div id="note-chat-cols-marker"></div>', unsafe_allow_html=True)
     col_content, col_chat = st.columns([1.12, 1], gap="large")
 
     with col_content:
