@@ -1155,17 +1155,12 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int) ->
     st.markdown("#### ✏️ 노트 수정")
     st.caption(f"섹션을 선택하고 수정 지시를 입력하세요 · LLM: `{llm_model}`")
 
-    # Section selectbox — auto-updated when user clicks inline ✏️
-    default_heading = st.session_state.get("selected_edit_section")
-    default_idx = (
-        section_headings.index(default_heading)
-        if default_heading in section_headings
-        else 0
-    )
+    # Section selectbox — auto-updated when user clicks inline ✏️.
+    # We set st.session_state["edit_section_selectbox"] directly in the ✏️ handler
+    # because Streamlit ignores index= when the key is already in session state.
     selected = st.selectbox(
         "수정할 섹션",
         options=section_headings,
-        index=default_idx,
         key="edit_section_selectbox",
     )
     st.session_state["selected_edit_section"] = selected
@@ -1707,6 +1702,11 @@ if active_tab == "📝 학습 노트":
                                     help=f"'{_sec_heading}' 섹션 수정",
                                 ):
                                     st.session_state["selected_edit_section"] = (
+                                        _sec_heading
+                                    )
+                                    # Directly set selectbox key — Streamlit ignores
+                                    # index= when the key already exists in session state
+                                    st.session_state["edit_section_selectbox"] = (
                                         _sec_heading
                                     )
                                     st.session_state["active_right_panel"] = (
