@@ -744,15 +744,17 @@ def _regex_extract_sections(text: str) -> str:
 
 
 def _downshift_headings(md_text: str) -> str:
-    """Shift markdown headings down by 2 levels (# -> ###, ## -> ####)."""
-
-    def _shift(m: re.Match) -> str:
-        hashes = m.group(1)
-        rest = m.group(2)
-        new_level = min(len(hashes) + 2, 6)
-        return "#" * new_level + rest
-
-    return re.sub(r"^(#{1,6})([ \t])", _shift, md_text, flags=re.MULTILINE)
+    """Shift markdown headings down by 2 levels, skipping content inside code fences."""
+    _HEADING_RE = re.compile(r"^(#{1,4})\s+(.+)")
+    in_code_fence = False
+    result_lines = []
+    for line in md_text.splitlines():
+        if line.strip().startswith("```"):
+            in_code_fence = not in_code_fence
+        if not in_code_fence:
+            line = _HEADING_RE.sub(lambda m: "#" * min(len(m.group(1)) + 2, 6) + " " + m.group(2), line)
+        result_lines.append(line)
+    return "\n".join(result_lines)
 
 
 def _render_note_html(note_md: str) -> str:
@@ -1688,31 +1690,21 @@ if active_tab == "📝 학습 노트":
                     # Per-section rendering with ✏️ button per ## heading
                     for _sec_heading, _sec_body in sections:
                         if _sec_heading:
-                            sec_content_col, sec_btn_col = st.columns([9, 1])
-                            with sec_content_col:
-                                st.markdown(
-                                    _render_note_html(f"{_sec_heading}\n\n{_sec_body}"),
-                                    unsafe_allow_html=True,
-                                )
-                            with sec_btn_col:
-                                st.caption("")
-                                if st.button(
-                                    "✏️",
-                                    key=f"edit_sec_{_sec_heading}",
-                                    help=f"'{_sec_heading}' 섹션 수정",
-                                ):
-                                    st.session_state["selected_edit_section"] = (
-                                        _sec_heading
-                                    )
-                                    # Directly set selectbox key — Streamlit ignores
-                                    # index= when the key already exists in session state
-                                    st.session_state["edit_section_selectbox"] = (
-                                        _sec_heading
-                                    )
-                                    st.session_state["active_right_panel"] = (
-                                        "✏️ 노트 수정"
-                                    )
-                                    st.rerun()
+                            st.markdown(
+                                _render_note_html(f"{_sec_heading}\n\n{_sec_body}"),
+                                unsafe_allow_html=True,
+                            )
+                            if st.button(
+                                "✏️ 이 섹션 수정",
+                                key=f"edit_sec_{_sec_heading}",
+                                help=f"'{_sec_heading}' 섹션 수정",
+                            ):
+                                st.session_state["selected_edit_section"] = _sec_heading
+                                # Directly set selectbox key — Streamlit ignores
+                                # index= when the key already exists in session state
+                                st.session_state["edit_section_selectbox"] = _sec_heading
+                                st.session_state["active_right_panel"] = "✏️ 노트 수정"
+                                st.rerun()
                         elif _sec_body:
                             # Preamble (before first ## heading)
                             st.markdown(

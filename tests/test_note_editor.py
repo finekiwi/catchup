@@ -81,6 +81,22 @@ def test_split_sections_single_section():
     assert "Some content." in sections[0][1]
 
 
+def test_split_sections_code_fence_with_heading():
+    """## inside code fence must NOT create a new section."""
+    md = "## 코드 분석\n\n```python\n## utility function\ndef foo(): pass\n```\n"
+    sections = _split_sections(md)
+    assert len(sections) == 1
+    assert sections[0][0] == "## 코드 분석"
+    assert "## utility function" in sections[0][1]
+
+
+def test_split_sections_unclosed_fence():
+    """Unclosed code fence: remaining content stays in same section."""
+    md = "## 섹션A\n\n```python\n## 헤딩처럼생긴주석\nsome code\n"
+    sections = _split_sections(md)
+    assert len(sections) == 1
+
+
 # ---------------------------------------------------------------------------
 # _merge_sections
 # ---------------------------------------------------------------------------

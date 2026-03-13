@@ -138,9 +138,12 @@ def _split_sections(markdown: str) -> list[tuple[str, str]]:
     sections: list[tuple[str, str]] = []
     current_heading = ""
     current_body_lines: list[str] = []
+    in_code_fence = False
 
     for line in lines:
-        if line.startswith("## ") and not line.startswith("### "):
+        if line.strip().startswith("```"):
+            in_code_fence = not in_code_fence
+        if not in_code_fence and line.startswith("## ") and not line.startswith("### "):
             if current_heading or current_body_lines:
                 sections.append(
                     (current_heading, "\n".join(current_body_lines).strip())
