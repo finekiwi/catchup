@@ -589,20 +589,6 @@ a:hover { color: #A8432C !important; }
     border-left-color: #C4553A !important;
 }
 
-/* ── Panel layout: independent scroll ──────────────────────────────────── */
-/* Suppress page-level scroll so panels scroll independently */
-[data-testid="stMainBlockContainer"] {
-    overflow: hidden !important;
-    padding-bottom: 0.5rem !important;
-}
-section[data-testid="stMain"] {
-    overflow: hidden !important;
-}
-/* Both columns stretch to equal height */
-[data-testid="stHorizontalBlock"] {
-    align-items: stretch;
-}
-
 /* ── Chat UI — Claude.ai inspired ──────────────────────────────────────── */
 /* Hide default avatars */
 [data-testid="chatAvatarIcon-user"],
