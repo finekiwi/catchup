@@ -106,6 +106,18 @@ _GLOBAL_CSS = """\
     max-width: 860px;
     box-shadow: 0 1px 4px rgba(61,46,36,0.06);
 }
+/* Edit mode: sections flow as one document, no per-section card */
+.note-section {
+    background: #FDF8F3;
+    padding: 0.5em 2.5em;
+    max-width: 860px;
+}
+hr.note-sep {
+    border: none;
+    border-top: 1px solid #EDE3D9;
+    margin: 0.2em 2.5em;
+    max-width: 860px;
+}
 .note-content {
     font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
     line-height: 1.8;
@@ -576,6 +588,35 @@ a:hover { color: #A8432C !important; }
 [data-testid="stToast"] {
     border-left-color: #C4553A !important;
 }
+
+/* ── Chat UI — Claude.ai inspired ──────────────────────────────────────── */
+/* Hide default avatars */
+[data-testid="chatAvatarIcon-user"],
+[data-testid="chatAvatarIcon-assistant"] { display: none !important; }
+
+/* User message: right-aligned bubble */
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {
+    flex-direction: row-reverse;
+    gap: 0;
+}
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) [data-testid="stChatMessageContent"] {
+    background: #EAD5C8;
+    border-radius: 18px 18px 4px 18px;
+    padding: 0.55em 1em;
+    max-width: 78%;
+    margin-left: auto;
+    color: #3D2E24;
+    font-size: 0.9rem;
+}
+
+/* Assistant message: no bubble, clean text */
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) [data-testid="stChatMessageContent"] {
+    background: transparent;
+    border: none;
+    padding: 0.3em 0;
+    font-size: 0.9rem;
+    color: #3D2E24;
+}
 </style>
 """
 
@@ -762,6 +803,13 @@ def _render_note_html(note_md: str) -> str:
     clean_md = _downshift_headings(_normalize_note_markdown(note_md))
     html_body = md_lib.markdown(clean_md, extensions=["fenced_code", "tables", "nl2br"])
     return f'<div class="note-wrapper"><div class="note-content">\n{html_body}\n</div></div>'
+
+
+def _render_note_section_html(note_md: str) -> str:
+    """Render a single section without card border (used in edit mode)."""
+    clean_md = _downshift_headings(_normalize_note_markdown(note_md))
+    html_body = md_lib.markdown(clean_md, extensions=["fenced_code", "tables", "nl2br"])
+    return f'<div class="note-section"><div class="note-content">\n{html_body}\n</div></div>'
 
 
 def _image_data_uri(image_bytes: bytes, suffix: str) -> str:
@@ -1673,45 +1721,35 @@ if active_tab == "📝 학습 노트":
                     st.rerun()
 
             if edit_mode:
-                edited_md = st.text_area(
-                    "마크다운 편집",
-                    value=raw_md,
-                    height=500,
-                    key="note_editor",
-                    label_visibility="collapsed",
-                )
-                st.markdown("**미리보기**")
-                st.markdown(_render_note_html(edited_md), unsafe_allow_html=True)
-                download_md = edited_md
-            else:
-                # Render sections with inline ✏️ buttons
+                # Section-level edit mode: flow as one document, ✏️ per section
                 sections = _split_note_sections(raw_md)
-                if len(sections) > 1:
-                    # Per-section rendering with ✏️ button per ## heading
-                    for _sec_heading, _sec_body in sections:
-                        if _sec_heading:
-                            st.markdown(
-                                _render_note_html(f"{_sec_heading}\n\n{_sec_body}"),
-                                unsafe_allow_html=True,
-                            )
-                            if st.button(
-                                "✏️ 이 섹션 수정",
-                                key=f"edit_sec_{_sec_heading}",
-                                help=f"'{_sec_heading}' 섹션 수정",
-                            ):
-                                st.session_state["selected_edit_section"] = _sec_heading
-                                # Directly set selectbox key — Streamlit ignores
-                                # index= when the key already exists in session state
-                                st.session_state["edit_section_selectbox"] = _sec_heading
-                                st.session_state["active_right_panel"] = "✏️ 노트 수정"
-                                st.rerun()
-                        elif _sec_body:
-                            # Preamble (before first ## heading)
-                            st.markdown(
-                                _render_note_html(_sec_body), unsafe_allow_html=True
-                            )
-                else:
-                    st.markdown(_render_note_html(raw_md), unsafe_allow_html=True)
+                first_rendered = True
+                for _sec_heading, _sec_body in sections:
+                    content_md = (
+                        f"{_sec_heading}\n\n{_sec_body}".strip() if _sec_heading else _sec_body
+                    )
+                    if not content_md:
+                        continue
+                    if not first_rendered:
+                        st.markdown('<hr class="note-sep">', unsafe_allow_html=True)
+                    st.markdown(_render_note_section_html(content_md), unsafe_allow_html=True)
+                    if _sec_heading:
+                        if st.button(
+                            "✏️",
+                            key=f"edit_sec_{_sec_heading}",
+                            help=f"'{_sec_heading}' 섹션 수정",
+                        ):
+                            st.session_state["selected_edit_section"] = _sec_heading
+                            # Directly set selectbox key — Streamlit ignores
+                            # index= when the key already exists in session state
+                            st.session_state["edit_section_selectbox"] = _sec_heading
+                            st.session_state["active_right_panel"] = "✏️ 노트 수정"
+                            st.rerun()
+                    first_rendered = False
+                download_md = raw_md
+            else:
+                # Pure read view: single note block, no edit controls
+                st.markdown(_render_note_html(raw_md), unsafe_allow_html=True)
                 download_md = raw_md
 
             full_md = f"# {title}\n\n{download_md}"
@@ -1727,7 +1765,7 @@ if active_tab == "📝 학습 노트":
     with col_chat:
         if is_image:
             # Image mode: Q&A only, no note editor
-            _render_qa_panel(doc, result, llm_model, is_image=True, chat_height=560)
+            _render_qa_panel(doc, result, llm_model, is_image=True, chat_height=640)
         else:
             # Non-image mode: Q&A tab + Note editor tab
             right_panel = st.radio(
@@ -1739,7 +1777,7 @@ if active_tab == "📝 학습 노트":
             )
             if right_panel == "💬 Q&A":
                 _render_qa_panel(
-                    doc, result, llm_model, is_image=False, chat_height=520
+                    doc, result, llm_model, is_image=False, chat_height=600
                 )
             else:
                 _render_note_editor_panel(result, llm_model, chat_height=420)
