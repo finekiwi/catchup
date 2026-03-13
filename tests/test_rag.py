@@ -233,3 +233,34 @@ def test_query_unsupported_model_raises_value_error():
     """query() with an unregistered model must raise ValueError, not silently fall through to OpenAI."""
     with pytest.raises(ValueError, match="Unsupported model"):
         query("any question", model="gpt-99-nonexistent")
+
+
+def test_query_filters_to_current_document(monkeypatch):
+    """When document_id is provided, retrieval must be restricted to that document."""
+    meta = {
+        "document_id": "doc-current",
+        "source": "guardrails.pdf",
+        "block_order": 0,
+        "block_type": "text",
+        "page": 3,
+    }
+    content = "Prompt injection is a representative jailbreak risk."
+    mock_collection = MagicMock()
+    mock_collection.count.return_value = 5
+    mock_collection.get.return_value = {"ids": ["doc-current:0", "doc-current:1", "doc-current:2"]}
+    mock_collection.query.return_value = {
+        "ids": [["doc-current:0"]],
+        "documents": [[content]],
+        "metadatas": [[meta]],
+        "distances": [[0.01]],
+    }
+    monkeypatch.setattr(qa_module, "_get_rag_collection", lambda: mock_collection)
+    monkeypatch.setattr(qa_module, "_expand_with_adjacent_blocks", lambda *args, **kwargs: [(meta, content)])
+    _patch_embedding(monkeypatch)
+    _patch_llm(monkeypatch, answer="Prompt injection is covered [guardrails.pdf, page 3].")
+    _patch_log(monkeypatch)
+
+    result = query("prompt injection이 뭐야?", document_id="doc-current")
+
+    assert result.source_blocks[0].document_id == "doc-current"
+    assert mock_collection.query.call_args.kwargs["where"] == {"document_id": {"$eq": "doc-current"}}

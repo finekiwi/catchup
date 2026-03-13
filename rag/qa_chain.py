@@ -648,13 +648,19 @@ def query_chunked(question: str, top_k: int = 5, model: str = "gpt-4o-mini") -> 
         )
 
 
-def query(question: str, top_k: int = 5, model: str = "gpt-4o-mini") -> QAResult:
+def query(
+    question: str,
+    top_k: int = 5,
+    model: str = "gpt-4o-mini",
+    document_id: str | None = None,
+) -> QAResult:
     """Answer a question using RAG: embed question → search ChromaDB → generate answer with LLM.
 
     Args:
         question: Natural language question.
         top_k: Number of context blocks to retrieve.
         model: LLM model identifier for answer generation. Must be in SUPPORTED_MODELS.
+        document_id: Optional document id to restrict retrieval to a single indexed document.
 
     Returns:
         QAResult with answer, source_blocks, model name, latency, and token usage.
@@ -717,11 +723,20 @@ def query(question: str, top_k: int = 5, model: str = "gpt-4o-mini") -> QAResult
 
     # Search ChromaDB
     try:
-        n_results = min(top_k, collection.count())
+        if document_id is not None:
+            filtered_count = len(collection.get(where={"document_id": {"$eq": document_id}})["ids"])
+            n_results = min(top_k, filtered_count)
+        else:
+            n_results = min(top_k, collection.count())
+        query_kwargs: dict[str, Any] = {
+            "query_embeddings": [question_vector],
+            "n_results": n_results,
+            "include": ["documents", "metadatas", "distances"],
+        }
+        if document_id is not None:
+            query_kwargs["where"] = {"document_id": {"$eq": document_id}}
         raw_results = collection.query(
-            query_embeddings=[question_vector],
-            n_results=n_results,
-            include=["documents", "metadatas", "distances"],
+            **query_kwargs,
         )
     except Exception:
         LOGGER.exception("ChromaDB search failed")

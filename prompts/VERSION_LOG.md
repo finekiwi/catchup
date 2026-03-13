@@ -45,6 +45,9 @@
 | v1.2.0 | 2026-03-11 | Distinguish note modification requests from pure emotional expressions. Note edit requests now redirect user to ✏️ edit mode toggle instead of being misclassified as emotional queries. | Prevents misclassification of functional requests containing emotional words |
 | v1.2.1 | 2026-03-11 | Fix note modification response: replace English instruction with explicit Korean template to prevent LLM mistranslation ("가능합니다" → "지원하지 않습니다"). | Fixes response polarity bug in note modification guidance |
 | v1.2.2 | 2026-03-11 | Add English response template alongside Korean for note modification guidance to prevent confusion when user writes in English. | Covers multilingual users |
+| v1.3.0 | 2026-03-13 | Tighten pure-emotion fallback: ask which part of the current document is difficult, and only mention topics explicitly present in retrieved context. | Reduces unrelated topic suggestions when retrieval context is weak or off-target |
+| v1.3.1 | 2026-03-13 | Add code-identifier handling: when a relevant code/text block is retrieved, explain the symbol's role from surrounding context instead of falling back to "not found" over minor punctuation/exact-match differences. | Improves answers for code screenshot questions such as functions/classes referenced with quotes or missing punctuation |
+| v1.3.2 | 2026-03-13 | Narrow note-modification detection to explicit edit requests only; explanation/summary/simplification requests must remain normal Q&A. | Prevents "설명해줘" style questions from being misrouted to the note-editing fallback |
 
 ## Known Limitations & v2 Roadmap (recorded 2026-03-05, CU-07 demo)
 
