@@ -590,21 +590,12 @@ a:hover { color: #A8432C !important; }
 }
 
 /* ── Panel height sync ───────────────────────────────────────────────────── */
-/* Stretch both columns to match the taller one (no overflow:hidden) */
 [data-testid="stHorizontalBlock"] {
-    align-items: stretch;
+    align-items: stretch !important;
 }
 [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
-    display: flex;
-    flex-direction: column;
-}
-/* Chat input sticky at panel bottom */
-[data-testid="stChatInput"] {
-    position: sticky;
-    bottom: 0;
-    z-index: 10;
-    background: white;
-    padding-top: 0.4rem;
+    display: flex !important;
+    flex-direction: column !important;
 }
 
 /* ── Chat UI — Claude.ai inspired ──────────────────────────────────────── */
