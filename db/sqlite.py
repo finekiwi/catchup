@@ -38,6 +38,20 @@ def _initialize_schema(connection: sqlite3.Connection) -> None:
         )
         """
     )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS notes (
+            document_id TEXT NOT NULL,
+            file_hash TEXT NOT NULL DEFAULT '',
+            vlm_model TEXT NOT NULL DEFAULT '',
+            llm_model TEXT NOT NULL DEFAULT '',
+            result_json TEXT NOT NULL,
+            is_image INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (document_id, vlm_model, llm_model)
+        )
+        """
+    )
     connection.commit()
 
 
@@ -164,8 +178,12 @@ def update_status(doc_id: str, status: ProcessingStatus) -> None:
         connection.close()
 
 
-def list_documents() -> list[Document]:
-    """List all saved documents."""
+def list_documents(limit: int = 20) -> list[Document]:
+    """List saved documents, ordered by most recent first.
+
+    Args:
+        limit: Maximum number of documents to return.
+    """
     connection = _connect()
     if connection is None:
         return []
@@ -176,7 +194,9 @@ def list_documents() -> list[Document]:
             SELECT id, source, format, status, created_at, metadata
             FROM documents
             ORDER BY created_at DESC
-            """
+            LIMIT ?
+            """,
+            (limit,),
         ).fetchall()
     except sqlite3.Error:
         LOGGER.exception("Failed to list documents")
@@ -190,3 +210,137 @@ def list_documents() -> list[Document]:
         if document is not None:
             documents.append(document)
     return documents
+
+
+# ---------------------------------------------------------------------------
+# Notes CRUD
+# ---------------------------------------------------------------------------
+
+def save_note(
+    document_id: str,
+    file_hash: str,
+    result: dict,
+    vlm_model: str,
+    llm_model: str,
+    is_image: bool = False,
+) -> None:
+    """Upsert a note (analysis result) for a document + model combination."""
+    connection = _connect()
+    if connection is None:
+        return
+
+    from datetime import datetime, timezone
+
+    result_json = json.dumps(result, ensure_ascii=False)
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        connection.execute(
+            """
+            INSERT INTO notes (document_id, file_hash, vlm_model, llm_model, result_json, is_image, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(document_id, vlm_model, llm_model) DO UPDATE SET
+                file_hash = excluded.file_hash,
+                result_json = excluded.result_json,
+                is_image = excluded.is_image,
+                updated_at = excluded.updated_at
+            """,
+            (document_id, file_hash, vlm_model, llm_model, result_json, int(is_image), now),
+        )
+        connection.commit()
+    except sqlite3.Error:
+        LOGGER.exception("Failed to save note for document_id=%s", document_id)
+    finally:
+        connection.close()
+
+
+def get_note(document_id: str, vlm_model: str, llm_model: str) -> Optional[dict]:
+    """Retrieve a specific note by document + model combination.
+
+    Returns a dict with keys: result, file_hash, vlm_model, llm_model, is_image, updated_at.
+    """
+    connection = _connect()
+    if connection is None:
+        return None
+
+    try:
+        row = connection.execute(
+            """
+            SELECT result_json, file_hash, vlm_model, llm_model, is_image, updated_at
+            FROM notes
+            WHERE document_id = ? AND vlm_model = ? AND llm_model = ?
+            """,
+            (document_id, vlm_model, llm_model),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "result": json.loads(row["result_json"]),
+            "file_hash": row["file_hash"],
+            "vlm_model": row["vlm_model"],
+            "llm_model": row["llm_model"],
+            "is_image": bool(row["is_image"]),
+            "updated_at": row["updated_at"],
+        }
+    except (sqlite3.Error, json.JSONDecodeError):
+        LOGGER.exception("Failed to get note for document_id=%s", document_id)
+        return None
+    finally:
+        connection.close()
+
+
+def list_notes_for_document(document_id: str) -> list[dict]:
+    """List all notes for a given document, newest first."""
+    connection = _connect()
+    if connection is None:
+        return []
+
+    try:
+        rows = connection.execute(
+            """
+            SELECT result_json, file_hash, vlm_model, llm_model, is_image, updated_at
+            FROM notes
+            WHERE document_id = ?
+            ORDER BY updated_at DESC
+            """,
+            (document_id,),
+        ).fetchall()
+        results = []
+        for row in rows:
+            try:
+                results.append({
+                    "result": json.loads(row["result_json"]),
+                    "file_hash": row["file_hash"],
+                    "vlm_model": row["vlm_model"],
+                    "llm_model": row["llm_model"],
+                    "is_image": bool(row["is_image"]),
+                    "updated_at": row["updated_at"],
+                })
+            except json.JSONDecodeError:
+                LOGGER.warning("Skipping note with invalid JSON for document_id=%s", document_id)
+        return results
+    except sqlite3.Error:
+        LOGGER.exception("Failed to list notes for document_id=%s", document_id)
+        return []
+    finally:
+        connection.close()
+
+
+def delete_note(document_id: str, vlm_model: str, llm_model: str) -> None:
+    """Delete a specific note by document + model combination."""
+    connection = _connect()
+    if connection is None:
+        return
+
+    try:
+        connection.execute(
+            """
+            DELETE FROM notes
+            WHERE document_id = ? AND vlm_model = ? AND llm_model = ?
+            """,
+            (document_id, vlm_model, llm_model),
+        )
+        connection.commit()
+    except sqlite3.Error:
+        LOGGER.exception("Failed to delete note for document_id=%s", document_id)
+    finally:
+        connection.close()

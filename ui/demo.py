@@ -36,6 +36,14 @@ from llm.note_generator import SUPPORTED_LLM_MODELS, generate_note  # noqa: E402
 from parsers.image_parser import parse_image  # noqa: E402
 from parsers.ipynb_parser import parse_ipynb  # noqa: E402
 from parsers.pdf_parser import parse_pdf  # noqa: E402
+from db.sqlite import (  # noqa: E402
+    get_document,
+    get_note,
+    list_documents,
+    list_notes_for_document,
+    save_document,
+    save_note,
+)
 from rag import index_document, query as rag_query  # noqa: E402
 from vlm.client import SUPPORTED_MODELS  # noqa: E402
 
@@ -1352,6 +1360,7 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
                 if len(undo_stack) > 10:
                     undo_stack.pop(0)
                 result["note_markdown"] = edited
+                st.session_state["_note_dirty"] = True
                 st.rerun()
         return
 
@@ -1455,6 +1464,7 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
                     result["note_markdown"] = st.session_state.pop(pending_md_key)
                     st.session_state.pop(pending_sec_key, None)
                     st.session_state.pop(pending_idx_key, None)
+                    st.session_state["_note_dirty"] = True
                     st.rerun()
             with col_cancel:
                 if st.button("❌ 취소", use_container_width=True):
@@ -1659,13 +1669,61 @@ with st.sidebar:
 
     st.markdown("---")
 
+    # ── Recent documents library ──────────────────────────────────────
+    _FORMAT_ICON = {"pdf": "📄", "ipynb": "📓", "image": "🖼️"}
+    _lib_docs = list_documents(limit=10)
+    if _lib_docs:
+        st.caption("📚 최근 문서")
+        for _ld in _lib_docs:
+            _icon = _FORMAT_ICON.get(_ld.format.value, "📄")
+            _date_str = _ld.created_at.strftime("%m/%d")
+            _label = f"{_icon} {_ld.source}  ({_date_str})"
+            if st.button(_label, key=f"lib_{_ld.id}", use_container_width=True):
+                st.session_state["_library_load"] = {"doc_id": _ld.id}
+                st.rerun()
+        st.markdown("---")
+
     if st.button("캐시 초기화", use_container_width=True):
         st.session_state.clear()
         st.rerun()
 
     st.caption("Built with Streamlit + OpenAI / Anthropic / Google")
 
-if uploaded_file is None:
+# ===================================================================
+# LIBRARY RESTORATION — load a previously saved document from sidebar
+# ===================================================================
+_lib_mode = st.session_state.get("_library_mode", False)
+
+if "_library_load" in st.session_state:
+    _lib_req = st.session_state.pop("_library_load")
+    _lib_doc_id = _lib_req["doc_id"]
+    # 1. Try matching current sidebar model selection
+    _note_row = get_note(_lib_doc_id, vlm_model, llm_model)
+    if _note_row is None:
+        # 2. Fallback: most recent note for this document
+        _all_notes = list_notes_for_document(_lib_doc_id)
+        _note_row = _all_notes[0] if _all_notes else None
+    _lib_doc = get_document(_lib_doc_id)
+
+    if _note_row and _lib_doc:
+        _fh = _note_row["file_hash"]
+        _used_vlm = _note_row["vlm_model"]
+        _used_llm = _note_row["llm_model"]
+        _ck = f"result_{_fh}_{_used_vlm}_{_used_llm}"
+        _dck = f"doc_{_fh}_{_used_vlm}"
+        st.session_state[_ck] = _note_row["result"]
+        st.session_state[_dck] = _lib_doc
+        st.session_state[f"is_image_{_ck}"] = _note_row["is_image"]
+        st.session_state[f"indexed_{_lib_doc.id}"] = True
+        st.session_state["_library_mode"] = True
+        st.session_state["_library_cache_key"] = _ck
+        st.session_state["_library_doc_cache_key"] = _dck
+        st.session_state["_library_used_vlm"] = _used_vlm
+        st.session_state["_library_used_llm"] = _used_llm
+        st.session_state["_library_file_hash"] = _fh
+        _lib_mode = True
+
+if uploaded_file is None and not _lib_mode:
     # Landing state
     st.markdown("#### 지원 형식")
     c1, c2, c3 = st.columns(3)
@@ -1677,105 +1735,134 @@ if uploaded_file is None:
         st.markdown("🖼️ **이미지**\nVLM 기반 분류 + 분석")
     st.stop()
 
-# Update pipeline
-st.session_state.setdefault("_pipeline_steps", {})["upload"] = True
-
-st.markdown(f"**{uploaded_file.name}** ({uploaded_file.size:,} bytes)")
-
-# ===================================================================
-# ANALYSIS PIPELINE
-# ===================================================================
-file_bytes = uploaded_file.read()
-file_hash = hashlib.sha256(file_bytes).hexdigest()
-cache_key = f"result_{file_hash}_{vlm_model}_{llm_model}"
-doc_cache_key = f"doc_{file_hash}_{vlm_model}"
-
-if not st.button("분석 시작", type="primary", use_container_width=False):
-    if cache_key not in st.session_state:
-        st.stop()
-
-if cache_key in st.session_state:
-    doc = st.session_state[doc_cache_key]
-    result = st.session_state[cache_key]
+if _lib_mode:
+    # Library restoration: load from session_state cache
+    cache_key = st.session_state["_library_cache_key"]
+    doc_cache_key = st.session_state["_library_doc_cache_key"]
+    doc: Document = st.session_state[doc_cache_key]
+    result: dict = st.session_state[cache_key]
     is_image = st.session_state.get(f"is_image_{cache_key}", False)
-    if not st.session_state.get(f"_toast_shown_{cache_key}"):
-        st.toast("캐시된 결과를 불러왔습니다", icon="⚡")
-        st.session_state[f"_toast_shown_{cache_key}"] = True
+    file_hash = st.session_state.get("_library_file_hash", "")
+    _used_vlm = st.session_state.get("_library_used_vlm", vlm_model)
+    _used_llm = st.session_state.get("_library_used_llm", llm_model)
+    st.info(f"📚 라이브러리에서 로드됨 — {doc.source} (모델: {_used_vlm} / {_used_llm})")
+    if uploaded_file is not None:
+        # User uploaded a new file — exit library mode and proceed normally
+        st.session_state.pop("_library_mode", None)
+        st.session_state.pop("_library_cache_key", None)
+        st.session_state.pop("_library_doc_cache_key", None)
+        st.session_state.pop("_library_used_vlm", None)
+        st.session_state.pop("_library_used_llm", None)
+        st.session_state.pop("_library_file_hash", None)
+        st.rerun()
 else:
-    tmp_path: str | None = None
-    doc = None
+    # Normal upload flow
+    st.session_state.setdefault("_pipeline_steps", {})["upload"] = True
+    st.markdown(f"**{uploaded_file.name}** ({uploaded_file.size:,} bytes)")
 
-    with st.status("분석 진행 중...", expanded=True) as status:
-        # Step 1: Parse
-        parse_status_label = (
-            "1/1 — 이미지 분석 중..." if is_image else "1/2 — 파일 파싱 중..."
-        )
-        status.update(label=parse_status_label, state="running")
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                tmp.write(file_bytes)
-                tmp_path = tmp.name
+# ===================================================================
+# ANALYSIS PIPELINE (skipped in library mode)
+# ===================================================================
+if not _lib_mode:
+    file_bytes = uploaded_file.read()
+    file_hash = hashlib.sha256(file_bytes).hexdigest()
+    cache_key = f"result_{file_hash}_{vlm_model}_{llm_model}"
+    doc_cache_key = f"doc_{file_hash}_{vlm_model}"
 
-            if suffix.lower() == ".pdf":
-                doc = parse_pdf(tmp_path)
-            elif suffix.lower() == ".ipynb":
-                doc = parse_ipynb(tmp_path)
-            else:
-                try:
-                    doc = parse_image(tmp_path, model=vlm_model)
-                except Exception as exc:
-                    if any(kw in str(exc).lower() for kw in ("api", "key", "auth")):
-                        st.error("API 키를 .env에 설정해주세요")
-                    else:
-                        st.error(f"이미지 파싱 실패: {exc}")
-                    st.stop()
-        finally:
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-
-        if doc is None:
-            st.error("파일 처리 중 오류가 발생했습니다.")
+    if not st.button("분석 시작", type="primary", use_container_width=False):
+        if cache_key not in st.session_state:
             st.stop()
 
-        doc.source = uploaded_file.name
-        st.session_state.setdefault("_pipeline_steps", {})["parse"] = True
+    if cache_key in st.session_state:
+        doc = st.session_state[doc_cache_key]
+        result = st.session_state[cache_key]
+        is_image = st.session_state.get(f"is_image_{cache_key}", False)
+        if not st.session_state.get(f"_toast_shown_{cache_key}"):
+            st.toast("캐시된 결과를 불러왔습니다", icon="⚡")
+            st.session_state[f"_toast_shown_{cache_key}"] = True
+    else:
+        tmp_path: str | None = None
+        doc = None
 
-        parse_failed = not doc.blocks or "parse_failed" in doc.metadata.tags
-        if parse_failed:
-            status.update(label="파싱 실패", state="error")
-            st.stop()
-
-        st.write(f"파싱 완료 — {doc.block_count}개 블록 추출")
-
-        # Step 2: Generate note
-        if not is_image:
-            status.update(label="2/2 — 학습 노트 생성 중...", state="running")
+        with st.status("분석 진행 중...", expanded=True) as status:
+            # Step 1: Parse
+            parse_status_label = (
+                "1/1 — 이미지 분석 중..." if is_image else "1/2 — 파일 파싱 중..."
+            )
+            status.update(label=parse_status_label, state="running")
             try:
-                result = generate_note(doc, model=llm_model)
-            except Exception as exc:
-                st.error(f"노트 생성 실패: {exc}")
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                    tmp.write(file_bytes)
+                    tmp_path = tmp.name
+
+                if suffix.lower() == ".pdf":
+                    doc = parse_pdf(tmp_path)
+                elif suffix.lower() == ".ipynb":
+                    doc = parse_ipynb(tmp_path)
+                else:
+                    try:
+                        doc = parse_image(tmp_path, model=vlm_model)
+                    except Exception as exc:
+                        if any(kw in str(exc).lower() for kw in ("api", "key", "auth")):
+                            st.error("API 키를 .env에 설정해주세요")
+                        else:
+                            st.error(f"이미지 파싱 실패: {exc}")
+                        st.stop()
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+
+            if doc is None:
+                st.error("파일 처리 중 오류가 발생했습니다.")
                 st.stop()
 
-            st.session_state.setdefault("_pipeline_steps", {})["note"] = True
-        else:
-            result = {}
-        status.update(label="분석 완료!", state="complete", expanded=False)
+            doc.source = uploaded_file.name
+            st.session_state.setdefault("_pipeline_steps", {})["parse"] = True
 
-    # Cache
-    st.session_state[doc_cache_key] = doc
-    st.session_state[cache_key] = result
-    st.session_state[f"is_image_{cache_key}"] = is_image
+            parse_failed = not doc.blocks or "parse_failed" in doc.metadata.tags
+            if parse_failed:
+                status.update(label="파싱 실패", state="error")
+                st.stop()
+
+            st.write(f"파싱 완료 — {doc.block_count}개 블록 추출")
+
+            # Step 2: Generate note
+            if not is_image:
+                status.update(label="2/2 — 학습 노트 생성 중...", state="running")
+                try:
+                    result = generate_note(doc, model=llm_model)
+                except Exception as exc:
+                    st.error(f"노트 생성 실패: {exc}")
+                    st.stop()
+
+                st.session_state.setdefault("_pipeline_steps", {})["note"] = True
+            else:
+                result = {}
+            status.update(label="분석 완료!", state="complete", expanded=False)
+
+        # Cache
+        st.session_state[doc_cache_key] = doc
+        st.session_state[cache_key] = result
+        st.session_state[f"is_image_{cache_key}"] = is_image
+
+        # Persist to SQLite
+        save_document(doc)
+        save_note(doc.id, file_hash, result, vlm_model, llm_model, is_image)
 
 # ===================================================================
 # RAG INDEXING — run once per document (session-cached)
 # ===================================================================
 _indexed_key = f"indexed_{doc.id}"
 if not st.session_state.get(_indexed_key):
-    try:
-        index_document(doc)
+    if doc.blocks:  # Library mode has blocks=[] — skip indexing
+        try:
+            index_document(doc)
+            st.session_state[_indexed_key] = True
+        except Exception as _idx_exc:
+            st.warning(f"RAG 인덱싱 실패: {_idx_exc}")
+    else:
+        # Library mode: ChromaDB already has embeddings from original analysis
         st.session_state[_indexed_key] = True
-    except Exception as _idx_exc:
-        st.warning(f"RAG 인덱싱 실패: {_idx_exc}")
 
 # ===================================================================
 # RESULTS — Study note (default view) + Chat panel
@@ -1796,33 +1883,36 @@ with col_content:
             st.info(str(err))
 
     if is_image:
-        preview_controls, preview_action = st.columns([3, 1])
-        with preview_controls:
-            zoom_percent = st.slider(
-                "이미지 확대",
-                min_value=100,
-                max_value=300,
-                value=160,
-                step=10,
-                key=f"image_zoom_{cache_key}",
-                help="작은 글씨가 있는 이미지라면 확대 후 스크롤해서 확인하세요.",
-            )
-        with preview_action:
-            st.caption("")
-            if st.button(
-                "전체화면 보기",
-                use_container_width=True,
-                key=f"open_image_lightbox_{cache_key}",
-            ):
-                _show_image_lightbox(
-                    uploaded_file.name, file_bytes, suffix, cache_key
+        if _lib_mode:
+            st.info("이미지 미리보기는 원본 파일이 필요합니다. 파일을 다시 업로드하면 미리보기를 확인할 수 있습니다.")
+        else:
+            preview_controls, preview_action = st.columns([3, 1])
+            with preview_controls:
+                zoom_percent = st.slider(
+                    "이미지 확대",
+                    min_value=100,
+                    max_value=300,
+                    value=160,
+                    step=10,
+                    key=f"image_zoom_{cache_key}",
+                    help="작은 글씨가 있는 이미지라면 확대 후 스크롤해서 확인하세요.",
                 )
-        st.markdown(
-            _render_image_preview_card(
-                uploaded_file.name, file_bytes, suffix, zoom_percent
-            ),
-            unsafe_allow_html=True,
-        )
+            with preview_action:
+                st.caption("")
+                if st.button(
+                    "전체화면 보기",
+                    use_container_width=True,
+                    key=f"open_image_lightbox_{cache_key}",
+                ):
+                    _show_image_lightbox(
+                        uploaded_file.name, file_bytes, suffix, cache_key
+                    )
+            st.markdown(
+                _render_image_preview_card(
+                    uploaded_file.name, file_bytes, suffix, zoom_percent
+                ),
+                unsafe_allow_html=True,
+            )
     elif note_markdown:
         raw_md = _normalize_note_markdown(note_markdown)
         file_stem = Path(doc.source).stem
@@ -1909,6 +1999,7 @@ with col_content:
                             ):
                                 prev_body = _sec_stack.pop()
                                 result["note_markdown"] = _replace_section_body(raw_md, _cur_named_idx, prev_body)
+                                st.session_state["_note_dirty"] = True
                                 st.rerun()
                             st.markdown('</div>', unsafe_allow_html=True)
                         _named_sec_idx += 1
@@ -1939,30 +2030,44 @@ with col_chat:
         else:
             _render_note_editor_panel(result, llm_model, chat_height=837, doc_key=doc.id)
 
+# ─── Persist dirty note edits to SQLite ──────────────────────────────
+if st.session_state.pop("_note_dirty", False):
+    # Determine the vlm/llm models used for this result
+    if _lib_mode:
+        _sv_vlm = st.session_state.get("_library_used_vlm", vlm_model)
+        _sv_llm = st.session_state.get("_library_used_llm", llm_model)
+        _sv_hash = st.session_state.get("_library_file_hash", "")
+    else:
+        _sv_vlm = vlm_model
+        _sv_llm = llm_model
+        _sv_hash = file_hash
+    save_note(doc.id, _sv_hash, result, _sv_vlm, _sv_llm, is_image)
+
 # ─── Pipeline details (collapsed by default) ─────────────────────────
 st.markdown('<div style="height:96px"></div>', unsafe_allow_html=True)
-with st.expander("🔧 파이프라인 상세", expanded=False):
-    type_counts = Counter(block.type.value for block in doc.blocks)
-    mc1, mc2, mc3 = st.columns(3)
-    with mc1:
-        st.markdown(
-            _render_metric_card(doc.block_count, "총 블록 수"), unsafe_allow_html=True
-        )
-    with mc2:
-        st.markdown(
-            _render_metric_card(doc.format.value.upper(), "문서 형식"),
-            unsafe_allow_html=True,
-        )
-    with mc3:
-        st.markdown(
-            _render_metric_card(doc.status.value, "처리 상태"), unsafe_allow_html=True
-        )
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("**블록 구성**")
-    st.markdown(_render_block_type_badges(type_counts), unsafe_allow_html=True)
-    with st.expander("블록 상세 보기", expanded=False):
-        for i, block in enumerate(doc.blocks[:30]):
-            content_preview = block.content[:120].replace("\n", " ")
-            st.text(f"[{i}] {block.type.value}: {content_preview}")
-        if len(doc.blocks) > 30:
-            st.caption(f"... 외 {len(doc.blocks) - 30}개 블록")
+if doc.blocks:
+    with st.expander("🔧 파이프라인 상세", expanded=False):
+        type_counts = Counter(block.type.value for block in doc.blocks)
+        mc1, mc2, mc3 = st.columns(3)
+        with mc1:
+            st.markdown(
+                _render_metric_card(doc.block_count, "총 블록 수"), unsafe_allow_html=True
+            )
+        with mc2:
+            st.markdown(
+                _render_metric_card(doc.format.value.upper(), "문서 형식"),
+                unsafe_allow_html=True,
+            )
+        with mc3:
+            st.markdown(
+                _render_metric_card(doc.status.value, "처리 상태"), unsafe_allow_html=True
+            )
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("**블록 구성**")
+        st.markdown(_render_block_type_badges(type_counts), unsafe_allow_html=True)
+        with st.expander("블록 상세 보기", expanded=False):
+            for i, block in enumerate(doc.blocks[:30]):
+                content_preview = block.content[:120].replace("\n", " ")
+                st.text(f"[{i}] {block.type.value}: {content_preview}")
+            if len(doc.blocks) > 30:
+                st.caption(f"... 외 {len(doc.blocks) - 30}개 블록")
