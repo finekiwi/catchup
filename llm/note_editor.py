@@ -187,7 +187,7 @@ def _find_section_by_query(sections: list[tuple[str, str]], query: str) -> int |
     for i, (heading, _) in enumerate(sections):
         # Strip "## " prefix before comparing
         heading_text = heading.lstrip("#").strip().lower()
-        if heading_text and heading_text in lower_query or lower_query in heading_text:
+        if heading_text and (heading_text in lower_query or lower_query in heading_text):
             matches.append(i)
 
     if not matches:

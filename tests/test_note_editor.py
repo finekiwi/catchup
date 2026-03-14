@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from llm.note_editor import (
-    NoteEditResult,
     _find_section_by_query,
     _merge_sections,
     _split_sections,

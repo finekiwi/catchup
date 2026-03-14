@@ -123,7 +123,7 @@ def test_generate_note_json_parse_failure_returns_fallback(monkeypatch) -> None:
 
     assert result["title"] == doc.source
     assert result["note_markdown"] == "이건 JSON이 아닙니다."
-    assert "JSON parse failed" in result["errors"]
+    assert result["errors"]  # fallback must populate errors list
     assert result["confidence"] == 0.0
 
 

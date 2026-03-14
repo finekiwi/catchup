@@ -12,6 +12,7 @@ import sys
 import tempfile
 from collections import Counter
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 # Ensure project root is on sys.path when launched via `streamlit run ui/demo.py`
 _ROOT = Path(__file__).resolve().parent.parent
@@ -26,6 +27,9 @@ import markdown as md_lib  # noqa: E402
 import streamlit as st  # noqa: E402
 import pyperclip  # noqa: E402
 
+if TYPE_CHECKING:
+    from models.document import Document
+
 from llm.note_editor import NoteEditResult, edit_section  # noqa: E402
 from llm.note_editor import _split_sections as _split_note_sections  # noqa: E402
 from llm.note_generator import SUPPORTED_LLM_MODELS, generate_note  # noqa: E402
@@ -39,6 +43,9 @@ from vlm.client import SUPPORTED_MODELS  # noqa: E402
 _NOTE_INTERNAL_KEYS: frozenset[str] = frozenset(
     {"schema_version", "confidence", "errors", "starter prompts"}
 )
+
+# Compiled regex for heading downshift — hoisted to avoid repeated compilation
+_HEADING_RE = re.compile(r"^(#{1,4})\s+(.+)")
 
 # ---------------------------------------------------------------------------
 # Global CSS — light theme styles for all custom components
@@ -849,7 +856,6 @@ def _regex_extract_sections(text: str) -> str:
 
 def _downshift_headings(md_text: str) -> str:
     """Shift markdown headings down by 2 levels, skipping content inside code fences."""
-    _HEADING_RE = re.compile(r"^(#{1,4})\s+(.+)")
     in_code_fence = False
     result_lines = []
     for line in md_text.splitlines():
@@ -1277,12 +1283,21 @@ def _replace_section_body(full_md: str, heading: str, new_body: str) -> str:
 
 
 
-def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int) -> None:
+def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, doc_key: str = "") -> None:
     """Render the note editor panel (✏️ 노트 수정 tab).
 
     Supports two editing modes selectable via a toggle:
     - 💬 챗봇: section-level chat-driven editing with preview/apply flow.
     - ⌨️ 직접 편집: full-note text area for direct markdown editing.
+
+    Args:
+        result: The note generation result dict held in session state.
+        llm_model: Default LLM model from the sidebar.
+        chat_height: Height in pixels for the chat container.
+        doc_key: A stable identifier for the current document (e.g. doc.id).
+                 Used to namespace session-state keys so that two documents
+                 with identical section headings (e.g. "## 개요") never share
+                 chat history or undo stacks.
     """
     note_markdown = result.get("note_markdown", "")
     raw_md = _normalize_note_markdown(note_markdown) if note_markdown else ""
@@ -1292,6 +1307,9 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int) ->
     if not section_headings:
         st.info("수정할 섹션이 없습니다. 먼저 노트를 생성해주세요.")
         return
+
+    # Session-state key prefix scoped to this document
+    _sk = f"editor_{doc_key}_" if doc_key else "editor_"
 
     # Mode toggle
     edit_method = st.radio(
@@ -1304,8 +1322,9 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int) ->
 
     # ── Direct markdown editing mode ────────────────────────────────────────
     if edit_method == "⌨️ 직접 편집":
-        if "note_section_undo" not in st.session_state:
-            st.session_state["note_section_undo"] = {}
+        undo_key = f"{_sk}note_section_undo"
+        if undo_key not in st.session_state:
+            st.session_state[undo_key] = {}
 
         edited = st.text_area(
             "마크다운 직접 편집",
@@ -1317,7 +1336,7 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int) ->
         if st.button("✅ 저장", use_container_width=True, type="primary", key="direct_edit_save"):
             if edited != raw_md:
                 # Store full note under special key for direct edits
-                undo_stack = st.session_state["note_section_undo"].setdefault("__direct__", [])
+                undo_stack = st.session_state[undo_key].setdefault("__direct__", [])
                 undo_stack.append(raw_md)
                 if len(undo_stack) > 10:
                     undo_stack.pop(0)
@@ -1345,19 +1364,18 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int) ->
     )
     st.session_state["selected_edit_section"] = selected
 
-
-    # Session state init — chat history keyed by section heading
+    # Session state init — chat history keyed by (doc_key, section_heading)
     # Migrate legacy list format to dict on restart
-    if "edit_chat_messages" not in st.session_state or isinstance(
-        st.session_state["edit_chat_messages"], list
-    ):
-        st.session_state["edit_chat_messages"] = {}  # {section_heading: [msg, ...]}
+    chat_key = f"{_sk}edit_chat_messages"
+    undo_key = f"{_sk}note_section_undo"
+    if chat_key not in st.session_state or isinstance(st.session_state[chat_key], list):
+        st.session_state[chat_key] = {}  # {section_heading: [msg, ...]}
     # note_section_undo: {section_heading: [section_body_before_edit, ...]}
-    if "note_section_undo" not in st.session_state:
-        st.session_state["note_section_undo"] = {}
+    if undo_key not in st.session_state:
+        st.session_state[undo_key] = {}
 
     # Ensure current section has a message list
-    sec_msgs: list = st.session_state["edit_chat_messages"].setdefault(selected, [])
+    sec_msgs: list = st.session_state[chat_key].setdefault(selected, [])
 
     # Chat container
     chat_container = st.container(height=chat_height)
@@ -1379,7 +1397,7 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int) ->
         if _pending_edit := st.session_state.pop("_pending_edit", None):
             instruction = _pending_edit["instruction"]
             section_heading = _pending_edit["section"]
-            cur_msgs = st.session_state["edit_chat_messages"].setdefault(section_heading, [])
+            cur_msgs = st.session_state[chat_key].setdefault(section_heading, [])
             with st.spinner("수정 중..."):
                 history = [
                     {"role": m["role"], "content": m["content"]}
@@ -1394,7 +1412,12 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int) ->
                     history=history,
                 )
             if edit_result.success:
+                # Bind pending preview to the section that produced it so that
+                # switching the selectbox before clicking ✅ 적용 cannot apply
+                # the wrong section's markdown or record the undo entry under
+                # a different heading.
                 st.session_state["edit_pending_markdown"] = edit_result.edited_markdown
+                st.session_state["edit_pending_section"] = section_heading
                 preview_content = f"**{section_heading}** 섹션 수정 결과:\n\n{edit_result.edited_section_body}"
                 cur_msgs.append({"role": "assistant", "content": preview_content, "is_preview": True})
             else:
@@ -1406,23 +1429,26 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int) ->
             col_apply, col_cancel = st.columns(2)
             with col_apply:
                 if st.button("✅ 적용", use_container_width=True, type="primary"):
-                    cur_sec = st.session_state.get("selected_edit_section", "")
+                    # Use the section that produced the preview, not the current selectbox value
+                    pending_sec = st.session_state.get("edit_pending_section") or st.session_state.get("selected_edit_section", "")
                     # Push current section body to per-section undo stack (max 10)
                     sec_map = {h: b for h, b in _split_note_sections(raw_md)}
-                    undo_stack = st.session_state["note_section_undo"].setdefault(cur_sec, [])
-                    undo_stack.append(sec_map.get(cur_sec, ""))
+                    undo_stack = st.session_state[undo_key].setdefault(pending_sec, [])
+                    undo_stack.append(sec_map.get(pending_sec, ""))
                     if len(undo_stack) > 10:
                         undo_stack.pop(0)
                     result["note_markdown"] = st.session_state.pop("edit_pending_markdown")
+                    st.session_state.pop("edit_pending_section", None)
                     st.rerun()
             with col_cancel:
                 if st.button("❌ 취소", use_container_width=True):
                     st.session_state.pop("edit_pending_markdown", None)
+                    st.session_state.pop("edit_pending_section", None)
                     st.rerun()
 
     # Chat input OUTSIDE the gray box
     if edit_instruction := st.chat_input("수정 지시를 입력하세요 (예: 코드 예제 추가해줘)"):
-        st.session_state["edit_chat_messages"].setdefault(selected, []).append(
+        st.session_state[chat_key].setdefault(selected, []).append(
             {"role": "user", "content": edit_instruction}
         )
         st.session_state["_pending_edit"] = {
@@ -1849,7 +1875,8 @@ with col_content:
                                 st.session_state["edit_section_selectbox"] = _sec_heading
                                 st.session_state["active_right_panel"] = "✏️ 노트 수정"
                                 st.rerun()
-                            _sec_stack = st.session_state.get("note_section_undo", {}).get(_sec_heading, [])
+                            _undo_key = f"editor_{doc.id}_note_section_undo"
+                            _sec_stack = st.session_state.get(_undo_key, {}).get(_sec_heading, [])
                             if st.button(
                                 "↩",
                                 key=f"undo_sec_{_sec_heading}",
@@ -1885,7 +1912,7 @@ with col_chat:
                 doc, result, llm_model, is_image=False, chat_height=960
             )
         else:
-            _render_note_editor_panel(result, llm_model, chat_height=837)
+            _render_note_editor_panel(result, llm_model, chat_height=837, doc_key=doc.id)
 
 # ─── Pipeline details (collapsed by default) ─────────────────────────
 st.markdown('<div style="height:96px"></div>', unsafe_allow_html=True)

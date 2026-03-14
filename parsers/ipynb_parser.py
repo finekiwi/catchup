@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -54,17 +55,25 @@ def _normalize_text(value: Any) -> str:
         text = "".join(str(item) for item in value)
     else:
         text = str(value)
-    # Strip JavaScript object placeholders that appear in Jupyter rich display outputs
-    import re as _re
-    text = _re.sub(r",?\[object Object\],?", "", text)
     return text
+
+
+def _strip_js_object_placeholders(text: str) -> str:
+    """Remove JavaScript object placeholders from Jupyter rich display output text.
+
+    Only called for display_data / execute_result text payloads where
+    ``[object Object]`` artifacts appear when the kernel serialises non-string
+    rich output.  Not applied to markdown cells or code source to avoid
+    corrupting notebooks that legitimately reference the literal string.
+    """
+    return re.sub(r",?\[object Object\],?", "", text)
 
 
 def _extract_text_from_data(data: dict[str, Any]) -> str:
     """Extract text content from rich output data payloads."""
     for mime in TEXT_MIME_PRIORITY:
         if mime in data:
-            return _normalize_text(data[mime])
+            return _strip_js_object_placeholders(_normalize_text(data[mime]))
     return ""
 
 
@@ -155,6 +164,9 @@ def parse_ipynb(file_path: str) -> Document:
     """
     Parse a Jupyter notebook file into the shared Document schema.
 
+    Results are cached to data/parsed/ by file content hash. On subsequent calls
+    with the same file, the cached Document is returned immediately without re-parsing.
+
     Args:
         file_path: Path to a `.ipynb` file.
 
@@ -162,8 +174,15 @@ def parse_ipynb(file_path: str) -> Document:
         Parsed Document. If parsing fails, returns a fallback Document
         with empty blocks.
     """
+    from utils.cache import load_cached_parse, save_cached_parse
+
+    source_path = Path(file_path)
+    cached = load_cached_parse(source_path)
+    if cached is not None:
+        return cached
+
     start_time = time.perf_counter()
-    source_name = Path(file_path).name
+    source_name = source_path.name
     document_id = _safe_document_id(file_path)
     document = Document(
         id=document_id,
@@ -228,4 +247,5 @@ def parse_ipynb(file_path: str) -> Document:
     finally:
         document.processing.latency_ms = (time.perf_counter() - start_time) * 1000
 
+    save_cached_parse(source_path, document)
     return document

@@ -432,11 +432,146 @@ def query_baseline(
         )
 
 
+def extract_text_ipynb(ipynb_path: Path) -> str:
+    """Extract plain text from a Jupyter notebook via nbformat.
+
+    Concatenates markdown cell source, code cell source, and text outputs
+    in notebook order. This intentionally ignores rich outputs (images, HTML)
+    to represent the flat-text 'Before' baseline for ipynb.
+
+    Args:
+        ipynb_path: Path to the .ipynb file.
+
+    Returns:
+        Concatenated plain text from all cells and their text outputs.
+
+    Raises:
+        ImportError: If nbformat is not installed.
+        FileNotFoundError: If ipynb_path does not exist.
+    """
+    try:
+        import nbformat as _nbformat
+    except ImportError as exc:
+        raise ImportError("nbformat not installed. Run: uv add nbformat") from exc
+
+    if not ipynb_path.exists():
+        raise FileNotFoundError(f"Notebook not found: {ipynb_path}")
+
+    with open(ipynb_path, encoding="utf-8") as f:
+        nb = _nbformat.read(f, as_version=4)
+
+    parts: list[str] = []
+    for cell in nb.cells:
+        src = "".join(cell.get("source", []) if isinstance(cell.get("source"), list) else [cell.get("source", "")])
+        if src.strip():
+            parts.append(src)
+
+        # Include text outputs from code cells
+        if cell.cell_type == "code":
+            for output in cell.get("outputs", []):
+                otype = output.get("output_type", "")
+                text_content = ""
+                if otype in ("stream", "error"):
+                    text_content = "".join(output.get("text", []))
+                elif otype in ("execute_result", "display_data"):
+                    data = output.get("data", {})
+                    text_content = "".join(data.get("text/plain", []))
+                if text_content.strip():
+                    parts.append(text_content)
+
+    return "\n\n".join(parts)
+
+
+def index_baseline_ipynb(ipynb_path: Path) -> None:
+    """Extract, chunk, embed, and store a notebook into the baseline ChromaDB collection.
+
+    Uses nbformat flat extraction → fixed-size chunking → text-embedding-3-small.
+    If the source has already been indexed, the call is a no-op.
+
+    Args:
+        ipynb_path: Path to the .ipynb file to index.
+    """
+    collection = _get_baseline_collection()
+    if collection is None:
+        LOGGER.error("Baseline collection unavailable — skipping index for %s", ipynb_path)
+        return
+
+    source = ipynb_path.name
+
+    try:
+        existing = collection.get(where={"source": source})
+        if existing.get("ids"):
+            LOGGER.info("Baseline: %s already indexed (%d chunks), skipping", source, len(existing["ids"]))
+            return
+    except Exception:
+        LOGGER.debug("Could not check baseline index for %s — proceeding", source)
+
+    LOGGER.info("Baseline: indexing notebook %s", ipynb_path)
+
+    try:
+        raw_text = extract_text_ipynb(ipynb_path)
+    except Exception as exc:
+        LOGGER.error("nbformat extraction failed for %s: %s", ipynb_path, exc)
+        return
+
+    chunks = chunk_text(raw_text, source)
+    if not chunks:
+        LOGGER.warning("Baseline: no chunks produced for %s", source)
+        return
+
+    LOGGER.info("Baseline: %d chunks from %s", len(chunks), source)
+
+    for chunk in chunks:
+        t0 = time.perf_counter()
+        try:
+            vector, total_tokens = _get_openai_embedding(chunk.content)
+            latency_ms = (time.perf_counter() - t0) * 1000
+            log_api_call(
+                model=EMBED_MODEL,
+                stage="baseline_embed",
+                input_tokens=total_tokens,
+                output_tokens=0,
+                latency_ms=latency_ms,
+                cost_usd=total_tokens * _EMBED_COST_PER_1M_USD / 1_000_000,
+                success=True,
+            )
+        except Exception as exc:
+            LOGGER.warning("Embedding failed for chunk %s: %s", chunk.chunk_id, exc)
+            log_api_call(
+                model=EMBED_MODEL,
+                stage="baseline_embed",
+                input_tokens=0,
+                output_tokens=0,
+                latency_ms=(time.perf_counter() - t0) * 1000,
+                cost_usd=0.0,
+                success=False,
+                error=str(exc),
+            )
+            continue
+
+        metadata: dict[str, Any] = {
+            "source": chunk.source,
+            "chunk_index": chunk.chunk_index,
+        }
+
+        try:
+            collection.upsert(
+                ids=[chunk.chunk_id],
+                documents=[chunk.content],
+                metadatas=[metadata],
+                embeddings=[vector],
+            )
+        except Exception:
+            LOGGER.exception("Failed to upsert baseline chunk %s", chunk.chunk_id)
+
+
 __all__ = [
     "BASELINE_COLLECTION",
     "BaselineChunk",
     "extract_text_pypdf",
+    "extract_text_ipynb",
     "chunk_text",
     "index_baseline",
+    "index_baseline_ipynb",
     "query_baseline",
 ]
