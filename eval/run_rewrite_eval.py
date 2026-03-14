@@ -1,7 +1,10 @@
 """Before/After RAG evaluation: vanilla query vs query rewriting (CU-13).
 
-Runs both pipelines on the combined 30-question golden set (PDF 15 + ipynb 15),
+Runs both pipelines on the combined 31-question golden set (PDF 16 + ipynb 15),
 then computes subgroup analysis for rewrite-needed cases and Wilcoxon Signed-Rank Test.
+
+Each case is checkpointed to JSONL immediately after query + eval, so a crashed
+run can be resumed without re-running completed cases.
 
 Usage:
     python -m eval.run_rewrite_eval
@@ -13,7 +16,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -59,29 +61,114 @@ def _load_golden_items() -> list[dict]:
     return items
 
 
-def _build_eval_cases(
-    query_fn, label: str, model: str, items: list[dict]
-) -> tuple[list, list[str | None], list[list[str]]]:
-    """Build EvalCase list, also capturing rewritten queries and retrieved contexts.
+# ---------------------------------------------------------------------------
+# Case-level checkpoint helpers
+# ---------------------------------------------------------------------------
+
+
+def _case_ckpt_path(output: Path, label: str) -> Path:
+    """Return per-case JSONL checkpoint path for a pipeline label."""
+    return output.parent / f".ckpt_{output.stem}_{label.lower()}_cases.jsonl"
+
+
+def _load_case_checkpoint(path: Path) -> dict[str, dict]:
+    """Load completed cases from JSONL checkpoint.
 
     Returns:
-        (cases, rewritten_queries, all_retrieved_contexts)
-        — rewritten_queries[i]: rewritten string or None
-        — all_retrieved_contexts[i]: list of "source:page\\ncontent_preview" strings for case i
+        Dict mapping case_id → case_data for all successfully checkpointed cases.
     """
-    from eval.evaluator import EvalCase
+    if not path.exists():
+        return {}
+    completed: dict[str, dict] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+            completed[d["case_id"]] = d
+        except Exception as exc:
+            LOGGER.warning("Skipping malformed checkpoint line: %s", exc)
+    LOGGER.info("Loaded %d completed cases from %s", len(completed), path)
+    return completed
 
-    cases = []
-    rewritten_queries: list[str | None] = []
-    all_retrieved_contexts: list[list[str]] = []
+
+def _append_case_checkpoint(path: Path, case_data: dict) -> None:
+    """Append one completed case to JSONL checkpoint (atomic line append)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(case_data, ensure_ascii=False) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# Pipeline runner — case-by-case query + eval + checkpoint
+# ---------------------------------------------------------------------------
+
+
+def _run_pipeline_with_ckpt(
+    query_fn,
+    label: str,
+    model: str,
+    items: list[dict],
+    ckpt_path: Path,
+) -> tuple[dict, list[float], list[str | None], list[list[str]]]:
+    """Run one pipeline (vanilla or rewrite) case-by-case with per-case JSONL checkpoint.
+
+    For each item:
+      1. If case_id already in checkpoint → load from checkpoint (skip query + eval).
+      2. Otherwise → run query, then evaluate single case, then append to JSONL.
+
+    Args:
+        query_fn: Callable(question, top_k, model) → QAResult.
+        label: Human-readable pipeline name ("Vanilla" or "Rewrite").
+        model: LLM model for answer generation.
+        items: Golden set items list.
+        ckpt_path: JSONL checkpoint file path.
+
+    Returns:
+        (report_dict, per_case_scores, rewritten_queries, retrieved_contexts)
+    """
+    # Import here to avoid top-level circular import risks
+    from eval.evaluator import (  # type: ignore[attr-defined]
+        EvalCase,
+        _evaluate_single_case,
+        _resolve_judge_model,
+        _build_citation_metric,
+    )
+    from deepeval.metrics import (
+        FaithfulnessMetric,
+        ContextualPrecisionMetric,
+        ContextualRecallMetric,
+    )
+
+    completed = _load_case_checkpoint(ckpt_path)
+    remaining = sum(1 for item in items if item.get("id", "unknown") not in completed)
+    LOGGER.info("=== Pipeline: %s — %d/%d to run ===", label, remaining, len(items))
+
+    judge_model = _resolve_judge_model(model)
+
+    # Build metric instances once and reuse across cases
+    faithfulness_metric = FaithfulnessMetric(threshold=0.5, model=judge_model, include_reason=True)
+    context_precision_metric = ContextualPrecisionMetric(threshold=0.5, model=judge_model, include_reason=True)
+    context_recall_metric = ContextualRecallMetric(threshold=0.5, model=judge_model, include_reason=True)
+    citation_metric = _build_citation_metric(judge_model)
+
+    all_case_data: list[dict] = []
 
     for item in items:
+        case_id: str = item.get("id", "unknown")
         question: str = item["question"]
         expected: str = item["expected_answer"]
-        case_id: str = item.get("id", "unknown")
         tier: int = item.get("tier", 0)
 
-        LOGGER.info("  [%s] querying %s", label, case_id)
+        # Resume: use checkpoint data if available
+        if case_id in completed:
+            LOGGER.info("  [%s] %s — loaded from checkpoint", label, case_id)
+            all_case_data.append(completed[case_id])
+            continue
+
+        # --- Query phase ---
+        LOGGER.info("  [%s] %s — querying", label, case_id)
         try:
             result = query_fn(question, top_k=5, model=model)
             actual_answer = result.answer
@@ -90,16 +177,17 @@ def _build_eval_cases(
                 for sb in result.source_blocks
             ]
             sources = [sb.source for sb in result.source_blocks]
-            rewritten_queries.append(getattr(result, "rewritten_query", None))
+            rewritten_query: str | None = getattr(result, "rewritten_query", None)
         except Exception as exc:
             LOGGER.warning("%s query failed for %s: %s", label, case_id, exc)
             actual_answer = f"[ERROR] {exc}"
             retrieved_contexts = []
             sources = []
-            rewritten_queries.append(None)
+            rewritten_query = None
 
-        all_retrieved_contexts.append(retrieved_contexts)
-        cases.append(EvalCase(
+        # --- Eval phase ---
+        LOGGER.info("  [%s] %s — evaluating", label, case_id)
+        eval_case = EvalCase(
             question=question,
             expected_answer=expected,
             actual_answer=actual_answer,
@@ -107,32 +195,80 @@ def _build_eval_cases(
             sources=sources,
             case_id=case_id,
             tier=tier,
-        ))
+        )
+        case_result = _evaluate_single_case(
+            eval_case,
+            faithfulness_metric,
+            context_precision_metric,
+            context_recall_metric,
+            citation_metric,
+        )
 
-    return cases, rewritten_queries, all_retrieved_contexts
+        case_data = {
+            "case_id": case_id,
+            "question": question,
+            "actual_answer": actual_answer,
+            "rewritten_query": rewritten_query,
+            "retrieved_contexts": retrieved_contexts,
+            "faithfulness_score": case_result.faithfulness_score,
+            "context_precision_score": case_result.context_precision_score,
+            "context_recall_score": case_result.context_recall_score,
+            "citation_score": case_result.citation_score,
+            "overall_score": case_result.overall_score,
+            "passed": case_result.passed,
+            "tier": tier,
+            "error": case_result.error,
+        }
 
+        _append_case_checkpoint(ckpt_path, case_data)
+        all_case_data.append(case_data)
+        LOGGER.info(
+            "  [%s] %s — done: overall=%.4f (faith=%.4f, prec=%.4f, rec=%.4f, cit=%.4f)",
+            label, case_id, case_result.overall_score,
+            case_result.faithfulness_score, case_result.context_precision_score,
+            case_result.context_recall_score, case_result.citation_score,
+        )
 
-def _run_pipeline(
-    query_fn, label: str, model: str, items: list[dict]
-) -> tuple[dict, list[float], list[str | None], list[list[str]]]:
-    """Run evaluation pipeline and return (report_dict, per_case_overall_scores, rewritten_queries, retrieved_contexts)."""
-    from eval.evaluator import run_evaluation
+    # Reconstruct aggregate report from all_case_data
+    n = len(all_case_data)
+    agg_faithfulness = sum(d["faithfulness_score"] for d in all_case_data) / n
+    agg_precision = sum(d["context_precision_score"] for d in all_case_data) / n
+    agg_recall = sum(d["context_recall_score"] for d in all_case_data) / n
+    agg_citation = sum(d["citation_score"] for d in all_case_data) / n
+    agg_overall = sum(d["overall_score"] for d in all_case_data) / n
+    passed = sum(1 for d in all_case_data if d.get("passed", False))
 
-    LOGGER.info("=== Pipeline: %s ===", label)
-    cases, rewritten_queries, retrieved_contexts = _build_eval_cases(query_fn, label, model, items)
-    report = run_evaluation(cases, model=model)
-
-    per_case_scores = [cr.overall_score for cr in report.per_case_results]
+    report: dict = {
+        "overall_score": round(agg_overall, 4),
+        "faithfulness_score": round(agg_faithfulness, 4),
+        "context_precision_score": round(agg_precision, 4),
+        "context_recall_score": round(agg_recall, 4),
+        "citation_score": round(agg_citation, 4),
+        "total_cases": n,
+        "passed_cases": passed,
+        "model": model,
+        "judge_model": judge_model,
+        "per_case_results": all_case_data,
+    }
 
     print(f"\n=== {label} ===")
-    print(f"  Faithfulness:       {report.faithfulness_score:.4f}")
-    print(f"  Context Precision:  {report.context_precision_score:.4f}")
-    print(f"  Context Recall:     {report.context_recall_score:.4f}")
-    print(f"  Citation Accuracy:  {report.citation_score:.4f}")
-    print(f"  Overall:            {report.overall_score:.4f}")
-    print(f"  Passed:             {report.passed_cases}/{report.total_cases}")
+    print(f"  Faithfulness:       {report['faithfulness_score']:.4f}")
+    print(f"  Context Precision:  {report['context_precision_score']:.4f}")
+    print(f"  Context Recall:     {report['context_recall_score']:.4f}")
+    print(f"  Citation Accuracy:  {report['citation_score']:.4f}")
+    print(f"  Overall:            {report['overall_score']:.4f}")
+    print(f"  Passed:             {report['passed_cases']}/{report['total_cases']}")
 
-    return asdict(report), per_case_scores, rewritten_queries, retrieved_contexts
+    per_case_scores = [d["overall_score"] for d in all_case_data]
+    rewritten_queries: list[str | None] = [d["rewritten_query"] for d in all_case_data]
+    retrieved_contexts: list[list[str]] = [d["retrieved_contexts"] for d in all_case_data]
+
+    return report, per_case_scores, rewritten_queries, retrieved_contexts
+
+
+# ---------------------------------------------------------------------------
+# Analysis helpers
+# ---------------------------------------------------------------------------
 
 
 def _binary_comparison(
@@ -209,38 +345,16 @@ def _wilcoxon_test(vanilla_scores: list[float], rewrite_scores: list[float]) -> 
         return {"test": "wilcoxon", "error": str(exc)}
 
 
-def _checkpoint_path(output: Path, label: str) -> Path:
-    """Return checkpoint file path for a pipeline label."""
-    return output.parent / f".ckpt_{output.stem}_{label.lower()}.json"
-
-
-def _save_checkpoint(path: Path, report: dict, scores: list[float], queries: list, contexts: list) -> None:
-    """Save pipeline results to a checkpoint file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({
-        "report": report, "scores": scores, "queries": queries, "contexts": contexts,
-    }, ensure_ascii=False), encoding="utf-8")
-    LOGGER.info("Checkpoint saved: %s", path)
-
-
-def _load_checkpoint(path: Path) -> tuple | None:
-    """Load checkpoint if it exists. Returns (report, scores, queries, contexts) or None."""
-    if not path.exists():
-        return None
-    try:
-        d = json.loads(path.read_text(encoding="utf-8"))
-        LOGGER.info("Checkpoint loaded: %s", path)
-        return d["report"], d["scores"], d["queries"], d["contexts"]
-    except Exception as exc:
-        LOGGER.warning("Checkpoint load failed (%s), re-running pipeline", exc)
-        return None
+# ---------------------------------------------------------------------------
+# Main evaluation entry point
+# ---------------------------------------------------------------------------
 
 
 def run_rewrite_eval(model: str, output: Path = Path("eval/results/rewrite_eval.json")) -> dict:
     """Run vanilla vs rewrite evaluation on the combined 31Q golden set.
 
-    Checkpoints each pipeline to disk so a mid-run crash can be resumed
-    without re-running the completed pipeline.
+    Each case is checkpointed to JSONL immediately after query + eval, so a
+    mid-run crash can be resumed from the last completed case.
 
     Args:
         model: LLM model for answer generation (same for both pipelines).
@@ -255,49 +369,40 @@ def run_rewrite_eval(model: str, output: Path = Path("eval/results/rewrite_eval.
 
     items = _load_golden_items()
 
-    # Vanilla pipeline — load checkpoint or run
-    ckpt_vanilla = _checkpoint_path(output, "vanilla")
-    ckpt_result = _load_checkpoint(ckpt_vanilla)
-    if ckpt_result:
-        vanilla_report, vanilla_scores, _, vanilla_contexts = ckpt_result
-        print("\n=== Vanilla (from checkpoint) ===")
-        print(f"  Overall: {vanilla_report['overall_score']:.4f}  Passed: {vanilla_report['passed_cases']}/{vanilla_report['total_cases']}")
-    else:
-        vanilla_report, vanilla_scores, _, vanilla_contexts = _run_pipeline(
-            partial(query_chunked, rewrite=False),
-            label="Vanilla",
-            model=model,
-            items=items,
-        )
-        _save_checkpoint(ckpt_vanilla, vanilla_report, vanilla_scores, [], vanilla_contexts)
+    ckpt_vanilla = _case_ckpt_path(output, "vanilla")
+    ckpt_rewrite = _case_ckpt_path(output, "rewrite")
 
-    # Rewrite pipeline — load checkpoint or run
-    ckpt_rewrite = _checkpoint_path(output, "rewrite")
-    ckpt_result = _load_checkpoint(ckpt_rewrite)
-    if ckpt_result:
-        rewrite_report, rewrite_scores, rewrite_queries, rewrite_contexts = ckpt_result
-        print("\n=== Rewrite (from checkpoint) ===")
-        print(f"  Overall: {rewrite_report['overall_score']:.4f}  Passed: {rewrite_report['passed_cases']}/{rewrite_report['total_cases']}")
-    else:
-        rewrite_report, rewrite_scores, rewrite_queries, rewrite_contexts = _run_pipeline(
-            partial(query_chunked, rewrite=True),
-            label="Rewrite",
-            model=model,
-            items=items,
-        )
-        _save_checkpoint(ckpt_rewrite, rewrite_report, rewrite_scores, rewrite_queries, rewrite_contexts)
+    vanilla_report, vanilla_scores, _, vanilla_contexts = _run_pipeline_with_ckpt(
+        partial(query_chunked, rewrite=False),
+        label="Vanilla",
+        model=model,
+        items=items,
+        ckpt_path=ckpt_vanilla,
+    )
 
-    per_case = _binary_comparison(items, vanilla_scores, rewrite_scores, rewrite_queries, vanilla_contexts, rewrite_contexts)
+    rewrite_report, rewrite_scores, rewrite_queries, rewrite_contexts = _run_pipeline_with_ckpt(
+        partial(query_chunked, rewrite=True),
+        label="Rewrite",
+        model=model,
+        items=items,
+        ckpt_path=ckpt_rewrite,
+    )
+
+    per_case = _binary_comparison(
+        items, vanilla_scores, rewrite_scores, rewrite_queries, vanilla_contexts, rewrite_contexts
+    )
     subgroup = _subgroup_analysis(per_case)
 
-    # Wilcoxon tests: all 30 + rewrite_needed subset only
+    # Wilcoxon tests: all 31 + rewrite_needed subset only
     needed_indices = [i for i, c in enumerate(per_case) if c["rewrite_needed"]]
-    vanilla_all, rewrite_all = vanilla_scores, rewrite_scores
     vanilla_needed = [vanilla_scores[i] for i in needed_indices]
-    rewrite_needed = [rewrite_scores[i] for i in needed_indices]
+    rewrite_needed_scores = [rewrite_scores[i] for i in needed_indices]
 
-    stat_all = _wilcoxon_test(vanilla_all, rewrite_all)
-    stat_needed = _wilcoxon_test(vanilla_needed, rewrite_needed) if needed_indices else {"note": "no rewrite_needed cases"}
+    stat_all = _wilcoxon_test(vanilla_scores, rewrite_scores)
+    stat_needed = (
+        _wilcoxon_test(vanilla_needed, rewrite_needed_scores)
+        if needed_indices else {"note": "no rewrite_needed cases"}
+    )
 
     vanilla_correct = sum(1 for c in per_case if c["vanilla_correct"])
     rewrite_correct = sum(1 for c in per_case if c["rewrite_correct"])

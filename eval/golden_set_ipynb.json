@@ -1,0 +1,156 @@
+{
+  "version": "2.0.0",
+  "description": "Golden QA set for CatchUp RAG evaluation (CU-09) — based on 5 curated Jupyter notebooks",
+  "created_at": "2026-03-14",
+  "total": 15,
+  "sources": {
+    "LLM_034_neo4j_intro.ipynb": "Neo4j Knowledge Graph intro notebook (Korean)",
+    "LLM_016_ToolCalling_Agent.ipynb": "Tool Calling + Agent concepts notebook (Korean)",
+    "day53_langchain.ipynb": "LangChain / RAG / Retriever tutorial notebook (Korean)",
+    "elk_01_basic.ipynb": "Elasticsearch basics notebook (Korean)",
+    "Logistic_Regression_with_a_Neural_Network_mindset.ipynb": "Logistic Regression with a Neural Network mindset assignment notebook (English)"
+  },
+  "tiers": {
+    "1_single_fact": "Basic factual retrieval from markdown cells — explicit definitions or concept summaries",
+    "2_code_numeric": "Code output / numeric extraction — execution results, printed values, and returned rows",
+    "3_cross_document": "Cross-notebook reasoning — concepts connected across different ipynb sources",
+    "4_code_structure": "Code-cell structure dependence — function call order, chain composition, or agent state flow"
+  },
+  "items": [
+    {
+      "id": "gs_ipynb_001",
+      "tier": 1,
+      "question": "According to the Neo4j intro notebook, what is a Knowledge Graph and what key advantage does it preserve?",
+      "expected_answer": "A Knowledge Graph is a graph structure that represents data as nodes and relationships, modeling real-world concepts and the links between them. Its key advantage is that it preserves the context and meaning of the data.",
+      "expected_sources": ["LLM_034_neo4j_intro.ipynb"],
+      "document_format": "ipynb",
+      "notes": "Tier 1: direct markdown definition from the Neo4j basics section"
+    },
+    {
+      "id": "gs_ipynb_002",
+      "tier": 1,
+      "question": "In the Tool Calling notebook, what is a ToolMessage, and which fields are highlighted as its core pieces of information?",
+      "expected_answer": "A ToolMessage is the standardized message format used to send a tool's execution result back to the LLM inside the agent loop. The notebook highlights `content`, `name`, and `tool_call_id` as the core fields, with `tool_call_id` identifying which original tool call the response belongs to.",
+      "expected_sources": ["LLM_016_ToolCalling_Agent.ipynb"],
+      "document_format": "ipynb",
+      "notes": "Tier 1: explicit markdown explanation under the ToolCall-object section"
+    },
+    {
+      "id": "gs_ipynb_003",
+      "tier": 1,
+      "question": "In the day53 LangChain notebook, what four runtime-stage components are listed for RAG?",
+      "expected_answer": "The runtime-stage components listed for RAG are Retriever, Prompt, LLM, and Chain.",
+      "expected_sources": ["day53_langchain.ipynb"],
+      "document_format": "ipynb",
+      "notes": "Tier 1: markdown table in the RAG overview section"
+    },
+    {
+      "id": "gs_ipynb_004",
+      "tier": 1,
+      "question": "What is Nori in the Elasticsearch notebook, and how does the notebook say it tokenizes the Korean word \"손해보험회사\"?",
+      "expected_answer": "Nori is a Korean morphological analyzer. The notebook says it tokenizes \"손해보험회사\" into [\"손해\", \"보험\", \"회사\"].",
+      "expected_sources": ["elk_01_basic.ipynb"],
+      "document_format": "ipynb",
+      "notes": "Tier 1: direct markdown definition in the Nori section"
+    },
+    {
+      "id": "gs_ipynb_005",
+      "tier": 2,
+      "question": "In the logistic regression notebook, what values are printed for m_train, m_test, and num_px, and what full image size do those numbers imply?",
+      "expected_answer": "The notebook prints m_train = 209, m_test = 50, and num_px = 64. Those values imply that each image has size (64, 64, 3).",
+      "expected_sources": ["Logistic_Regression_with_a_Neural_Network_mindset.ipynb"],
+      "document_format": "ipynb",
+      "notes": "Tier 2: extracted from the printed dataset-shape output"
+    },
+    {
+      "id": "gs_ipynb_006",
+      "tier": 2,
+      "question": "In day53_langchain, what cosine similarity is printed between the embeddings of \"hello world!\" and \"hello world\", and what shape is printed when embedding those two strings together as documents?",
+      "expected_answer": "The cosine similarity is 0.9341421221189211, and the shape for the two embedded documents is (2, 1536).",
+      "expected_sources": ["day53_langchain.ipynb"],
+      "document_format": "ipynb",
+      "notes": "Tier 2: numeric outputs from the OpenAI embeddings section"
+    },
+    {
+      "id": "gs_ipynb_007",
+      "tier": 2,
+      "question": "In the Elasticsearch notebook, how many documents are bulk-indexed into the `insurance` index, and how many hits does the basic `match` query on `RatDcd = \"C\"` return?",
+      "expected_answer": "The notebook bulk-indexes 21,700 documents into `insurance`, and the basic `match` query on `RatDcd = \"C\"` returns 1,809 hits.",
+      "expected_sources": ["elk_01_basic.ipynb"],
+      "document_format": "ipynb",
+      "notes": "Tier 2: combines the bulk indexing output with the first search result count"
+    },
+    {
+      "id": "gs_ipynb_008",
+      "tier": 2,
+      "question": "In the Neo4j notebook's example answer for '모든 Topic 노드 조회', which Topic names are returned?",
+      "expected_answer": "The returned Topic names are `AI 반도체`, `기업 실적`, and `기술 투자`.",
+      "expected_sources": ["LLM_034_neo4j_intro.ipynb"],
+      "document_format": "ipynb",
+      "notes": "Tier 2: exact values from the example-answer output for the Topic-node query"
+    },
+    {
+      "id": "gs_ipynb_009",
+      "tier": 3,
+      "question": "How does the `search_db` tool in LLM_016_ToolCalling_Agent operationalize the RAG pipeline described in day53_langchain?",
+      "expected_answer": "The day53 notebook describes a RAG flow where documents are embedded, stored in a vector database, exposed through a retriever, and then used to answer a question. In the Tool Calling notebook, `search_db` wraps exactly that retrieval step by calling `chroma_k_retriever.invoke(query)`. The model is bound to this tool, emits a tool call when retrieval is needed, receives the retrieved `Document` objects through the tool, and then continues the agent loop using the returned tool result.",
+      "expected_sources": ["LLM_016_ToolCalling_Agent.ipynb", "day53_langchain.ipynb"],
+      "document_format": "ipynb",
+      "notes": "Tier 3: links the abstract RAG pipeline to the concrete tool wrapper used by the agent"
+    },
+    {
+      "id": "gs_ipynb_010",
+      "tier": 3,
+      "question": "For a question like \"삼성전자는 어떤 기술을 개발하고 있나요?\", why is the Neo4j notebook's GraphCypherQAChain better suited than day53's plain vector similarity search?",
+      "expected_answer": "The Neo4j notebook models explicit entities and relations such as Article, Topic, Company, Product, and typed links like `MENTIONS` or `INVEST_IN`, then queries them through GraphCypherQAChain and Cypher. That is better suited for relation-centric questions such as what technology Samsung is developing, because the answer depends on traversing explicit graph structure. The day53 notebook's vector retrieval is optimized for semantic similarity over text chunks, but it does not encode typed graph relations directly.",
+      "expected_sources": ["LLM_034_neo4j_intro.ipynb", "day53_langchain.ipynb"],
+      "document_format": "ipynb",
+      "notes": "Tier 3: compares graph-structured QA against chunk-based vector retrieval"
+    },
+    {
+      "id": "gs_ipynb_011",
+      "tier": 3,
+      "question": "How do elk_01_basic and day53_langchain complement each other when a system needs both exact field constraints and semantic retrieval?",
+      "expected_answer": "The Elasticsearch notebook covers exact or field-aware retrieval with queries such as `term`, `range`, `bool`, and Korean tokenization via Nori, which is useful when results must satisfy explicit structured constraints. The day53 notebook covers semantic retrieval with embeddings, vector stores, MMR, contextual compression, and parent-child retrieval, which is useful when relevance depends on meaning rather than exact field matches. Together, they complement each other by combining structured filtering with semantic context retrieval.",
+      "expected_sources": ["elk_01_basic.ipynb", "day53_langchain.ipynb"],
+      "document_format": "ipynb",
+      "notes": "Tier 3: synthesizes sparse/structured retrieval with dense/semantic retrieval"
+    },
+    {
+      "id": "gs_ipynb_012",
+      "tier": 3,
+      "question": "If you wanted one assistant to answer weather/math questions, graph questions, and structured insurance-search questions in a single conversation, which notebook provides the orchestration mechanism and which notebooks provide the two retrieval backends?",
+      "expected_answer": "The orchestration mechanism comes from `LLM_016_ToolCalling_Agent.ipynb`, which shows `create_agent`, `create_react_agent`, tool binding, and the ToolMessage-based agent loop. The graph backend comes from `LLM_034_neo4j_intro.ipynb`, which provides GraphCypherQAChain over a Neo4j knowledge graph. The structured insurance-search backend comes from `elk_01_basic.ipynb`, which shows Elasticsearch indexing and field-based queries. Together, the tool-calling agent can sit on top of Neo4j and Elasticsearch tools to answer all three categories in one interface.",
+      "expected_sources": ["LLM_016_ToolCalling_Agent.ipynb", "LLM_034_neo4j_intro.ipynb", "elk_01_basic.ipynb"],
+      "document_format": "ipynb",
+      "notes": "Tier 3: combines agent orchestration with graph and structured-search backends"
+    },
+    {
+      "id": "gs_ipynb_013",
+      "tier": 4,
+      "question": "In the logistic regression notebook, what function-call sequence inside `model()` produces the final train/test predictions, including the inner dependency inside `optimize()`?",
+      "expected_answer": "Inside `model()`, the sequence is: `initialize_with_zeros(len(X_train))` to create `w` and `b`, then `optimize(w, b, X_train, Y_train, ...)` to train them, then extracting `w` and `b` from `params`, then `predict(w, b, X_train)` and `predict(w, b, X_test)` to produce train and test predictions. Inside `optimize()`, each iteration calls `propagate(w, b, X, Y)`, and `propagate()` computes `A = sigmoid(w.T @ X + b)` before computing cost, `dw`, and `db`.",
+      "expected_sources": ["Logistic_Regression_with_a_Neural_Network_mindset.ipynb"],
+      "document_format": "ipynb",
+      "notes": "Tier 4: depends on code-cell structure and nested function calls across multiple graded functions"
+    },
+    {
+      "id": "gs_ipynb_014",
+      "tier": 4,
+      "question": "In the day53 notebook's NLP retriever chain built after loading `nlp_keywords.txt`, how is the `reference` field constructed before the prompt is sent to the model?",
+      "expected_answer": "The `reference` field is built by taking `itemgetter('question')`, passing the question into `retriever_nlp`, then passing the retrieved documents into `RunnableLambda(reorder_documents)`. In parallel, `question` and `language` are forwarded unchanged. That mapping is then fed into `PromptTemplate.from_template(...)`, then into `ChatOpenAI(model_name='gpt-4o-mini')`, and finally into `StrOutputParser()`.",
+      "expected_sources": ["day53_langchain.ipynb"],
+      "document_format": "ipynb",
+      "notes": "Tier 4: answer requires reading the runnable composition in the code cell, not just markdown summaries"
+    },
+    {
+      "id": "gs_ipynb_015",
+      "tier": 4,
+      "question": "In the Tool Calling notebook's `create_agent` weather example, what is the returned message sequence in the agent state, in order?",
+      "expected_answer": "The returned state shows four messages in order: a `HumanMessage` asking about Seoul weather, an `AIMessage` that contains a `get_weather` tool call with `city='서울'`, a `ToolMessage` with the tool result `서울 날씨는 맑음`, and a final `AIMessage` answering `서울의 날씨는 맑음입니다. 더 궁금한 점 있으신가요?`.",
+      "expected_sources": ["LLM_016_ToolCalling_Agent.ipynb"],
+      "document_format": "ipynb",
+      "notes": "Tier 4: depends on the structured agent-state output, including message types and ordering"
+    }
+  ]
+}
