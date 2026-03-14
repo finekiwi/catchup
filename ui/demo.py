@@ -1765,7 +1765,13 @@ if _lib_mode:
     file_hash = st.session_state.get("_library_file_hash", "")
     _used_vlm = st.session_state.get("_library_used_vlm", vlm_model)
     _used_llm = st.session_state.get("_library_used_llm", llm_model)
-    st.caption(f"📚 라이브러리에서 로드됨 — {doc.source} (모델: {_used_vlm} / {_used_llm})")
+    st.markdown(
+        f'<div style="background:#DDE8ED;border:1px solid #BDD0D9;border-radius:8px;'
+        f'padding:0.5em 0.85em;color:#3D5A66;font-size:0.82rem;margin-bottom:0.5em">'
+        f'📚 라이브러리에서 로드됨 — <b>{html.escape(doc.source)}</b> '
+        f'(모델: {html.escape(_used_vlm)} / {html.escape(_used_llm)})</div>',
+        unsafe_allow_html=True,
+    )
     if uploaded_file is not None:
         # User uploaded a new file — exit library mode and proceed normally
         st.session_state.pop("_library_mode", None)
