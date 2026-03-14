@@ -1339,7 +1339,7 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
         "edit_method",
         ["💬 챗봇", "⌨️ 직접 편집"],
         horizontal=True,
-        key="note_editor_method",
+        key=f"{_sk}note_editor_method",
         label_visibility="collapsed",
     )
 
@@ -1353,10 +1353,10 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
             "마크다운 직접 편집",
             value=raw_md,
             height=chat_height,
-            key="direct_edit_textarea",
+            key=f"{_sk}direct_edit_textarea",
             label_visibility="collapsed",
         )
-        if st.button("✅ 저장", use_container_width=True, type="primary", key="direct_edit_save"):
+        if st.button("✅ 저장", use_container_width=True, type="primary", key=f"{_sk}direct_edit_save"):
             if edited != raw_md:
                 # Store full note under special key for direct edits
                 undo_stack = st.session_state[undo_key].setdefault("__direct__", [])
@@ -1804,18 +1804,22 @@ if _lib_mode:
         f'(모델: {html.escape(_used_vlm)} / {html.escape(_used_llm)})</div>',
         unsafe_allow_html=True,
     )
-    _just_loaded = st.session_state.pop("_library_just_loaded", False)
-    if uploaded_file is not None and not _just_loaded:
-        # User uploaded a new file — exit library mode and proceed normally.
-        # Skip this check on the same rerun that just established library mode so
-        # a stale file_uploader value cannot immediately cancel the restore.
-        for _k in (
-            "_library_mode", "_library_doc_id", "_library_cache_key",
-            "_library_doc_cache_key", "_library_used_vlm", "_library_used_llm",
-            "_library_file_hash",
-        ):
-            st.session_state.pop(_k, None)
-        st.rerun()
+    st.session_state.pop("_library_just_loaded", None)
+    if uploaded_file is not None:
+        # Exit library mode only when the user uploads a *different* file.
+        # Compare the uploader's file hash against the library document's hash so
+        # that a stale file_uploader value (still holding the same file across reruns)
+        # does not cancel library mode on every subsequent rerun.
+        _uploaded_hash = hashlib.sha256(uploaded_file.getvalue()).hexdigest()
+        _lib_file_hash = st.session_state.get("_library_file_hash", "")
+        if _uploaded_hash != _lib_file_hash:
+            for _k in (
+                "_library_mode", "_library_doc_id", "_library_cache_key",
+                "_library_doc_cache_key", "_library_used_vlm", "_library_used_llm",
+                "_library_file_hash",
+            ):
+                st.session_state.pop(_k, None)
+            st.rerun()
 else:
     # Normal upload flow
     st.session_state.setdefault("_pipeline_steps", {})["upload"] = True
