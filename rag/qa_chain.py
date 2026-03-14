@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 from db.chroma import _build_client
+from llm.note_generator import _is_noise_block
 from models.document import Document
 from prompts.rag_qa import PROMPT
 from utils.logging import log_api_call
@@ -200,7 +201,7 @@ def rechunk_blocks(
     flat: list[tuple[str, dict]] = []
     for block in document.blocks:
         content = block.content.strip()
-        if not content:
+        if not content or _is_noise_block(block):
             continue
         meta = {
             "document_id": document.id,
@@ -390,15 +391,13 @@ def index_document(document: Document) -> None:
         LOGGER.error("RAG collection unavailable — skipping index for document id=%s", document.id)
         return
 
-    non_empty_blocks = [b for b in document.blocks if b.content.strip()]
-    if _is_document_indexed(collection, document.id, len(non_empty_blocks)):
+    indexable_blocks = [b for b in document.blocks if b.content.strip() and not _is_noise_block(b)]
+    if _is_document_indexed(collection, document.id, len(indexable_blocks)):
         LOGGER.info("Document id=%s already indexed, skipping", document.id)
         return
 
-    for block in document.blocks:
+    for block in indexable_blocks:
         content = block.content.strip()
-        if not content:
-            continue
 
         t0 = time.perf_counter()
         try:
