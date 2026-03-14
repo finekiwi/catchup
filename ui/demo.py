@@ -1687,6 +1687,13 @@ with st.sidebar:
                     st.rerun()
             with _col_del:
                 if st.button("🗑️", key=f"lib_del_{_ld.id}", help=f"{_ld.source} 삭제"):
+                    # Evict session_state note caches for this document before DB delete
+                    for _nr in list_notes_for_document(_ld.id):
+                        _evict_key = f"result_{_nr['file_hash']}_{_nr['vlm_model']}_{_nr['llm_model']}"
+                        st.session_state.pop(_evict_key, None)
+                        st.session_state.pop(f"doc_{_nr['file_hash']}_{_nr['vlm_model']}", None)
+                        st.session_state.pop(f"is_image_{_evict_key}", None)
+                        st.session_state.pop(f"_toast_shown_{_evict_key}", None)
                     delete_document(_ld.id)
                     st.rerun()
         st.markdown("---")
