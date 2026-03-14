@@ -1532,7 +1532,7 @@ def _render_qa_panel(
     # During loading, skip fixed height to prevent Streamlit splitting the container
     # into two gray boxes. After rerun, full height is restored.
     _is_loading = "_pending_chat" in st.session_state
-    chat_container = st.container(height=None if _is_loading else chat_height)
+    chat_container = st.container() if _is_loading else st.container(height=chat_height)
     with chat_container:
         msgs = st.session_state[_qa_chat_key]
         for msg in msgs:
