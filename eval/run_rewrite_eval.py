@@ -209,11 +209,42 @@ def _wilcoxon_test(vanilla_scores: list[float], rewrite_scores: list[float]) -> 
         return {"test": "wilcoxon", "error": str(exc)}
 
 
-def run_rewrite_eval(model: str) -> dict:
-    """Run vanilla vs rewrite evaluation on the combined 30Q golden set.
+def _checkpoint_path(output: Path, label: str) -> Path:
+    """Return checkpoint file path for a pipeline label."""
+    return output.parent / f".ckpt_{output.stem}_{label.lower()}.json"
+
+
+def _save_checkpoint(path: Path, report: dict, scores: list[float], queries: list, contexts: list) -> None:
+    """Save pipeline results to a checkpoint file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "report": report, "scores": scores, "queries": queries, "contexts": contexts,
+    }, ensure_ascii=False), encoding="utf-8")
+    LOGGER.info("Checkpoint saved: %s", path)
+
+
+def _load_checkpoint(path: Path) -> tuple | None:
+    """Load checkpoint if it exists. Returns (report, scores, queries, contexts) or None."""
+    if not path.exists():
+        return None
+    try:
+        d = json.loads(path.read_text(encoding="utf-8"))
+        LOGGER.info("Checkpoint loaded: %s", path)
+        return d["report"], d["scores"], d["queries"], d["contexts"]
+    except Exception as exc:
+        LOGGER.warning("Checkpoint load failed (%s), re-running pipeline", exc)
+        return None
+
+
+def run_rewrite_eval(model: str, output: Path = Path("eval/results/rewrite_eval.json")) -> dict:
+    """Run vanilla vs rewrite evaluation on the combined 31Q golden set.
+
+    Checkpoints each pipeline to disk so a mid-run crash can be resumed
+    without re-running the completed pipeline.
 
     Args:
         model: LLM model for answer generation (same for both pipelines).
+        output: Final output path (used to derive checkpoint paths).
 
     Returns:
         Full result dict with pipelines, binary_comparison, subgroup_analysis,
@@ -224,21 +255,37 @@ def run_rewrite_eval(model: str) -> dict:
 
     items = _load_golden_items()
 
-    # Vanilla pipeline: query_chunked with rewrite=False (default)
-    vanilla_report, vanilla_scores, _, vanilla_contexts = _run_pipeline(
-        partial(query_chunked, rewrite=False),
-        label="Vanilla",
-        model=model,
-        items=items,
-    )
+    # Vanilla pipeline — load checkpoint or run
+    ckpt_vanilla = _checkpoint_path(output, "vanilla")
+    ckpt_result = _load_checkpoint(ckpt_vanilla)
+    if ckpt_result:
+        vanilla_report, vanilla_scores, _, vanilla_contexts = ckpt_result
+        print("\n=== Vanilla (from checkpoint) ===")
+        print(f"  Overall: {vanilla_report['overall_score']:.4f}  Passed: {vanilla_report['passed_cases']}/{vanilla_report['total_cases']}")
+    else:
+        vanilla_report, vanilla_scores, _, vanilla_contexts = _run_pipeline(
+            partial(query_chunked, rewrite=False),
+            label="Vanilla",
+            model=model,
+            items=items,
+        )
+        _save_checkpoint(ckpt_vanilla, vanilla_report, vanilla_scores, [], vanilla_contexts)
 
-    # Rewrite pipeline: query_chunked with rewrite=True
-    rewrite_report, rewrite_scores, rewrite_queries, rewrite_contexts = _run_pipeline(
-        partial(query_chunked, rewrite=True),
-        label="Rewrite",
-        model=model,
-        items=items,
-    )
+    # Rewrite pipeline — load checkpoint or run
+    ckpt_rewrite = _checkpoint_path(output, "rewrite")
+    ckpt_result = _load_checkpoint(ckpt_rewrite)
+    if ckpt_result:
+        rewrite_report, rewrite_scores, rewrite_queries, rewrite_contexts = ckpt_result
+        print("\n=== Rewrite (from checkpoint) ===")
+        print(f"  Overall: {rewrite_report['overall_score']:.4f}  Passed: {rewrite_report['passed_cases']}/{rewrite_report['total_cases']}")
+    else:
+        rewrite_report, rewrite_scores, rewrite_queries, rewrite_contexts = _run_pipeline(
+            partial(query_chunked, rewrite=True),
+            label="Rewrite",
+            model=model,
+            items=items,
+        )
+        _save_checkpoint(ckpt_rewrite, rewrite_report, rewrite_scores, rewrite_queries, rewrite_contexts)
 
     per_case = _binary_comparison(items, vanilla_scores, rewrite_scores, rewrite_queries, vanilla_contexts, rewrite_contexts)
     subgroup = _subgroup_analysis(per_case)
@@ -307,7 +354,7 @@ def main(argv: Optional[list[str]] = None) -> None:
         if not path.exists():
             raise FileNotFoundError(f"Golden set not found: {path}")
 
-    results = run_rewrite_eval(args.model)
+    results = run_rewrite_eval(args.model, output=args.output)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
