@@ -64,6 +64,11 @@
 | v1.5.0 | 2026-03-14 | Add follow-up suggestion block (---SUGGESTIONS---/---END--- delimiters) appended after genuine document answers. UI parses and renders as clickable buttons (NotebookLM-style). Skip for note-mod redirects, emotional responses, and "not found" fallbacks. | Improves discovery of follow-on questions; no impact on main answer quality |
 | v1.5.1 | 2026-03-15 | Add indirect-evidence rule: if context touches topic implicitly (e.g. explains life without X), synthesize answer instead of falling back. Fallback reserved for genuinely unrelated context only. | Fixes false "찾을 수 없습니다" on implicit/indirect evidence blocks |
 
+## query_rewrite.py
+| Version | Date | Change | Quality Impact |
+|---------|------|--------|----------------|
+| v1.0.0 | 2026-03-15 | Initial prompt: language-agnostic retrieval-friendly expansion. Preserves original text and appends KO→EN translations, EN abbreviation full-names, and compound word decomposition. Returns unchanged query when already retrieval-friendly. Used by `rag/query_rewriter.py` with gpt-4.1-nano, max_tokens=128, temperature=0. | Reduces embedding similarity gap caused by KO/EN vocabulary mismatch and abbreviation ambiguity. |
+
 ## Known Limitations & v2 Roadmap (recorded 2026-03-05, CU-07 demo)
 
 Issues observed during CU-07 mid-check demo.

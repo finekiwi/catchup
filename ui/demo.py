@@ -1499,6 +1499,12 @@ def _render_qa_panel(
     _qa_cap_col, _qa_model_col = st.columns([3, 2])
     with _qa_cap_col:
         st.caption(f"{qa_subject}에 대해 질문하세요")
+        use_rewrite = st.checkbox(
+            "Query Rewriting",
+            value=False,
+            key="qa_use_rewrite",
+            help="한국어 구어체나 약어를 영문 기술 용어로 확장해 검색 정확도를 높입니다.",
+        )
     with _qa_model_col:
         qa_llm_model = st.selectbox(
             "Q&A 모델",
@@ -1584,7 +1590,8 @@ def _render_qa_panel(
     if _pending := st.session_state.pop("_pending_chat", None):
         try:
             _chat_result = rag_query(
-                _pending, model=qa_llm_model, document_id=doc.id, top_k=8
+                _pending, model=qa_llm_model, document_id=doc.id, top_k=8,
+                rewrite=st.session_state.get("qa_use_rewrite", False),
             )
             _raw_reply = _chat_result.answer
             _reply, _followups = _parse_followup_suggestions(_raw_reply)
