@@ -1414,11 +1414,9 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
                     unsafe_allow_html=True,
                 )
             else:
-                body_html = md_lib.markdown(msg["content"], extensions=["fenced_code", "tables"])
-                st.markdown(
-                    f'<div class="chat-assistant-msg">{body_html}</div>',
-                    unsafe_allow_html=True,
-                )
+                # Use st.markdown directly — double-processing (md_lib → HTML → st.markdown)
+                # causes react-markdown to re-parse * as emphasis nodes → [object Object]
+                st.markdown(msg["content"])
 
         # Process pending edit
         if _pending_edit := st.session_state.pop("_pending_edit", None):
@@ -1539,10 +1537,8 @@ def _render_qa_panel(
                     unsafe_allow_html=True,
                 )
             else:
-                st.markdown(
-                    f'<div class="chat-assistant-msg">{md_lib.markdown(msg["content"], extensions=["fenced_code", "tables"])}</div>',
-                    unsafe_allow_html=True,
-                )
+                # Use st.markdown directly — avoid double-processing that causes [object Object]
+                st.markdown(msg["content"])
                 _render_source_block_expanders(msg.get("source_blocks", []))
 
         # Follow-up question buttons after the last assistant message
