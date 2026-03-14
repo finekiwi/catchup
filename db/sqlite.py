@@ -156,6 +156,22 @@ def get_document(doc_id: str) -> Optional[Document]:
         connection.close()
 
 
+def delete_document(doc_id: str) -> None:
+    """Delete a document and all its associated notes from SQLite."""
+    connection = _connect()
+    if connection is None:
+        return
+
+    try:
+        connection.execute("DELETE FROM notes WHERE document_id = ?", (doc_id,))
+        connection.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+        connection.commit()
+    except sqlite3.Error:
+        LOGGER.exception("Failed to delete document id=%s", doc_id)
+    finally:
+        connection.close()
+
+
 def update_status(doc_id: str, status: ProcessingStatus) -> None:
     """Update processing status for a document."""
     connection = _connect()

@@ -37,6 +37,7 @@ from parsers.image_parser import parse_image  # noqa: E402
 from parsers.ipynb_parser import parse_ipynb  # noqa: E402
 from parsers.pdf_parser import parse_pdf  # noqa: E402
 from db.sqlite import (  # noqa: E402
+    delete_document,
     get_document,
     get_note,
     list_documents,
@@ -1679,9 +1680,15 @@ with st.sidebar:
             _icon = _FORMAT_ICON.get(_ld.format.value, "📄")
             _date_str = _ld.created_at.strftime("%m/%d")
             _label = f"{_icon} {_ld.source}  ({_date_str})"
-            if st.button(_label, key=f"lib_{_ld.id}", use_container_width=True):
-                st.session_state["_library_load"] = {"doc_id": _ld.id}
-                st.rerun()
+            _col_load, _col_del = st.columns([5, 1])
+            with _col_load:
+                if st.button(_label, key=f"lib_{_ld.id}", use_container_width=True):
+                    st.session_state["_library_load"] = {"doc_id": _ld.id}
+                    st.rerun()
+            with _col_del:
+                if st.button("🗑️", key=f"lib_del_{_ld.id}", help=f"{_ld.source} 삭제"):
+                    delete_document(_ld.id)
+                    st.rerun()
         st.markdown("---")
 
     if st.button("캐시 초기화", use_container_width=True):
