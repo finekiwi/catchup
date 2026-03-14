@@ -1271,12 +1271,23 @@ def _parse_followup_suggestions(answer: str) -> tuple[str, list[str]]:
 
 
 
-def _replace_section_body(full_md: str, heading: str, new_body: str) -> str:
-    """Return full_md with the body of *heading* replaced by new_body."""
+def _replace_section_body(full_md: str, heading_idx: int, new_body: str) -> str:
+    """Return full_md with the body of the nth named section replaced by new_body.
+
+    heading_idx is a 0-based index into the sub-list of sections that have headings,
+    matching the position returned by _render_note_editor_panel's section selectbox.
+    Using an index (rather than heading text) avoids ambiguity when a document
+    contains duplicate ## headings.
+    """
     sections = _split_note_sections(full_md)
     parts: list[str] = []
+    named_count = 0
     for h, b in sections:
-        body = new_body if h == heading else b
+        if h:
+            body = new_body if named_count == heading_idx else b
+            named_count += 1
+        else:
+            body = b
         parts.append(f"{h}\n\n{body}".strip() if h else body)
     return "\n\n".join(parts)
 
@@ -1357,25 +1368,31 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
             label_visibility="collapsed",
         )
 
-    selected = st.selectbox(
+    # Use index-based selectbox so duplicate headings (e.g. two "## 개요") are distinguished.
+    selected_section_idx: int = st.selectbox(  # type: ignore[assignment]
         "수정할 섹션",
-        options=section_headings,
+        options=list(range(len(section_headings))),
+        format_func=lambda i: section_headings[i],
         key="edit_section_selectbox",
     )
+    selected = section_headings[selected_section_idx]
     st.session_state["selected_edit_section"] = selected
+    st.session_state["selected_edit_section_idx"] = selected_section_idx
 
-    # Session state init — chat history keyed by (doc_key, section_heading)
-    # Migrate legacy list format to dict on restart
+    # Session state init — chat/undo keyed by integer section index (not heading text)
     chat_key = f"{_sk}edit_chat_messages"
     undo_key = f"{_sk}note_section_undo"
+    # Scoped pending-preview keys prevent cross-document leakage
+    pending_md_key = f"{_sk}edit_pending_markdown"
+    pending_sec_key = f"{_sk}edit_pending_section"
+    pending_idx_key = f"{_sk}edit_pending_section_idx"
     if chat_key not in st.session_state or isinstance(st.session_state[chat_key], list):
-        st.session_state[chat_key] = {}  # {section_heading: [msg, ...]}
-    # note_section_undo: {section_heading: [section_body_before_edit, ...]}
+        st.session_state[chat_key] = {}  # {section_idx: [msg, ...]}
     if undo_key not in st.session_state:
         st.session_state[undo_key] = {}
 
-    # Ensure current section has a message list
-    sec_msgs: list = st.session_state[chat_key].setdefault(selected, [])
+    # Ensure current section has a message list (keyed by integer index)
+    sec_msgs: list = st.session_state[chat_key].setdefault(selected_section_idx, [])
 
     # Chat container
     chat_container = st.container(height=chat_height)
@@ -1397,7 +1414,8 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
         if _pending_edit := st.session_state.pop("_pending_edit", None):
             instruction = _pending_edit["instruction"]
             section_heading = _pending_edit["section"]
-            cur_msgs = st.session_state[chat_key].setdefault(section_heading, [])
+            section_idx = _pending_edit["section_idx"]
+            cur_msgs = st.session_state[chat_key].setdefault(section_idx, [])
             with st.spinner("수정 중..."):
                 history = [
                     {"role": m["role"], "content": m["content"]}
@@ -1412,12 +1430,9 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
                     history=history,
                 )
             if edit_result.success:
-                # Bind pending preview to the section that produced it so that
-                # switching the selectbox before clicking ✅ 적용 cannot apply
-                # the wrong section's markdown or record the undo entry under
-                # a different heading.
-                st.session_state["edit_pending_markdown"] = edit_result.edited_markdown
-                st.session_state["edit_pending_section"] = section_heading
+                st.session_state[pending_md_key] = edit_result.edited_markdown
+                st.session_state[pending_sec_key] = section_heading
+                st.session_state[pending_idx_key] = section_idx
                 preview_content = f"**{section_heading}** 섹션 수정 결과:\n\n{edit_result.edited_section_body}"
                 cur_msgs.append({"role": "assistant", "content": preview_content, "is_preview": True})
             else:
@@ -1425,35 +1440,39 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
             st.rerun()
 
         # Apply / Cancel buttons inside container (keeps height stable)
-        if st.session_state.get("edit_pending_markdown"):
+        if st.session_state.get(pending_md_key):
             col_apply, col_cancel = st.columns(2)
             with col_apply:
                 if st.button("✅ 적용", use_container_width=True, type="primary"):
-                    # Use the section that produced the preview, not the current selectbox value
-                    pending_sec = st.session_state.get("edit_pending_section") or st.session_state.get("selected_edit_section", "")
-                    # Push current section body to per-section undo stack (max 10)
-                    sec_map = {h: b for h, b in _split_note_sections(raw_md)}
-                    undo_stack = st.session_state[undo_key].setdefault(pending_sec, [])
-                    undo_stack.append(sec_map.get(pending_sec, ""))
+                    pending_idx = st.session_state.get(pending_idx_key, 0)
+                    # Push current body of the pending section to undo stack (max 10)
+                    named_sections = [(h, b) for h, b in _split_note_sections(raw_md) if h]
+                    undo_body = named_sections[pending_idx][1] if pending_idx < len(named_sections) else ""
+                    undo_stack = st.session_state[undo_key].setdefault(pending_idx, [])
+                    undo_stack.append(undo_body)
                     if len(undo_stack) > 10:
                         undo_stack.pop(0)
-                    result["note_markdown"] = st.session_state.pop("edit_pending_markdown")
-                    st.session_state.pop("edit_pending_section", None)
+                    result["note_markdown"] = st.session_state.pop(pending_md_key)
+                    st.session_state.pop(pending_sec_key, None)
+                    st.session_state.pop(pending_idx_key, None)
                     st.rerun()
             with col_cancel:
                 if st.button("❌ 취소", use_container_width=True):
-                    st.session_state.pop("edit_pending_markdown", None)
-                    st.session_state.pop("edit_pending_section", None)
+                    st.session_state.pop(pending_md_key, None)
+                    st.session_state.pop(pending_sec_key, None)
+                    st.session_state.pop(pending_idx_key, None)
                     st.rerun()
 
     # Chat input OUTSIDE the gray box
     if edit_instruction := st.chat_input("수정 지시를 입력하세요 (예: 코드 예제 추가해줘)"):
-        st.session_state[chat_key].setdefault(selected, []).append(
+        _cur_idx = st.session_state.get("selected_edit_section_idx", 0)
+        st.session_state[chat_key].setdefault(_cur_idx, []).append(
             {"role": "user", "content": edit_instruction}
         )
         st.session_state["_pending_edit"] = {
             "instruction": edit_instruction,
             "section": st.session_state.get("selected_edit_section", section_headings[0]),
+            "section_idx": _cur_idx,
         }
         st.rerun()
 
@@ -1853,40 +1872,46 @@ with col_content:
                 # Section-level edit mode: flow as one document, ✏️ per section
                 sections = _split_note_sections(raw_md)
                 first_rendered = True
+                _named_sec_idx = 0  # tracks position among sections that have headings
                 for _sec_heading, _sec_body in sections:
                     content_md = (
                         f"{_sec_heading}\n\n{_sec_body}".strip() if _sec_heading else _sec_body
                     )
                     if not content_md:
+                        if _sec_heading:
+                            _named_sec_idx += 1
                         continue
                     if not first_rendered:
                         st.markdown('<hr class="note-sep">', unsafe_allow_html=True)
                     st.markdown(_render_note_section_html(content_md), unsafe_allow_html=True)
                     if _sec_heading:
+                        _cur_named_idx = _named_sec_idx  # capture for closure
                         _, _action_col = st.columns([6, 1])
                         with _action_col:
                             st.markdown('<div class="sec-action-btns">', unsafe_allow_html=True)
                             if st.button(
                                 "✏️",
-                                key=f"edit_sec_{_sec_heading}",
+                                key=f"edit_sec_{_cur_named_idx}",
                                 help=f"'{_sec_heading}' 섹션 수정",
                             ):
                                 st.session_state["selected_edit_section"] = _sec_heading
-                                st.session_state["edit_section_selectbox"] = _sec_heading
+                                st.session_state["selected_edit_section_idx"] = _cur_named_idx
+                                st.session_state["edit_section_selectbox"] = _cur_named_idx
                                 st.session_state["active_right_panel"] = "✏️ 노트 수정"
                                 st.rerun()
                             _undo_key = f"editor_{doc.id}_note_section_undo"
-                            _sec_stack = st.session_state.get(_undo_key, {}).get(_sec_heading, [])
+                            _sec_stack = st.session_state.get(_undo_key, {}).get(_cur_named_idx, [])
                             if st.button(
                                 "↩",
-                                key=f"undo_sec_{_sec_heading}",
+                                key=f"undo_sec_{_cur_named_idx}",
                                 disabled=len(_sec_stack) == 0,
                                 help=f"'{_sec_heading}' 섹션 되돌리기",
                             ):
                                 prev_body = _sec_stack.pop()
-                                result["note_markdown"] = _replace_section_body(raw_md, _sec_heading, prev_body)
+                                result["note_markdown"] = _replace_section_body(raw_md, _cur_named_idx, prev_body)
                                 st.rerun()
                             st.markdown('</div>', unsafe_allow_html=True)
+                        _named_sec_idx += 1
                     first_rendered = False
             else:
                 # Pure read view
