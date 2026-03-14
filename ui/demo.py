@@ -1529,7 +1529,10 @@ def _render_qa_panel(
                 unsafe_allow_html=True,
             )
 
-    chat_container = st.container(height=chat_height)
+    # During loading, skip fixed height to prevent Streamlit splitting the container
+    # into two gray boxes. After rerun, full height is restored.
+    _is_loading = "_pending_chat" in st.session_state
+    chat_container = st.container(height=None if _is_loading else chat_height)
     with chat_container:
         msgs = st.session_state[_qa_chat_key]
         for msg in msgs:
@@ -1559,22 +1562,20 @@ def _render_qa_panel(
                 st.markdown("</div>", unsafe_allow_html=True)
 
         if _pending := st.session_state.pop("_pending_chat", None):
-            _spinner_slot = st.empty()
-            _spinner_slot.markdown("🔄 생각 중...")
-            try:
-                _chat_result = rag_query(
-                    _pending, model=qa_llm_model, document_id=doc.id
-                )
-                _raw_reply = _chat_result.answer
-                _reply, _followups = _parse_followup_suggestions(_raw_reply)
-                _source_blocks = _serialize_source_blocks(
-                    _chat_result.source_blocks
-                )
-            except Exception as _exc:
-                _reply = f"오류가 발생했습니다: {_exc}"
-                _followups = []
-                _source_blocks = []
-            _spinner_slot.empty()
+            with st.spinner("생각 중..."):
+                try:
+                    _chat_result = rag_query(
+                        _pending, model=qa_llm_model, document_id=doc.id
+                    )
+                    _raw_reply = _chat_result.answer
+                    _reply, _followups = _parse_followup_suggestions(_raw_reply)
+                    _source_blocks = _serialize_source_blocks(
+                        _chat_result.source_blocks
+                    )
+                except Exception as _exc:
+                    _reply = f"오류가 발생했습니다: {_exc}"
+                    _followups = []
+                    _source_blocks = []
             st.session_state[_qa_chat_key].append(
                 {
                     "role": "assistant",
