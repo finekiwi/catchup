@@ -1510,33 +1510,6 @@ def _render_qa_panel(
     if _qa_chat_key not in st.session_state:
         st.session_state[_qa_chat_key] = []
 
-    # Process pending query BEFORE rendering the container — prevents Streamlit from
-    # splitting the fixed-height container into two separate gray boxes during spinner.
-    if _pending := st.session_state.pop("_pending_chat", None):
-        with st.spinner("생각 중..."):
-            try:
-                _chat_result = rag_query(
-                    _pending, model=qa_llm_model, document_id=doc.id
-                )
-                _raw_reply = _chat_result.answer
-                _reply, _followups = _parse_followup_suggestions(_raw_reply)
-                _source_blocks = _serialize_source_blocks(
-                    _chat_result.source_blocks
-                )
-            except Exception as _exc:
-                _reply = f"오류가 발생했습니다: {_exc}"
-                _followups = []
-                _source_blocks = []
-        st.session_state[_qa_chat_key].append(
-            {
-                "role": "assistant",
-                "content": _reply,
-                "source_blocks": _source_blocks,
-                "followup_suggestions": _followups,
-            }
-        )
-        st.rerun()
-
     # Suggestion card shown above the gray box only while no messages
     if not st.session_state[_qa_chat_key]:
         if is_image:
@@ -1584,6 +1557,33 @@ def _render_qa_panel(
                         st.session_state["_pending_chat"] = fq
                         st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
+
+        if _pending := st.session_state.pop("_pending_chat", None):
+            _spinner_slot = st.empty()
+            _spinner_slot.markdown("🔄 생각 중...")
+            try:
+                _chat_result = rag_query(
+                    _pending, model=qa_llm_model, document_id=doc.id
+                )
+                _raw_reply = _chat_result.answer
+                _reply, _followups = _parse_followup_suggestions(_raw_reply)
+                _source_blocks = _serialize_source_blocks(
+                    _chat_result.source_blocks
+                )
+            except Exception as _exc:
+                _reply = f"오류가 발생했습니다: {_exc}"
+                _followups = []
+                _source_blocks = []
+            _spinner_slot.empty()
+            st.session_state[_qa_chat_key].append(
+                {
+                    "role": "assistant",
+                    "content": _reply,
+                    "source_blocks": _source_blocks,
+                    "followup_suggestions": _followups,
+                }
+            )
+            st.rerun()
 
     # Chat input OUTSIDE the gray box (prevents double-box visual during spinner)
     if user_input := st.chat_input("질문을 입력하세요"):
