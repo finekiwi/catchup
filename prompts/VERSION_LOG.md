@@ -49,6 +49,15 @@
 | v1.3.1 | 2026-03-13 | Add code-identifier handling: when a relevant code/text block is retrieved, explain the symbol's role from surrounding context instead of falling back to "not found" over minor punctuation/exact-match differences. | Improves answers for code screenshot questions such as functions/classes referenced with quotes or missing punctuation |
 | v1.3.2 | 2026-03-13 | Narrow note-modification detection to explicit edit requests only; explanation/summary/simplification requests must remain normal Q&A. | Prevents "설명해줘" style questions from being misrouted to the note-editing fallback |
 
+## note_editor.py
+| Version | Date | Change | Quality Impact |
+|---------|------|--------|----------------|
+| v1.0.0 | 2026-03-13 | Initial prompt: section-level study note editing via natural-language instruction. Outputs raw markdown body (no heading, no JSON). Includes security guard against prompt injection in user instruction. Multi-turn context supported via section_list + history. | Baseline |
+
+## rag_qa.py (continued)
+| v1.4.0 | 2026-03-13 | Update note-modification response: redirect user to '✏️ 노트 수정' tab instead of edit mode toggle, reflecting new CU-11 note editor UI. | Aligns prompt with new UI affordance |
+| v1.5.0 | 2026-03-14 | Add follow-up suggestion block (---SUGGESTIONS---/---END--- delimiters) appended after genuine document answers. UI parses and renders as clickable buttons (NotebookLM-style). Skip for note-mod redirects, emotional responses, and "not found" fallbacks. | Improves discovery of follow-on questions; no impact on main answer quality |
+
 ## Known Limitations & v2 Roadmap (recorded 2026-03-05, CU-07 demo)
 
 Issues observed during CU-07 mid-check demo.

@@ -180,8 +180,23 @@ def rechunk_blocks(
         except Exception as exc:
             LOGGER.warning("HybridChunker failed for %s, falling back: %s", document.source, exc)
 
-    # Fallback: flat block iteration (original behaviour)
+    # Fallback: flat block iteration with chunk cache for ipynb files
     LOGGER.warning("rechunk_blocks: DoclingDocument not cached for %s — using flat blocks", document.source)
+    from utils.cache import load_cached_chunks, save_cached_chunks
+
+    # Try loading previously computed flat chunks to avoid re-iteration on re-runs
+    source_path: Optional["_Path"] = None
+    for candidate_dir in ("data/golden", "data"):
+        candidate = _Path(candidate_dir) / document.source
+        if candidate.exists():
+            source_path = candidate
+            break
+
+    if source_path is not None:
+        cached_chunks = load_cached_chunks(source_path)
+        if cached_chunks is not None:
+            return cached_chunks
+
     flat: list[tuple[str, dict]] = []
     for block in document.blocks:
         content = block.content.strip()
@@ -196,6 +211,10 @@ def rechunk_blocks(
         if block.metadata.page is not None:
             meta["page"] = block.metadata.page
         flat.append((content, meta))
+
+    if source_path is not None:
+        save_cached_chunks(source_path, flat)
+
     return flat
 
 

@@ -264,7 +264,7 @@ def generate_note(doc: Document, model: str = "gpt-4o-mini") -> dict[str, Any]:
             )
             if "note_generation_failed" not in doc.metadata.tags:
                 doc.metadata.tags.append("note_generation_failed")
-            return _make_fallback(doc, raw, "JSON parse failed")
+            return _make_fallback(doc, raw, "노트 구조 분석이 불완전합니다. 원문 형식으로 표시됩니다.")
 
         log_api_call(
             model=model,

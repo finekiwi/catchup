@@ -178,4 +178,75 @@ def save_docling_doc(file_path: Path, dl_doc: Any) -> None:
         LOGGER.warning("Docling cache save failed for %s: %s", file_path, exc)
 
 
-__all__ = ["load_cached_parse", "save_cached_parse", "load_docling_doc", "save_docling_doc"]
+def _chunks_cache_path(file_path: Path) -> Path:
+    """Return the cache JSON path for rechunked flat blocks of a given source file."""
+    digest = _file_sha256(file_path)
+    return _cache_dir() / f"{digest[:16]}_chunks.json"
+
+
+def load_cached_chunks(file_path: Path) -> Optional[list[tuple[str, dict]]]:
+    """Load cached rechunk output for file_path if a valid entry exists.
+
+    Used for ipynb flat-block rechunking where no DoclingDocument is available.
+    Returns None on cache miss, hash mismatch, or decode error.
+
+    Args:
+        file_path: Path to the source .ipynb file.
+
+    Returns:
+        List of (chunk_text, metadata_dict) tuples, or None if no valid cache entry.
+    """
+    try:
+        path = _chunks_cache_path(file_path)
+        if not path.exists():
+            return None
+
+        raw = json.loads(path.read_text(encoding="utf-8"))
+
+        stored_hash = raw.get("_cache_hash")
+        current_hash = _file_sha256(file_path)
+        if stored_hash != current_hash:
+            LOGGER.debug("Chunks cache hash mismatch for %s — invalidating", file_path.name)
+            return None
+
+        chunks = [(item[0], item[1]) for item in raw["chunks"]]
+        LOGGER.info("Chunks cache hit: %s (%s)", file_path.name, path.name)
+        return chunks
+
+    except Exception as exc:
+        LOGGER.debug("Chunks cache load failed for %s: %s", file_path, exc)
+        return None
+
+
+def save_cached_chunks(file_path: Path, chunks: list[tuple[str, dict]]) -> None:
+    """Persist rechunked flat-block output to the cache directory.
+
+    Args:
+        file_path: Path to the original source .ipynb file.
+        chunks: List of (chunk_text, metadata_dict) tuples from rechunk_blocks().
+    """
+    try:
+        cache_dir = _cache_dir()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        path = _chunks_cache_path(file_path)
+        payload = {
+            "_cache_hash": _file_sha256(file_path),
+            "_source": str(file_path),
+            "chunks": [[text, meta] for text, meta in chunks],
+        }
+        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        LOGGER.info("Chunks cache saved: %s → %s", file_path.name, path.name)
+
+    except Exception as exc:
+        LOGGER.warning("Chunks cache save failed for %s: %s", file_path, exc)
+
+
+__all__ = [
+    "load_cached_parse",
+    "save_cached_parse",
+    "load_docling_doc",
+    "save_docling_doc",
+    "load_cached_chunks",
+    "save_cached_chunks",
+]

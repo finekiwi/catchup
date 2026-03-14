@@ -341,6 +341,7 @@ dependencies = [
     { name = "openai" },
     { name = "pillow" },
     { name = "pypdf" },
+    { name = "pyperclip" },
     { name = "python-dotenv" },
     { name = "pyvis" },
     { name = "streamlit" },
@@ -368,6 +369,7 @@ requires-dist = [
     { name = "openai", specifier = ">=1.50.0" },
     { name = "pillow", specifier = ">=11.0.0" },
     { name = "pypdf", specifier = ">=6.8.0" },
+    { name = "pyperclip", specifier = ">=1.11.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "pyvis", specifier = ">=0.3.2" },
     { name = "streamlit", specifier = ">=1.54.0" },
@@ -3501,6 +3503,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ac/38/f77e7792b4fba37f0e3d78db52fb7288d41db3c46ed28906fb940bc3e325/pypdfium2-5.5.0-py3-none-win32.whl", hash = "sha256:ec62a00223d1222d2f35c0866dd79cdc24da070738544cdf51b17d332d4a7389", size = 3001772, upload-time = "2026-02-18T23:22:32.367Z" },
     { url = "https://files.pythonhosted.org/packages/3e/c5/0d7ba53148262f78d8eee528a504764f78ae7bebf434a53714294b1fd973/pypdfium2-5.5.0-py3-none-win_amd64.whl", hash = "sha256:15c32fbeebb5198afa785dd03e98906ebb4eded9ef8862e10f833c37b4a18786", size = 3107710, upload-time = "2026-02-18T23:22:33.925Z" },
     { url = "https://files.pythonhosted.org/packages/29/ad/fae449d2ed7b3088c6ab088f53fc6a9e9af26ccc9e0477d4182e373c4dd8/pypdfium2-5.5.0-py3-none-win_arm64.whl", hash = "sha256:f618af0884c16c768539c44933a255039131dbbf39d68eded020da4f14958d73", size = 2938315, upload-time = "2026-02-18T23:22:35.907Z" },
+]
+
+[[package]]
+name = "pyperclip"
+version = "1.11.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/52/d87eba7cb129b81563019d1679026e7a112ef76855d6159d24754dbd2a51/pyperclip-1.11.0.tar.gz", hash = "sha256:244035963e4428530d9e3a6101a1ef97209c6825edab1567beac148ccc1db1b6", size = 12185, upload-time = "2025-09-26T14:40:37.245Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/df/80/fc9d01d5ed37ba4c42ca2b55b4339ae6e200b456be3a1aaddf4a9fa99b8c/pyperclip-1.11.0-py3-none-any.whl", hash = "sha256:299403e9ff44581cb9ba2ffeed69c7aa96a008622ad0c46cb575ca75b5b84273", size = 11063, upload-time = "2025-09-26T14:40:36.069Z" },
 ]
 
 [[package]]
