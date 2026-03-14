@@ -45,7 +45,7 @@ from db.sqlite import (  # noqa: E402
     save_document,
     save_note,
 )
-from rag import index_document, query as rag_query  # noqa: E402
+from rag import delete_document_index, index_document, query as rag_query  # noqa: E402
 from vlm.client import SUPPORTED_MODELS  # noqa: E402
 
 # Keys injected by the LLM schema but not rendered as note content
@@ -1694,6 +1694,8 @@ with st.sidebar:
                         st.session_state.pop(f"doc_{_nr['file_hash']}_{_nr['vlm_model']}", None)
                         st.session_state.pop(f"is_image_{_evict_key}", None)
                         st.session_state.pop(f"_toast_shown_{_evict_key}", None)
+                    st.session_state.pop(f"indexed_{_ld.id}", None)
+                    delete_document_index(_ld.id)  # Remove ChromaDB vectors so re-upload re-indexes
                     delete_document(_ld.id)
                     st.rerun()
         st.markdown("---")

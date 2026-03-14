@@ -877,8 +877,32 @@ def query(
         )
 
 
+def delete_document_index(document_id: str) -> None:
+    """Delete all ChromaDB entries for a document from both RAG collections.
+
+    Called when a document is removed from the library so stale vectors don't
+    persist and re-uploads trigger a fresh index with current filters applied.
+
+    Args:
+        document_id: Document.id whose entries should be removed.
+    """
+    for name in (RAG_COLLECTION_NAME, RAG_CHUNKED_COLLECTION_NAME):
+        collection = _get_rag_collection(name)
+        if collection is None:
+            continue
+        try:
+            result = collection.get(where={"document_id": document_id})
+            ids = result.get("ids", [])
+            if ids:
+                collection.delete(ids=ids)
+                LOGGER.info("Deleted %d vectors for document id=%s from %s", len(ids), document_id, name)
+        except Exception as exc:
+            LOGGER.warning("Failed to delete vectors for document id=%s from %s: %s", document_id, name, exc)
+
+
 __all__ = [
     "index_document", "index_document_chunked",
+    "delete_document_index",
     "query", "query_chunked",
     "rechunk_blocks",
     "QAResult", "SourceBlock", "SUPPORTED_MODELS",
