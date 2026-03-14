@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -163,6 +164,8 @@ def delete_document(doc_id: str) -> None:
         return
 
     try:
+        # Delete notes before documents — no FOREIGN KEY ... ON DELETE CASCADE is defined,
+        # so the ordering must be explicit to preserve referential integrity.
         connection.execute("DELETE FROM notes WHERE document_id = ?", (doc_id,))
         connection.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
         connection.commit()
@@ -244,8 +247,6 @@ def save_note(
     connection = _connect()
     if connection is None:
         return
-
-    from datetime import datetime, timezone
 
     result_json = json.dumps(result, ensure_ascii=False)
     now = datetime.now(timezone.utc).isoformat()

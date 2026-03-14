@@ -293,6 +293,16 @@ def generate_note(doc: Document, model: str = "gpt-4o-mini") -> dict[str, Any]:
     provider = _MODEL_REGISTRY[model]["provider"]
     call_fn = _PROVIDER_DISPATCH[provider]
     user_content = _serialize_blocks(doc)
+
+    # Guard: if noise filtering removed every block, fail fast rather than letting
+    # the LLM hallucinate a note from an empty context.
+    if not user_content.strip():
+        error_msg = "All document blocks were filtered as noise — no content to generate a note from."
+        LOGGER.warning("generate_note aborted for document id=%s: %s", doc.id, error_msg)
+        if "note_generation_failed" not in doc.metadata.tags:
+            doc.metadata.tags.append("note_generation_failed")
+        return _make_fallback(doc, "", error_msg)
+
     t0 = time.perf_counter()
 
     try:
@@ -310,12 +320,24 @@ def generate_note(doc: Document, model: str = "gpt-4o-mini") -> dict[str, Any]:
                 LOGGER.warning("NoteGenerationOutput schema validation warning: %s", val_exc)
         except (json.JSONDecodeError, ValueError) as parse_exc:
             LOGGER.warning("Note generation JSON parse failed (attempt 1): %s — retrying", parse_exc)
+            # Log attempt-1 failure so every API call is accounted for in the audit log
+            log_api_call(
+                model=model,
+                stage="note_generation",
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_ms=latency_ms,
+                cost_usd=cost_usd,
+                success=False,
+                error=f"JSON parse failed (attempt 1): {parse_exc}",
+            )
             # Retry once with an explicit JSON-only nudge in the user message
             retry_user = user_content + "\n\nIMPORTANT: Respond with valid JSON only. No markdown fences, no extra text."
+            t1 = time.perf_counter()
             try:
                 raw, input_tokens, output_tokens = call_fn(model, PROMPT, retry_user)
-                latency_ms = (time.perf_counter() - t0) * 1000
-                cost_usd = _compute_cost(model, input_tokens, output_tokens)
+                retry_latency_ms = (time.perf_counter() - t1) * 1000
+                retry_cost_usd = _compute_cost(model, input_tokens, output_tokens)
                 result = json.loads(_strip_markdown_fence(raw))
                 if not isinstance(result, dict):
                     raise ValueError("LLM retry response JSON must be an object")
@@ -323,32 +345,37 @@ def generate_note(doc: Document, model: str = "gpt-4o-mini") -> dict[str, Any]:
                     result = NoteGenerationOutput.model_validate(result).model_dump()
                 except Exception as val_exc:
                     LOGGER.warning("NoteGenerationOutput schema validation warning (retry): %s", val_exc)
-                # Log successful retry separately for failure-rate tracking
+                # Log successful retry with its own latency/tokens — not end-to-end
                 log_api_call(
                     model=model,
                     stage="note_generation_retry",
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
-                    latency_ms=latency_ms,
-                    cost_usd=cost_usd,
+                    latency_ms=retry_latency_ms,
+                    cost_usd=retry_cost_usd,
                     success=True,
                     error=None,
                 )
             except (json.JSONDecodeError, ValueError) as retry_exc:
+                retry_latency_ms = (time.perf_counter() - t1) * 1000
+                retry_cost_usd = _compute_cost(model, input_tokens, output_tokens)
                 LOGGER.warning("Note generation JSON parse failed (retry): %s", retry_exc)
                 log_api_call(
                     model=model,
                     stage="note_generation_retry",
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
-                    latency_ms=latency_ms,
-                    cost_usd=cost_usd,
+                    latency_ms=retry_latency_ms,
+                    cost_usd=retry_cost_usd,
                     success=False,
                     error=f"JSON parse failed after retry: {retry_exc}",
                 )
                 if "note_generation_failed" not in doc.metadata.tags:
                     doc.metadata.tags.append("note_generation_failed")
                 return _make_fallback(doc, raw, "노트 구조 분석이 불완전합니다. 원문 형식으로 표시됩니다.")
+            # Retry succeeded — return early without logging via the normal success path below
+            doc.status = ProcessingStatus.NOTE_GENERATED
+            return result
 
         log_api_call(
             model=model,

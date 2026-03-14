@@ -45,7 +45,7 @@ from db.sqlite import (  # noqa: E402
     save_document,
     save_note,
 )
-from rag import delete_document_index, index_document, query as rag_query  # noqa: E402
+from rag import delete_document_index, has_document_vectors, index_document, query as rag_query  # noqa: E402
 from vlm.client import SUPPORTED_MODELS  # noqa: E402
 
 # Keys injected by the LLM schema but not rendered as note content
@@ -1709,6 +1709,19 @@ with st.sidebar:
                         st.session_state.pop(f"is_image_{_evict_key}", None)
                         st.session_state.pop(f"_toast_shown_{_evict_key}", None)
                     st.session_state.pop(f"indexed_{_ld.id}", None)
+                    # If the document being deleted is currently open in library mode,
+                    # clear all library pointers so the next rerun returns to landing state
+                    # rather than dereferencing missing session keys and crashing.
+                    if (
+                        st.session_state.get("_library_mode")
+                        and st.session_state.get("_library_doc_id") == _ld.id
+                    ):
+                        for _k in (
+                            "_library_mode", "_library_doc_id", "_library_cache_key",
+                            "_library_doc_cache_key", "_library_used_vlm", "_library_used_llm",
+                            "_library_file_hash", "_library_just_loaded",
+                        ):
+                            st.session_state.pop(_k, None)
                     delete_document_index(_ld.id)  # Remove ChromaDB vectors so re-upload re-indexes
                     delete_document(_ld.id)
                     st.rerun()
@@ -1745,13 +1758,21 @@ if "_library_load" in st.session_state:
         st.session_state[_ck] = _note_row["result"]
         st.session_state[_dck] = _lib_doc
         st.session_state[f"is_image_{_ck}"] = _note_row["is_image"]
-        st.session_state[f"indexed_{_lib_doc.id}"] = True
+        # Only mark as indexed when ChromaDB actually has vectors for this document.
+        # An unconditional True would suppress re-indexing even when embeddings are absent
+        # (e.g. after a crash or indexing failure), causing Q&A/note-editor to retrieve nothing.
+        if has_document_vectors(_lib_doc.id):
+            st.session_state[f"indexed_{_lib_doc.id}"] = True
         st.session_state["_library_mode"] = True
+        st.session_state["_library_doc_id"] = _lib_doc.id
         st.session_state["_library_cache_key"] = _ck
         st.session_state["_library_doc_cache_key"] = _dck
         st.session_state["_library_used_vlm"] = _used_vlm
         st.session_state["_library_used_llm"] = _used_llm
         st.session_state["_library_file_hash"] = _fh
+        # Mark this rerun as a fresh library load so the uploaded-file override below
+        # does not immediately cancel the restore when the uploader still holds a file.
+        st.session_state["_library_just_loaded"] = True
         _lib_mode = True
 
 if uploaded_file is None and not _lib_mode:
@@ -1783,14 +1804,17 @@ if _lib_mode:
         f'(모델: {html.escape(_used_vlm)} / {html.escape(_used_llm)})</div>',
         unsafe_allow_html=True,
     )
-    if uploaded_file is not None:
-        # User uploaded a new file — exit library mode and proceed normally
-        st.session_state.pop("_library_mode", None)
-        st.session_state.pop("_library_cache_key", None)
-        st.session_state.pop("_library_doc_cache_key", None)
-        st.session_state.pop("_library_used_vlm", None)
-        st.session_state.pop("_library_used_llm", None)
-        st.session_state.pop("_library_file_hash", None)
+    _just_loaded = st.session_state.pop("_library_just_loaded", False)
+    if uploaded_file is not None and not _just_loaded:
+        # User uploaded a new file — exit library mode and proceed normally.
+        # Skip this check on the same rerun that just established library mode so
+        # a stale file_uploader value cannot immediately cancel the restore.
+        for _k in (
+            "_library_mode", "_library_doc_id", "_library_cache_key",
+            "_library_doc_cache_key", "_library_used_vlm", "_library_used_llm",
+            "_library_file_hash",
+        ):
+            st.session_state.pop(_k, None)
         st.rerun()
 else:
     # Normal upload flow
@@ -1899,8 +1923,10 @@ if not st.session_state.get(_indexed_key):
         except Exception as _idx_exc:
             st.warning(f"RAG 인덱싱 실패: {_idx_exc}")
     else:
-        # Library mode: ChromaDB already has embeddings from original analysis
-        st.session_state[_indexed_key] = True
+        # Library mode: blocks are not available locally. Mark as indexed only when
+        # ChromaDB actually holds vectors — avoids silently grounding Q&A on an empty index.
+        if has_document_vectors(doc.id):
+            st.session_state[_indexed_key] = True
 
 # ===================================================================
 # RESULTS — Study note (default view) + Chat panel

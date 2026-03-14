@@ -29,7 +29,7 @@ INSTRUCTIONS:
 
 OUTPUT FORMAT (JSON only, no markdown fences):
 {
-  "schema_version": "v1.5.1",
+  "schema_version": "v1.5.2",  # keep in sync with PROMPT_VERSION
   "title": "Note title in original language",
   "summary": "2-3 sentence summary in original language",
   "note_markdown": "## Section\\n\\nParagraph text here.\\n\\n### Subsection\\n\\n- bullet",

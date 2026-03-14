@@ -392,6 +392,16 @@ def index_document(document: Document) -> None:
         return
 
     indexable_blocks = [b for b in document.blocks if b.content.strip() and not _is_noise_block(b)]
+
+    # Guard: if noise filtering removed every block there is nothing to embed.
+    # Treat this as a no-op rather than letting expected_block_count==0 cause
+    # _is_document_indexed to always return True and silently suppress future attempts.
+    if not indexable_blocks:
+        LOGGER.warning(
+            "index_document skipped for document id=%s: all blocks filtered as noise", document.id
+        )
+        return
+
     if _is_document_indexed(collection, document.id, len(indexable_blocks)):
         LOGGER.info("Document id=%s already indexed, skipping", document.id)
         return
@@ -899,13 +909,15 @@ def retrieve_context(
         return []
 
     try:
+        t0 = time.perf_counter()
         query_vector, embed_tokens = _get_openai_embedding(query_text)
+        latency_ms = (time.perf_counter() - t0) * 1000
         log_api_call(
             model=EMBED_MODEL,
             stage="note_edit_retrieve",
             input_tokens=embed_tokens,
             output_tokens=0,
-            latency_ms=0.0,
+            latency_ms=latency_ms,
             cost_usd=embed_tokens * _EMBED_COST_PER_1M_USD / 1_000_000,
             success=True,
             error=None,
@@ -930,6 +942,26 @@ def retrieve_context(
     except Exception:
         LOGGER.exception("ChromaDB context retrieval failed for document_id=%s", document_id)
         return []
+
+
+def has_document_vectors(document_id: str) -> bool:
+    """Return True if at least one vector is stored for this document in the RAG collection.
+
+    Used by the UI to decide whether to set the indexed session-state flag when restoring
+    a document from the library — avoids marking a document as indexed when embeddings were
+    never stored or were deleted.
+
+    Args:
+        document_id: Document.id to check.
+    """
+    collection = _get_rag_collection()
+    if collection is None:
+        return False
+    try:
+        result = collection.get(where={"document_id": {"$eq": document_id}})
+        return len(result.get("ids") or []) > 0
+    except Exception:
+        return False
 
 
 def delete_document_index(document_id: str) -> None:
@@ -958,6 +990,7 @@ def delete_document_index(document_id: str) -> None:
 __all__ = [
     "index_document", "index_document_chunked",
     "delete_document_index",
+    "has_document_vectors",
     "query", "query_chunked",
     "retrieve_context",
     "rechunk_blocks",
