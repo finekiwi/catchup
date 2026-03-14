@@ -29,7 +29,7 @@ load_dotenv()
 
 LOGGER = logging.getLogger(__name__)
 
-_MAX_BLOCKS = 80
+_MAX_BLOCKS = 200
 _MAX_CONTENT_LEN = 1200      # per block in normal mode
 _MAX_CONTENT_LEN_LARGE = 600 # per block when doc has many blocks
 _LARGE_DOC_THRESHOLD = 40    # blocks: above this, use large-doc strategy
@@ -120,14 +120,24 @@ _PROVIDER_DISPATCH: dict[str, Any] = {
 }
 
 
+_MIN_FIGURE_CONTENT_LEN = 20  # figure blocks shorter than this carry no useful text
+
+
 def _sample_blocks(doc: Document, max_blocks: int = _MAX_BLOCKS) -> list:
     """Return a representative block sample from the document.
 
-    For large documents, evenly samples across the full block list so the
+    Figure blocks with very short content (< _MIN_FIGURE_CONTENT_LEN chars) are
+    excluded before sampling — they have no extractable text and only waste tokens.
+    Figure blocks with VLM-generated descriptions (longer content) are kept.
+
+    For large documents, evenly samples across the filtered block list so the
     LLM sees content from beginning, middle, and end rather than just the
     first N blocks.
     """
-    blocks = doc.blocks
+    blocks = [
+        b for b in doc.blocks
+        if not (b.type == BlockType.FIGURE and len(b.content.strip()) < _MIN_FIGURE_CONTENT_LEN)
+    ]
     if len(blocks) <= max_blocks:
         return blocks
 
