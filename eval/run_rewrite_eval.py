@@ -41,6 +41,7 @@ _REWRITE_MODEL = "gpt-4.1-nano"
 REWRITE_NEEDED_CASES: set[str] = {
     "gs_005",        # "MLP" abbreviation → "MLP (Multilayer Perceptron)" helps match EN+KO docs
     "gs_008",        # EN query against KO git book; "inline commit" → "인라인 커밋 (inline commit, git commit -m)"
+    "gs_016",        # KO colloquial compound "커밋로그" → "커밋 로그 (commit log, git log, 기록보기)"; vanilla retrieves commit-intro chunks instead of git log section
     "gs_ipynb_003",  # "RAG" acronym → "RAG (Retrieval-Augmented Generation, 검색 증강 생성)" in KO notebook
     "gs_ipynb_008",  # mixed KO query containing "노드 조회" — KO/EN expansion helpful
     "gs_ipynb_009",  # EN query about KO RAG pipeline; "search_db tool" + "RAG pipeline" expansion helpful
@@ -58,16 +59,21 @@ def _load_golden_items() -> list[dict]:
     return items
 
 
-def _build_eval_cases(query_fn, label: str, model: str, items: list[dict]) -> tuple[list, list[str | None]]:
-    """Build EvalCase list, also capturing rewritten queries for comparison output.
+def _build_eval_cases(
+    query_fn, label: str, model: str, items: list[dict]
+) -> tuple[list, list[str | None], list[list[str]]]:
+    """Build EvalCase list, also capturing rewritten queries and retrieved contexts.
 
     Returns:
-        (cases, rewritten_queries) — rewritten_queries[i] is the rewritten string or None.
+        (cases, rewritten_queries, all_retrieved_contexts)
+        — rewritten_queries[i]: rewritten string or None
+        — all_retrieved_contexts[i]: list of "source:page\\ncontent_preview" strings for case i
     """
     from eval.evaluator import EvalCase
 
     cases = []
     rewritten_queries: list[str | None] = []
+    all_retrieved_contexts: list[list[str]] = []
 
     for item in items:
         question: str = item["question"]
@@ -92,6 +98,7 @@ def _build_eval_cases(query_fn, label: str, model: str, items: list[dict]) -> tu
             sources = []
             rewritten_queries.append(None)
 
+        all_retrieved_contexts.append(retrieved_contexts)
         cases.append(EvalCase(
             question=question,
             expected_answer=expected,
@@ -102,15 +109,17 @@ def _build_eval_cases(query_fn, label: str, model: str, items: list[dict]) -> tu
             tier=tier,
         ))
 
-    return cases, rewritten_queries
+    return cases, rewritten_queries, all_retrieved_contexts
 
 
-def _run_pipeline(query_fn, label: str, model: str, items: list[dict]) -> tuple[dict, list[float], list[str | None]]:
-    """Run evaluation pipeline and return (report_dict, per_case_overall_scores, rewritten_queries)."""
+def _run_pipeline(
+    query_fn, label: str, model: str, items: list[dict]
+) -> tuple[dict, list[float], list[str | None], list[list[str]]]:
+    """Run evaluation pipeline and return (report_dict, per_case_overall_scores, rewritten_queries, retrieved_contexts)."""
     from eval.evaluator import run_evaluation
 
     LOGGER.info("=== Pipeline: %s ===", label)
-    cases, rewritten_queries = _build_eval_cases(query_fn, label, model, items)
+    cases, rewritten_queries, retrieved_contexts = _build_eval_cases(query_fn, label, model, items)
     report = run_evaluation(cases, model=model)
 
     per_case_scores = [cr.overall_score for cr in report.per_case_results]
@@ -123,7 +132,7 @@ def _run_pipeline(query_fn, label: str, model: str, items: list[dict]) -> tuple[
     print(f"  Overall:            {report.overall_score:.4f}")
     print(f"  Passed:             {report.passed_cases}/{report.total_cases}")
 
-    return asdict(report), per_case_scores, rewritten_queries
+    return asdict(report), per_case_scores, rewritten_queries, retrieved_contexts
 
 
 def _binary_comparison(
@@ -131,8 +140,10 @@ def _binary_comparison(
     vanilla_scores: list[float],
     rewrite_scores: list[float],
     rewrite_queries: list[str | None],
+    vanilla_contexts: list[list[str]],
+    rewrite_contexts: list[list[str]],
 ) -> list[dict]:
-    """Build per-case binary comparison list."""
+    """Build per-case binary comparison list with retrieval context diff."""
     _PASS_THRESHOLD = 0.5
     result = []
     for i, item in enumerate(items):
@@ -146,6 +157,8 @@ def _binary_comparison(
             "rewrite_overall": round(rewrite_scores[i], 4),
             "vanilla_correct": vanilla_scores[i] >= _PASS_THRESHOLD,
             "rewrite_correct": rewrite_scores[i] >= _PASS_THRESHOLD,
+            "vanilla_retrieved": vanilla_contexts[i],
+            "rewrite_retrieved": rewrite_contexts[i],
         })
     return result
 
@@ -212,7 +225,7 @@ def run_rewrite_eval(model: str) -> dict:
     items = _load_golden_items()
 
     # Vanilla pipeline: query_chunked with rewrite=False (default)
-    vanilla_report, vanilla_scores, _ = _run_pipeline(
+    vanilla_report, vanilla_scores, _, vanilla_contexts = _run_pipeline(
         partial(query_chunked, rewrite=False),
         label="Vanilla",
         model=model,
@@ -220,14 +233,14 @@ def run_rewrite_eval(model: str) -> dict:
     )
 
     # Rewrite pipeline: query_chunked with rewrite=True
-    rewrite_report, rewrite_scores, rewrite_queries = _run_pipeline(
+    rewrite_report, rewrite_scores, rewrite_queries, rewrite_contexts = _run_pipeline(
         partial(query_chunked, rewrite=True),
         label="Rewrite",
         model=model,
         items=items,
     )
 
-    per_case = _binary_comparison(items, vanilla_scores, rewrite_scores, rewrite_queries)
+    per_case = _binary_comparison(items, vanilla_scores, rewrite_scores, rewrite_queries, vanilla_contexts, rewrite_contexts)
     subgroup = _subgroup_analysis(per_case)
 
     # Wilcoxon tests: all 30 + rewrite_needed subset only
