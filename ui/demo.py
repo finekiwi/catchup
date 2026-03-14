@@ -1505,11 +1505,12 @@ def _render_qa_panel(
             label_visibility="collapsed",
         )
 
-    if "chat_messages" not in st.session_state:
-        st.session_state["chat_messages"] = []
+    _qa_chat_key = f"chat_messages_{doc.id}"
+    if _qa_chat_key not in st.session_state:
+        st.session_state[_qa_chat_key] = []
 
     # Suggestion card shown above the gray box only while no messages
-    if not st.session_state["chat_messages"]:
+    if not st.session_state[_qa_chat_key]:
         if is_image:
             st.markdown(
                 _render_chat_suggestion_card(
@@ -1529,7 +1530,7 @@ def _render_qa_panel(
 
     chat_container = st.container(height=chat_height)
     with chat_container:
-        msgs = st.session_state["chat_messages"]
+        msgs = st.session_state[_qa_chat_key]
         for msg in msgs:
             if msg["role"] == "user":
                 st.markdown(
@@ -1551,7 +1552,7 @@ def _render_qa_panel(
                 st.markdown('<div class="followup-btns">', unsafe_allow_html=True)
                 for fq_idx, fq in enumerate(followups):
                     if st.button(fq, key=f"fq_{last_idx}_{fq_idx}", use_container_width=True):
-                        st.session_state["chat_messages"].append({"role": "user", "content": fq})
+                        st.session_state[_qa_chat_key].append({"role": "user", "content": fq})
                         st.session_state["_pending_chat"] = fq
                         st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
@@ -1571,7 +1572,7 @@ def _render_qa_panel(
                     _reply = f"오류가 발생했습니다: {_exc}"
                     _followups = []
                     _source_blocks = []
-            st.session_state["chat_messages"].append(
+            st.session_state[_qa_chat_key].append(
                 {
                     "role": "assistant",
                     "content": _reply,
@@ -1583,7 +1584,7 @@ def _render_qa_panel(
 
     # Chat input OUTSIDE the gray box (prevents double-box visual during spinner)
     if user_input := st.chat_input("질문을 입력하세요"):
-        st.session_state["chat_messages"].append({"role": "user", "content": user_input})
+        st.session_state[_qa_chat_key].append({"role": "user", "content": user_input})
         st.session_state["_pending_chat"] = user_input
         st.rerun()
 
@@ -1848,6 +1849,7 @@ if not _lib_mode:
         # Persist to SQLite
         save_document(doc)
         save_note(doc.id, file_hash, result, vlm_model, llm_model, is_image)
+        st.rerun()  # Refresh sidebar to show newly saved document
 
 # ===================================================================
 # RAG INDEXING — run once per document (session-cached)
