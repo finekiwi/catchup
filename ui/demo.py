@@ -1765,7 +1765,7 @@ if _lib_mode:
     file_hash = st.session_state.get("_library_file_hash", "")
     _used_vlm = st.session_state.get("_library_used_vlm", vlm_model)
     _used_llm = st.session_state.get("_library_used_llm", llm_model)
-    st.info(f"📚 라이브러리에서 로드됨 — {doc.source} (모델: {_used_vlm} / {_used_llm})")
+    st.caption(f"📚 라이브러리에서 로드됨 — {doc.source} (모델: {_used_vlm} / {_used_llm})")
     if uploaded_file is not None:
         # User uploaded a new file — exit library mode and proceed normally
         st.session_state.pop("_library_mode", None)
