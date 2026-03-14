@@ -66,9 +66,15 @@ def _load_golden_items() -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-def _case_ckpt_path(output: Path, label: str) -> Path:
-    """Return per-case JSONL checkpoint path for a pipeline label."""
-    return output.parent / f".ckpt_{output.stem}_{label.lower()}_cases.jsonl"
+def _case_ckpt_path(output: Path, label: str, model: str) -> Path:
+    """Return per-case JSONL checkpoint path for a pipeline label and model.
+
+    The model name is included in the filename so that switching models with the
+    same --output path starts a fresh checkpoint rather than reusing stale cached
+    answers from a different model.
+    """
+    safe_model = model.replace("/", "_").replace(":", "_")
+    return output.parent / f".ckpt_{output.stem}_{label.lower()}_{safe_model}_cases.jsonl"
 
 
 def _load_case_checkpoint(path: Path) -> dict[str, dict]:
@@ -98,6 +104,27 @@ def _append_case_checkpoint(path: Path, case_data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(case_data, ensure_ascii=False) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# Retrieval context helpers
+# ---------------------------------------------------------------------------
+
+
+def _context_location(sb) -> str:  # type: ignore[no-untyped-def]
+    """Return a human-readable location string for a SourceBlock.
+
+    For PDF chunks, uses ``page {n}``.
+    For notebook chunks (no page), uses ``cell {cell_index}`` when available,
+    falling back to ``block {block_order}`` for other chunk types.  Using
+    ``page {block_order}`` for notebook chunks was incorrect because ipynb
+    chunks are identified by ``cell_index``, not a page number.
+    """
+    if sb.page is not None:
+        return f"page {sb.page}"
+    if sb.cell_index is not None:
+        return f"cell {sb.cell_index}"
+    return f"block {sb.block_order}"
 
 
 # ---------------------------------------------------------------------------
@@ -169,17 +196,19 @@ def _run_pipeline_with_ckpt(
 
         # --- Query phase ---
         LOGGER.info("  [%s] %s — querying", label, case_id)
+        query_error: str | None = None
         try:
             result = query_fn(question, top_k=5, model=model)
             actual_answer = result.answer
             retrieved_contexts = [
-                f"[{sb.source}] page {sb.page if sb.page is not None else sb.block_order}\n{sb.content_preview}"
+                f"[{sb.source}] {_context_location(sb)}\n{sb.content_preview}"
                 for sb in result.source_blocks
             ]
             sources = [sb.source for sb in result.source_blocks]
             rewritten_query: str | None = getattr(result, "rewritten_query", None)
         except Exception as exc:
-            LOGGER.warning("%s query failed for %s: %s", label, case_id, exc)
+            LOGGER.warning("%s query failed for %s: %s — will retry on next run", label, case_id, exc)
+            query_error = str(exc)
             actual_answer = f"[ERROR] {exc}"
             retrieved_contexts = []
             sources = []
@@ -196,13 +225,18 @@ def _run_pipeline_with_ckpt(
             case_id=case_id,
             tier=tier,
         )
-        case_result = _evaluate_single_case(
-            eval_case,
-            faithfulness_metric,
-            context_precision_metric,
-            context_recall_metric,
-            citation_metric,
-        )
+        try:
+            case_result = _evaluate_single_case(
+                eval_case,
+                faithfulness_metric,
+                context_precision_metric,
+                context_recall_metric,
+                citation_metric,
+            )
+        except Exception as exc:
+            LOGGER.warning("%s eval failed for %s: %s — will retry on next run", label, case_id, exc)
+            # Do not checkpoint; allow the case to be retried on next run
+            continue
 
         case_data = {
             "case_id": case_id,
@@ -217,10 +251,15 @@ def _run_pipeline_with_ckpt(
             "overall_score": case_result.overall_score,
             "passed": case_result.passed,
             "tier": tier,
-            "error": case_result.error,
+            "error": query_error or case_result.error,
         }
 
-        _append_case_checkpoint(ckpt_path, case_data)
+        # Only checkpoint completed (non-transient-failure) cases. Query-phase errors
+        # are not checkpointed so they are retried on the next run.
+        if query_error is None:
+            _append_case_checkpoint(ckpt_path, case_data)
+        else:
+            LOGGER.warning("  [%s] %s — skipping checkpoint due to query error", label, case_id)
         all_case_data.append(case_data)
         LOGGER.info(
             "  [%s] %s — done: overall=%.4f (faith=%.4f, prec=%.4f, rec=%.4f, cit=%.4f)",
@@ -369,8 +408,8 @@ def run_rewrite_eval(model: str, output: Path = Path("eval/results/rewrite_eval.
 
     items = _load_golden_items()
 
-    ckpt_vanilla = _case_ckpt_path(output, "vanilla")
-    ckpt_rewrite = _case_ckpt_path(output, "rewrite")
+    ckpt_vanilla = _case_ckpt_path(output, "vanilla", model)
+    ckpt_rewrite = _case_ckpt_path(output, "rewrite", model)
 
     vanilla_report, vanilla_scores, _, vanilla_contexts = _run_pipeline_with_ckpt(
         partial(query_chunked, rewrite=False),
@@ -407,17 +446,17 @@ def run_rewrite_eval(model: str, output: Path = Path("eval/results/rewrite_eval.
     vanilla_correct = sum(1 for c in per_case if c["vanilla_correct"])
     rewrite_correct = sum(1 for c in per_case if c["rewrite_correct"])
 
-    print(f"\n=== Binary Comparison ===")
+    print("\n=== Binary Comparison ===")
     print(f"  Total: {len(per_case)}")
     print(f"  Vanilla correct:  {vanilla_correct}/{len(per_case)}")
     print(f"  Rewrite correct:  {rewrite_correct}/{len(per_case)}")
-    print(f"\n=== Subgroup Analysis ===")
+    print("\n=== Subgroup Analysis ===")
     for grp, stats in subgroup.items():
         print(f"  {grp}: n={stats['count']}, vanilla={stats['vanilla_overall']:.4f}, "
               f"rewrite={stats['rewrite_overall']:.4f}, delta={stats['delta']:+.4f}")
-    print(f"\n=== Statistical Test (all) ===")
+    print("\n=== Statistical Test (all) ===")
     print(f"  p={stat_all.get('p_value')}, significant={stat_all.get('significant')}")
-    print(f"=== Statistical Test (rewrite_needed) ===")
+    print("=== Statistical Test (rewrite_needed) ===")
     print(f"  p={stat_needed.get('p_value')}, significant={stat_needed.get('significant')}")
 
     return {
