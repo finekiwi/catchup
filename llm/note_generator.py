@@ -276,11 +276,22 @@ def generate_note(doc: Document, model: str = "gpt-4o-mini") -> dict[str, Any]:
                     result = NoteGenerationOutput.model_validate(result).model_dump()
                 except Exception as val_exc:
                     LOGGER.warning("NoteGenerationOutput schema validation warning (retry): %s", val_exc)
+                # Log successful retry separately for failure-rate tracking
+                log_api_call(
+                    model=model,
+                    stage="note_generation_retry",
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    latency_ms=latency_ms,
+                    cost_usd=cost_usd,
+                    success=True,
+                    error=None,
+                )
             except (json.JSONDecodeError, ValueError) as retry_exc:
                 LOGGER.warning("Note generation JSON parse failed (retry): %s", retry_exc)
                 log_api_call(
                     model=model,
-                    stage="note_generation",
+                    stage="note_generation_retry",
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
                     latency_ms=latency_ms,
