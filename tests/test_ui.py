@@ -75,6 +75,7 @@ class DemoAppHarness:
     index_document: MagicMock
     has_document_vectors: MagicMock
     rag_query: MagicMock
+    rewrite_query: MagicMock
     pyperclip_copy: MagicMock
     documents_db: dict[str, Document]
     notes_db: dict[tuple[str, str, str], dict[str, Any]]
@@ -159,6 +160,17 @@ class DemoAppHarness:
     ) -> AppTest:
         """Set a toggle widget value and rerun the app."""
         self.app.toggle(key=key).set_value(value)
+        return self.run(upload=upload)
+
+    def set_checkbox(
+        self,
+        key: str,
+        value: bool,
+        *,
+        upload: UploadFixture | None | object = UNSET,
+    ) -> AppTest:
+        """Set a checkbox widget value and rerun the app."""
+        self.app.checkbox(key=key).set_value(value)
         return self.run(upload=upload)
 
     def set_text_area(
@@ -453,6 +465,18 @@ def make_app() -> Iterator[Any]:
         vector_documents: set[str] = set()
         upload_holder: dict[str, UploadFixture | None] = {"value": None}
         original_init = local_script_runner.LocalScriptRunner.__init__
+        rewrite_query = MagicMock(
+            side_effect=lambda question: (f"rewritten::{question}", 0.0, 0, 0)
+        )
+
+        def _rag_query(question: str, **kwargs: Any) -> SimpleNamespace:
+            retrieval_query = question
+            if kwargs.get("rewrite"):
+                try:
+                    retrieval_query = rewrite_query(question)[0]
+                except Exception:
+                    retrieval_query = question
+            return _qa_result(f"{retrieval_query}에 대한 답변")
 
         def _save_document(document: Document) -> None:
             documents_db[document.id] = _stored_document_copy(document)
@@ -618,11 +642,7 @@ def make_app() -> Iterator[Any]:
             rag_query = stack.enter_context(
                 patch(
                     "rag.query",
-                    new=MagicMock(
-                        side_effect=lambda question, **kwargs: _qa_result(
-                            f"{question}에 대한 답변",
-                        )
-                    ),
+                    new=MagicMock(side_effect=_rag_query),
                 )
             )
             pyperclip_copy = stack.enter_context(patch("pyperclip.copy", new=MagicMock()))
@@ -645,6 +665,7 @@ def make_app() -> Iterator[Any]:
                 index_document=index_document,
                 has_document_vectors=has_document_vectors,
                 rag_query=rag_query,
+                rewrite_query=rewrite_query,
                 pyperclip_copy=pyperclip_copy,
                 documents_db=documents_db,
                 notes_db=notes_db,
@@ -867,6 +888,83 @@ class TestRagChat:
             _assert_no_exception(harness.app)
             assert harness.rag_query.call_args.kwargs["document_id"] == "doc-pdf", "rag.query should always be filtered to the active document"
             assert any(button.label == "후속 질문 A" for button in harness.app.button), "The first follow-up suggestion pill should render after a RAG answer"
+
+
+class TestQueryRewriting:
+    """Coverage for the CU-13 query rewriting toggle and fallback flow."""
+
+    def test_query_rewriting_checkbox_renders_with_default_off(
+        self,
+        make_app: Any,
+    ) -> None:
+        """The Q&A panel should render the Query Rewriting checkbox as opt-in."""
+        pdf_upload = _pdf_upload()
+
+        with make_app() as harness:
+            _analyze_upload(harness, pdf_upload)
+
+            _assert_no_exception(harness.app)
+            checkbox = harness.app.checkbox(key="qa_use_rewrite")
+            assert checkbox.label == "Query Rewriting", "The Q&A panel should expose the Query Rewriting checkbox"
+            assert checkbox.value is False, "Query Rewriting should default to OFF"
+
+    def test_rewrite_is_not_called_when_checkbox_is_off(self, make_app: Any) -> None:
+        """The rewrite path should stay idle while the toggle remains off."""
+        pdf_upload = _pdf_upload()
+
+        with make_app() as harness:
+            _analyze_upload(harness, pdf_upload)
+            harness.set_chat_input("오프 상태 질문", upload=pdf_upload)
+
+            _assert_no_exception(harness.app)
+            assert harness.rewrite_query.call_count == 0, "rewrite_query should not run while Query Rewriting is OFF"
+            assert harness.rag_query.call_args.kwargs["rewrite"] is False, "rag.query should receive rewrite=False when the toggle is OFF"
+
+    def test_rewrite_is_called_once_when_checkbox_is_on(self, make_app: Any) -> None:
+        """Enabling the checkbox should route the next question through rewrite_query exactly once."""
+        pdf_upload = _pdf_upload()
+
+        with make_app() as harness:
+            _analyze_upload(harness, pdf_upload)
+            harness.set_checkbox("qa_use_rewrite", True, upload=pdf_upload)
+            harness.set_chat_input("온 상태 질문", upload=pdf_upload)
+
+            _assert_no_exception(harness.app)
+            assert harness.rewrite_query.call_count == 1, "rewrite_query should run exactly once for a rewritten question"
+            assert harness.rag_query.call_args.kwargs["rewrite"] is True, "rag.query should receive rewrite=True when the toggle is ON"
+
+    def test_toggling_query_rewriting_on_then_off_stays_stable(
+        self,
+        make_app: Any,
+    ) -> None:
+        """Turning rewrite on and back off should keep the Q&A flow stable across reruns."""
+        pdf_upload = _pdf_upload()
+
+        with make_app() as harness:
+            _analyze_upload(harness, pdf_upload)
+            harness.set_checkbox("qa_use_rewrite", True, upload=pdf_upload)
+            harness.set_chat_input("첫 질문", upload=pdf_upload)
+            harness.set_checkbox("qa_use_rewrite", False, upload=pdf_upload)
+            harness.set_chat_input("두 번째 질문", upload=pdf_upload)
+
+            _assert_no_exception(harness.app)
+            assert harness.rewrite_query.call_count == 1, "rewrite_query should stop being called after the toggle is turned back OFF"
+            assert harness.rag_query.call_args.kwargs["rewrite"] is False, "The second question should pass rewrite=False after toggling OFF"
+
+    def test_rewrite_failure_falls_back_to_original_query(self, make_app: Any) -> None:
+        """Rewrite failures should not crash Q&A and should answer from the original query text."""
+        pdf_upload = _pdf_upload()
+
+        with make_app() as harness:
+            harness.rewrite_query.side_effect = RuntimeError("rewrite failed")
+            _analyze_upload(harness, pdf_upload)
+            harness.set_checkbox("qa_use_rewrite", True, upload=pdf_upload)
+            harness.set_chat_input("원본 쿼리", upload=pdf_upload)
+
+            _assert_no_exception(harness.app)
+            assert harness.rewrite_query.call_count == 1, "rewrite_query should still be attempted once when rewriting is enabled"
+            assert harness.rag_query.call_args.kwargs["rewrite"] is True, "rag.query should still be called with rewrite=True when rewrite fails"
+            assert "원본 쿼리" in _session_messages(harness, "doc-pdf")[-1]["content"], "Rewrite failures should fall back to the original query instead of crashing"
 
 
 class TestImagePipeline:

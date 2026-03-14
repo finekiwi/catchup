@@ -1333,15 +1333,26 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
 
     # Session-state key prefix scoped to this document
     _sk = f"editor_{doc_key}_" if doc_key else "editor_"
+    edit_mode_options = ["💬 챗봇", "⌨️ 직접 편집"]
+    edit_method_key = f"{_sk}note_editor_method"
+    edit_method_pref_key = f"{_sk}note_editor_method_pref"
+    edit_method_default = st.session_state.get(edit_method_pref_key, edit_mode_options[0])
+    edit_method_index = (
+        edit_mode_options.index(edit_method_default)
+        if edit_method_default in edit_mode_options
+        else 0
+    )
 
     # Mode toggle
     edit_method = st.radio(
         "edit_method",
-        ["💬 챗봇", "⌨️ 직접 편집"],
+        edit_mode_options,
         horizontal=True,
-        key=f"{_sk}note_editor_method",
+        index=edit_method_index,
+        key=edit_method_key,
         label_visibility="collapsed",
     )
+    st.session_state[edit_method_pref_key] = edit_method
 
     # ── Direct markdown editing mode ────────────────────────────────────────
     if edit_method == "⌨️ 직접 편집":
@@ -1373,19 +1384,29 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
     with _editor_cap_col:
         st.caption("섹션을 선택하고 수정 지시를 입력하세요")
     with _editor_model_col:
+        editor_model_pref_key = f"{_sk}note_editor_model_pref"
+        editor_model_default = st.session_state.get(editor_model_pref_key, llm_model)
         editor_model = st.selectbox(
             "노트 수정 모델",
             options=SUPPORTED_LLM_MODELS,
-            index=SUPPORTED_LLM_MODELS.index(llm_model) if llm_model in SUPPORTED_LLM_MODELS else 0,
+            index=(
+                SUPPORTED_LLM_MODELS.index(editor_model_default)
+                if editor_model_default in SUPPORTED_LLM_MODELS
+                else 0
+            ),
             key=f"{_sk}note_editor_model_select",
             label_visibility="collapsed",
         )
+        st.session_state[editor_model_pref_key] = editor_model
 
     # Use index-based selectbox so duplicate headings (e.g. two "## 개요") are distinguished.
+    selected_section_default = st.session_state.get(f"{_sk}selected_edit_section_idx", 0)
+    selected_section_default = min(selected_section_default, len(section_headings) - 1)
     selected_section_idx: int = st.selectbox(  # type: ignore[assignment]
         "수정할 섹션",
         options=list(range(len(section_headings))),
         format_func=lambda i: section_headings[i],
+        index=selected_section_default,
         key=f"{_sk}edit_section_selectbox",
     )
     selected = section_headings[selected_section_idx]
@@ -1506,13 +1527,20 @@ def _render_qa_panel(
             help="한국어 구어체나 약어를 영문 기술 용어로 확장해 검색 정확도를 높입니다.",
         )
     with _qa_model_col:
+        qa_model_pref_key = "qa_model_pref"
+        qa_model_default = st.session_state.get(qa_model_pref_key, llm_model)
         qa_llm_model = st.selectbox(
             "Q&A 모델",
             options=SUPPORTED_LLM_MODELS,
-            index=SUPPORTED_LLM_MODELS.index(llm_model) if llm_model in SUPPORTED_LLM_MODELS else 0,
+            index=(
+                SUPPORTED_LLM_MODELS.index(qa_model_default)
+                if qa_model_default in SUPPORTED_LLM_MODELS
+                else 0
+            ),
             key="qa_model_select",
             label_visibility="collapsed",
         )
+        st.session_state[qa_model_pref_key] = qa_llm_model
 
     _qa_chat_key = f"chat_messages_{doc.id}"
     if _qa_chat_key not in st.session_state:
@@ -1590,8 +1618,11 @@ def _render_qa_panel(
     if _pending := st.session_state.pop("_pending_chat", None):
         try:
             _chat_result = rag_query(
-                _pending, model=qa_llm_model, document_id=doc.id, top_k=8,
-                rewrite=st.session_state.get("qa_use_rewrite", False),
+                _pending,
+                model=qa_llm_model,
+                document_id=doc.id,
+                top_k=8,
+                rewrite=use_rewrite,
             )
             _raw_reply = _chat_result.answer
             _reply, _followups = _parse_followup_suggestions(_raw_reply)
@@ -2083,9 +2114,17 @@ with col_content:
         st.info("노트 내용이 없습니다.")
 
 with col_chat:
+    _qa_disabled_msg = (
+        "Q&A를 사용하려면 문서 벡터가 필요합니다. "
+        "문서를 다시 분석하거나 라이브러리 인덱스를 확인해주세요."
+    )
+    _qa_ready = bool(st.session_state.get(_indexed_key))
     if is_image:
         # Image mode: Q&A only, no note editor
-        _render_qa_panel(doc, result, llm_model, is_image=True, chat_height=960)
+        if _qa_ready:
+            _render_qa_panel(doc, result, llm_model, is_image=True, chat_height=960)
+        else:
+            st.info(_qa_disabled_msg)
     else:
         # Non-image mode: Q&A tab + Note editor tab
         right_panel = st.radio(
@@ -2096,9 +2135,12 @@ with col_chat:
             label_visibility="collapsed",
         )
         if right_panel == "💬 Q&A":
-            _render_qa_panel(
-                doc, result, llm_model, is_image=False, chat_height=960
-            )
+            if _qa_ready:
+                _render_qa_panel(
+                    doc, result, llm_model, is_image=False, chat_height=960
+                )
+            else:
+                st.info(_qa_disabled_msg)
         else:
             _render_note_editor_panel(result, llm_model, chat_height=837, doc_key=doc.id)
 
