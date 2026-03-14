@@ -1572,6 +1572,15 @@ def _render_qa_panel(
                 unsafe_allow_html=True,
             )
 
+    # Chat input rendered BEFORE the LLM blocking call so it always renders on
+    # every cycle. Streamlit shows a stale-placeholder gray box for any widget
+    # that hasn't been reached yet when the script blocks — moving chat_input
+    # above the LLM call prevents the second gray box on the first message.
+    if user_input := st.chat_input("질문을 입력하세요"):
+        st.session_state[_qa_chat_key].append({"role": "user", "content": user_input})
+        st.session_state["_pending_chat"] = user_input
+        st.rerun()
+
     if _pending := st.session_state.pop("_pending_chat", None):
         try:
             _chat_result = rag_query(
@@ -1592,12 +1601,6 @@ def _render_qa_panel(
                 "followup_suggestions": _followups,
             }
         )
-        st.rerun()
-
-    # Chat input OUTSIDE the gray box (prevents double-box visual during spinner)
-    if user_input := st.chat_input("질문을 입력하세요"):
-        st.session_state[_qa_chat_key].append({"role": "user", "content": user_input})
-        st.session_state["_pending_chat"] = user_input
         st.rerun()
 
 
