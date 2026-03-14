@@ -33,6 +33,7 @@
 | v1.4.1 | 2026-03-05 | 핵심 코드 스니펫 허용: "DO NOT include raw code" → "Include short key code snippets (signatures, core logic) inside code fences — max 10 lines each. Do NOT dump entire blocks verbatim." 학습노트에 클래스/함수 시그니처, 핵심 로직, 사용 예시 포함 가능. | 코드 중심 자료(ipynb)에서 학습 효과 향상 — 설명만으론 부족한 구현 디테일 보완 |
 | v1.4.1 | 2026-03-15 | note_generator.py: OpenAI `response_format={"type":"json_object"}` 강제 + JSON 파싱 실패 시 1회 retry (nudge 메시지 추가). 프롬프트 텍스트 변경 없음 — 동작 레이어 수정. | gpt-4o-mini가 JSON 대신 마크다운 텍스트 반환하는 케이스 방어 |
 | v1.5.0 | 2026-03-15 | "5-10 major sections" → "Cover EVERY distinct topic, dedicated ## section per topic, TOC headings must all appear"; MINIMUM LENGTH 2000 → 3000자; max_tokens 4096 → 8192. | LLM이 섹션 누락하거나 1060 토큰에서 자발적으로 멈추는 문제 해결 |
+| v1.5.1 | 2026-03-15 | No-merge rule 강화: "one heading = one ## section, no exceptions. Do NOT merge adjacent or similar-sounding sections (e.g. 'git commit' and 'git commit -a' are separate sections)." | 유사 섹션 병합으로 인한 TOC 커버리지 누락 방지 (3.5/3.7/3.8 섹션 누락 케이스) |
 
 ## eval_judge.py
 | Version | Date | Change | Quality Impact |
