@@ -56,6 +56,7 @@
 
 ## rag_qa.py (continued)
 | v1.4.0 | 2026-03-13 | Update note-modification response: redirect user to '✏️ 노트 수정' tab instead of edit mode toggle, reflecting new CU-11 note editor UI. | Aligns prompt with new UI affordance |
+| v1.5.0 | 2026-03-14 | Add follow-up suggestion block (---SUGGESTIONS---/---END--- delimiters) appended after genuine document answers. UI parses and renders as clickable buttons (NotebookLM-style). Skip for note-mod redirects, emotional responses, and "not found" fallbacks. | Improves discovery of follow-on questions; no impact on main answer quality |
 
 ## Known Limitations & v2 Roadmap (recorded 2026-03-05, CU-07 demo)
 

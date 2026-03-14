@@ -24,6 +24,7 @@ load_dotenv()
 
 import markdown as md_lib  # noqa: E402
 import streamlit as st  # noqa: E402
+import pyperclip  # noqa: E402
 
 from llm.note_editor import NoteEditResult, edit_section  # noqa: E402
 from llm.note_editor import _split_sections as _split_note_sections  # noqa: E402
@@ -45,6 +46,58 @@ _NOTE_INTERNAL_KEYS: frozenset[str] = frozenset(
 _GLOBAL_CSS = """\
 <style>
 /* === CatchUp Warm & Soft Palette === */
+
+/* (chat_input bottom pinning handled via Python spacer injection) */
+
+/* ── Follow-up question pill buttons ─────────────────────────────────── */
+.followup-btns > div[data-testid="stVerticalBlock"] > div[data-testid="stButton"] button {
+    background: #F5EDE4 !important;
+    border: 1px solid #E5D9CD !important;
+    color: #7A6555 !important;
+    font-size: 0.83rem !important;
+    min-height: 32px !important;
+    border-radius: 16px !important;
+    text-align: left !important;
+    padding: 4px 14px !important;
+}
+.followup-btns > div[data-testid="stVerticalBlock"] > div[data-testid="stButton"] button:hover {
+    background: #EACFC5 !important;
+    border-color: #C4553A !important;
+    color: #A8432C !important;
+}
+
+/* ── Compact download trigger button ─────────────────────────────────── */
+.dl-compact > div[data-testid="stVerticalBlock"] > div[data-testid="stButton"] button {
+    min-height: 36px !important;
+    padding: 4px 10px !important;
+    font-size: 0.85rem !important;
+    border-color: #C4553A !important;
+    color: #C4553A !important;
+}
+.dl-compact > div[data-testid="stVerticalBlock"] > div[data-testid="stButton"] button:hover {
+    background: #F2DDD6 !important;
+    border-color: #A8432C !important;
+    color: #A8432C !important;
+}
+
+/* ── Section action buttons (✏️ + ↩): side by side, no gap ────────────── */
+.sec-action-btns > div[data-testid="stVerticalBlock"] {
+    flex-direction: row !important;
+    gap: 2px !important;
+    align-items: center !important;
+}
+.sec-action-btns button {
+    min-height: 30px !important;
+    padding: 2px 8px !important;
+    line-height: 1 !important;
+}
+
+/* ── Note / chat column layout breathing room ──────────────────────────── */
+div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:first-child
+    > div[data-testid="stVerticalBlock"]
+    > div[data-testid="stVerticalBlockBorderWrapper"] {
+    margin-right: 1rem;
+}
 
 /* ── Metric cards ──────────────────────────────────────────────────────── */
 .metric-card {
@@ -102,7 +155,7 @@ _GLOBAL_CSS = """\
     border: 1px solid #E5D9CD;
     border-radius: 14px;
     padding: 2em 2.5em;
-    margin-top: 0.8em;
+    margin: 0.8em auto 0;
     max-width: 860px;
     box-shadow: 0 1px 4px rgba(61,46,36,0.06);
 }
@@ -111,11 +164,12 @@ _GLOBAL_CSS = """\
     background: #FDF8F3;
     padding: 0.5em 2.5em;
     max-width: 860px;
+    margin: 0 auto;
 }
 hr.note-sep {
     border: none;
     border-top: 1px solid #EDE3D9;
-    margin: 0.2em 2.5em;
+    margin: 0.2em auto;
     max-width: 860px;
 }
 .note-content {
@@ -482,6 +536,8 @@ button[kind="primary"]:active {
 .stDownloadButton > button {
     border-color: #C4553A !important;
     color: #C4553A !important;
+    min-height: 38px !important;
+    width: 100% !important;
 }
 .stDownloadButton > button:hover {
     background-color: #F2DDD6 !important;
@@ -521,10 +577,6 @@ button[kind="primary"]:active {
     fill: #C4553A !important;
 }
 
-/* Chat message assistant avatar */
-[data-testid="stChatMessage"] [data-testid="chatAvatarIcon-assistant"] {
-    background-color: #C4553A !important;
-}
 
 /* Status widget */
 [data-testid="stStatus"] summary svg {
@@ -605,32 +657,28 @@ a:hover { color: #A8432C !important; }
 }
 
 /* ── Chat UI — Claude.ai inspired ──────────────────────────────────────── */
-/* Hide default avatars */
-[data-testid="chatAvatarIcon-user"],
-[data-testid="chatAvatarIcon-assistant"] { display: none !important; }
-
-/* User message: right-aligned bubble */
-[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {
-    flex-direction: row-reverse;
-    gap: 0;
+.chat-user-msg-wrap {
+    display: flex;
+    justify-content: flex-end;
+    margin: 2em 0 0.8em 0;
 }
-[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) [data-testid="stChatMessageContent"] {
+.chat-user-msg {
     background: #EAD5C8;
     border-radius: 18px 18px 4px 18px;
-    padding: 0.55em 1em;
+    padding: 0.6em 1.1em;
     max-width: 78%;
-    margin-left: auto;
+    display: inline-block;
     color: #3D2E24;
     font-size: 0.9rem;
+    line-height: 1.6;
+    word-break: break-word;
 }
-
-/* Assistant message: no bubble, clean text */
-[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) [data-testid="stChatMessageContent"] {
+.chat-assistant-msg {
     background: transparent;
-    border: none;
-    padding: 0.3em 0;
+    padding: 0.4em 0 2em;
     font-size: 0.9rem;
     color: #3D2E24;
+    line-height: 1.7;
 }
 </style>
 """
@@ -1201,12 +1249,40 @@ def _render_source_block_expanders(source_blocks: list[dict]) -> None:
             st.text(str(src.get("content_preview", "")))
 
 
-def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int) -> None:
-    """Render the note editor chatbot panel (✏️ 노트 수정 tab).
+def _parse_followup_suggestions(answer: str) -> tuple[str, list[str]]:
+    """Split answer text from follow-up suggestion block appended by the RAG prompt.
 
-    Shows a section selectbox (synced with inline ✏️ clicks) and a chat interface
-    for multi-turn natural-language section editing.  The edited section is shown
-    as a preview in the chat; the note is only updated when the user clicks [적용].
+    Returns (clean_answer, suggestions) where suggestions is a list of up to 3 strings.
+    If no block is found, suggestions is empty and answer is returned unchanged.
+    """
+    match = re.search(r"\n?---SUGGESTIONS---\n(.*?)\n---END---", answer, re.DOTALL)
+    if not match:
+        return answer, []
+    clean = answer[: match.start()].rstrip()
+    raw_lines = [line.strip() for line in match.group(1).strip().splitlines() if line.strip()]
+    suggestions = [re.sub(r"^\d+[.)]\s*", "", line) for line in raw_lines]
+    return clean, [s for s in suggestions if s][:3]
+
+
+
+def _replace_section_body(full_md: str, heading: str, new_body: str) -> str:
+    """Return full_md with the body of *heading* replaced by new_body."""
+    sections = _split_note_sections(full_md)
+    parts: list[str] = []
+    for h, b in sections:
+        body = new_body if h == heading else b
+        parts.append(f"{h}\n\n{body}".strip() if h else body)
+    return "\n\n".join(parts)
+
+
+
+
+def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int) -> None:
+    """Render the note editor panel (✏️ 노트 수정 tab).
+
+    Supports two editing modes selectable via a toggle:
+    - 💬 챗봇: section-level chat-driven editing with preview/apply flow.
+    - ⌨️ 직접 편집: full-note text area for direct markdown editing.
     """
     note_markdown = result.get("note_markdown", "")
     raw_md = _normalize_note_markdown(note_markdown) if note_markdown else ""
@@ -1217,12 +1293,51 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int) ->
         st.info("수정할 섹션이 없습니다. 먼저 노트를 생성해주세요.")
         return
 
-    st.markdown("#### ✏️ 노트 수정")
-    st.caption(f"섹션을 선택하고 수정 지시를 입력하세요 · LLM: `{llm_model}`")
+    # Mode toggle
+    edit_method = st.radio(
+        "edit_method",
+        ["💬 챗봇", "⌨️ 직접 편집"],
+        horizontal=True,
+        key="note_editor_method",
+        label_visibility="collapsed",
+    )
 
-    # Section selectbox — auto-updated when user clicks inline ✏️.
-    # We set st.session_state["edit_section_selectbox"] directly in the ✏️ handler
-    # because Streamlit ignores index= when the key is already in session state.
+    # ── Direct markdown editing mode ────────────────────────────────────────
+    if edit_method == "⌨️ 직접 편집":
+        if "note_section_undo" not in st.session_state:
+            st.session_state["note_section_undo"] = {}
+
+        edited = st.text_area(
+            "마크다운 직접 편집",
+            value=raw_md,
+            height=chat_height,
+            key="direct_edit_textarea",
+            label_visibility="collapsed",
+        )
+        if st.button("✅ 저장", use_container_width=True, type="primary", key="direct_edit_save"):
+            if edited != raw_md:
+                # Store full note under special key for direct edits
+                undo_stack = st.session_state["note_section_undo"].setdefault("__direct__", [])
+                undo_stack.append(raw_md)
+                if len(undo_stack) > 10:
+                    undo_stack.pop(0)
+                result["note_markdown"] = edited
+                st.rerun()
+        return
+
+    # ── Chatbot editing mode ─────────────────────────────────────────────────
+    _editor_cap_col, _editor_model_col = st.columns([3, 2])
+    with _editor_cap_col:
+        st.caption("섹션을 선택하고 수정 지시를 입력하세요")
+    with _editor_model_col:
+        editor_model = st.selectbox(
+            "노트 수정 모델",
+            options=SUPPORTED_LLM_MODELS,
+            index=SUPPORTED_LLM_MODELS.index(llm_model) if llm_model in SUPPORTED_LLM_MODELS else 0,
+            key="note_editor_model_select",
+            label_visibility="collapsed",
+        )
+
     selected = st.selectbox(
         "수정할 섹션",
         options=section_headings,
@@ -1230,106 +1345,89 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int) ->
     )
     st.session_state["selected_edit_section"] = selected
 
-    # Show current section preview (first 120 chars)
-    section_map = {h: b for h, b in sections}
-    preview = section_map.get(selected, "")[:120].replace("\n", " ")
-    if preview:
-        st.caption(f"현재 내용: {preview}…")
 
-    # Session state init
-    if "edit_chat_messages" not in st.session_state:
-        st.session_state["edit_chat_messages"] = []
-    if "note_edit_history" not in st.session_state:
-        st.session_state["note_edit_history"] = []
+    # Session state init — chat history keyed by section heading
+    # Migrate legacy list format to dict on restart
+    if "edit_chat_messages" not in st.session_state or isinstance(
+        st.session_state["edit_chat_messages"], list
+    ):
+        st.session_state["edit_chat_messages"] = {}  # {section_heading: [msg, ...]}
+    # note_section_undo: {section_heading: [section_body_before_edit, ...]}
+    if "note_section_undo" not in st.session_state:
+        st.session_state["note_section_undo"] = {}
+
+    # Ensure current section has a message list
+    sec_msgs: list = st.session_state["edit_chat_messages"].setdefault(selected, [])
 
     # Chat container
     chat_container = st.container(height=chat_height)
     with chat_container:
-        for msg in st.session_state["edit_chat_messages"]:
-            with st.chat_message(msg["role"]):
-                if msg["role"] == "assistant" and msg.get("is_preview"):
-                    st.markdown("**수정 미리보기:**")
-                st.markdown(msg["content"])
+        for msg in sec_msgs:
+            if msg["role"] == "user":
+                st.markdown(
+                    f'<div class="chat-user-msg-wrap"><div class="chat-user-msg">{html.escape(msg["content"])}</div></div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                body_html = md_lib.markdown(msg["content"], extensions=["fenced_code", "tables"])
+                st.markdown(
+                    f'<div class="chat-assistant-msg">{body_html}</div>',
+                    unsafe_allow_html=True,
+                )
 
         # Process pending edit
         if _pending_edit := st.session_state.pop("_pending_edit", None):
             instruction = _pending_edit["instruction"]
             section_heading = _pending_edit["section"]
-            with st.chat_message("assistant"):
-                with st.spinner("수정 중..."):
-                    history = [
-                        {"role": m["role"], "content": m["content"]}
-                        for m in st.session_state["edit_chat_messages"]
-                        if m["role"] in ("user", "assistant")
-                        and not m.get("is_preview")
-                    ]
-                    edit_result: NoteEditResult = edit_section(
-                        full_markdown=raw_md,
-                        section_heading=section_heading,
-                        instruction=instruction,
-                        model=llm_model,
-                        history=history,
-                    )
+            cur_msgs = st.session_state["edit_chat_messages"].setdefault(section_heading, [])
+            with st.spinner("수정 중..."):
+                history = [
+                    {"role": m["role"], "content": m["content"]}
+                    for m in cur_msgs
+                    if m["role"] in ("user", "assistant") and not m.get("is_preview")
+                ]
+                edit_result: NoteEditResult = edit_section(
+                    full_markdown=raw_md,
+                    section_heading=section_heading,
+                    instruction=instruction,
+                    model=editor_model,
+                    history=history,
+                )
             if edit_result.success:
                 st.session_state["edit_pending_markdown"] = edit_result.edited_markdown
                 preview_content = f"**{section_heading}** 섹션 수정 결과:\n\n{edit_result.edited_section_body}"
-                st.session_state["edit_chat_messages"].append(
-                    {
-                        "role": "assistant",
-                        "content": preview_content,
-                        "is_preview": True,
-                    }
-                )
+                cur_msgs.append({"role": "assistant", "content": preview_content, "is_preview": True})
             else:
-                error_msg = f"수정 실패: {edit_result.error}"
-                st.session_state["edit_chat_messages"].append(
-                    {
-                        "role": "assistant",
-                        "content": error_msg,
-                        "is_preview": False,
-                    }
-                )
+                cur_msgs.append({"role": "assistant", "content": f"수정 실패: {edit_result.error}", "is_preview": False})
             st.rerun()
 
-    # Apply / Cancel buttons (only show when there's a pending edit)
-    if st.session_state.get("edit_pending_markdown"):
-        col_apply, col_cancel = st.columns(2)
-        with col_apply:
-            if st.button("✅ 적용", use_container_width=True, type="primary"):
-                # Push undo entry (max 10)
-                history_entry = {
-                    "markdown_before": raw_md,
-                    "section": st.session_state.get("selected_edit_section", ""),
-                    "instruction": st.session_state["edit_chat_messages"][-2]["content"]
-                    if len(st.session_state["edit_chat_messages"]) >= 2
-                    else "",
-                }
-                edit_history = st.session_state["note_edit_history"]
-                edit_history.append(history_entry)
-                if len(edit_history) > 10:
-                    edit_history.pop(0)
-                # Update note
-                result["note_markdown"] = st.session_state.pop("edit_pending_markdown")
-                st.session_state["edit_chat_messages"] = []
-                st.rerun()
-        with col_cancel:
-            if st.button("❌ 취소", use_container_width=True):
-                st.session_state.pop("edit_pending_markdown", None)
-                st.session_state["edit_chat_messages"] = []
-                st.rerun()
+        # Apply / Cancel buttons inside container (keeps height stable)
+        if st.session_state.get("edit_pending_markdown"):
+            col_apply, col_cancel = st.columns(2)
+            with col_apply:
+                if st.button("✅ 적용", use_container_width=True, type="primary"):
+                    cur_sec = st.session_state.get("selected_edit_section", "")
+                    # Push current section body to per-section undo stack (max 10)
+                    sec_map = {h: b for h, b in _split_note_sections(raw_md)}
+                    undo_stack = st.session_state["note_section_undo"].setdefault(cur_sec, [])
+                    undo_stack.append(sec_map.get(cur_sec, ""))
+                    if len(undo_stack) > 10:
+                        undo_stack.pop(0)
+                    result["note_markdown"] = st.session_state.pop("edit_pending_markdown")
+                    st.rerun()
+            with col_cancel:
+                if st.button("❌ 취소", use_container_width=True):
+                    st.session_state.pop("edit_pending_markdown", None)
+                    st.rerun()
 
-    # Edit instruction input
-    if edit_instruction := st.chat_input(
-        "수정 지시를 입력하세요 (예: 코드 예제 추가해줘)"
-    ):
-        st.session_state["edit_chat_messages"].append(
+    # Chat input OUTSIDE the gray box
+    if edit_instruction := st.chat_input("수정 지시를 입력하세요 (예: 코드 예제 추가해줘)"):
+        st.session_state["edit_chat_messages"].setdefault(selected, []).append(
             {"role": "user", "content": edit_instruction}
         )
         st.session_state["_pending_edit"] = {
             "instruction": edit_instruction,
-            "section": st.session_state.get(
-                "selected_edit_section", section_headings[0]
-            ),
+            "section": st.session_state.get("selected_edit_section", section_headings[0]),
         }
         st.rerun()
 
@@ -1340,62 +1438,97 @@ def _render_qa_panel(
     """Render the Q&A area with optional image-specific starter prompts."""
     st.markdown("#### 💬 Q&A")
     qa_subject = "이미지" if is_image else "문서"
-    st.caption(f"{qa_subject}에 대해 질문하세요 · LLM: `{llm_model}`")
-    if is_image:
-        st.markdown(
-            _render_chat_suggestion_card(
-                _build_image_question_suggestions(doc),
-                "이미지 유형과 추출된 구조를 기준으로 바로 물어볼 수 있는 질문입니다.",
-            ),
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            _render_chat_suggestion_card(
-                _build_document_question_suggestions(doc, result),
-                "노트와 문서 구조를 기준으로 바로 이어서 물어볼 수 있는 질문입니다.",
-            ),
-            unsafe_allow_html=True,
+    _qa_cap_col, _qa_model_col = st.columns([3, 2])
+    with _qa_cap_col:
+        st.caption(f"{qa_subject}에 대해 질문하세요")
+    with _qa_model_col:
+        qa_llm_model = st.selectbox(
+            "Q&A 모델",
+            options=SUPPORTED_LLM_MODELS,
+            index=SUPPORTED_LLM_MODELS.index(llm_model) if llm_model in SUPPORTED_LLM_MODELS else 0,
+            key="qa_model_select",
+            label_visibility="collapsed",
         )
 
     if "chat_messages" not in st.session_state:
         st.session_state["chat_messages"] = []
 
+    # Suggestion card shown above the gray box only while no messages
+    if not st.session_state["chat_messages"]:
+        if is_image:
+            st.markdown(
+                _render_chat_suggestion_card(
+                    _build_image_question_suggestions(doc),
+                    "이미지 유형과 추출된 구조를 기준으로 바로 물어볼 수 있는 질문입니다.",
+                ),
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                _render_chat_suggestion_card(
+                    _build_document_question_suggestions(doc, result),
+                    "노트와 문서 구조를 기준으로 바로 이어서 물어볼 수 있는 질문입니다.",
+                ),
+                unsafe_allow_html=True,
+            )
+
     chat_container = st.container(height=chat_height)
     with chat_container:
-        for msg in st.session_state["chat_messages"]:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-                if msg["role"] == "assistant":
-                    _render_source_block_expanders(msg.get("source_blocks", []))
+        msgs = st.session_state["chat_messages"]
+        for msg in msgs:
+            if msg["role"] == "user":
+                st.markdown(
+                    f'<div class="chat-user-msg-wrap"><div class="chat-user-msg">{html.escape(msg["content"])}</div></div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    f'<div class="chat-assistant-msg">{md_lib.markdown(msg["content"], extensions=["fenced_code", "tables"])}</div>',
+                    unsafe_allow_html=True,
+                )
+                _render_source_block_expanders(msg.get("source_blocks", []))
+
+        # Follow-up question buttons after the last assistant message
+        if msgs and msgs[-1]["role"] == "assistant":
+            followups = msgs[-1].get("followup_suggestions", [])
+            if followups:
+                last_idx = len(msgs) - 1
+                st.markdown('<div class="followup-btns">', unsafe_allow_html=True)
+                for fq_idx, fq in enumerate(followups):
+                    if st.button(fq, key=f"fq_{last_idx}_{fq_idx}", use_container_width=True):
+                        st.session_state["chat_messages"].append({"role": "user", "content": fq})
+                        st.session_state["_pending_chat"] = fq
+                        st.rerun()
+                st.markdown("</div>", unsafe_allow_html=True)
 
         if _pending := st.session_state.pop("_pending_chat", None):
-            with st.chat_message("assistant"):
-                with st.spinner("생각 중..."):
-                    try:
-                        _chat_result = rag_query(
-                            _pending, model=llm_model, document_id=doc.id
-                        )
-                        _reply = _chat_result.answer
-                        _source_blocks = _serialize_source_blocks(
-                            _chat_result.source_blocks
-                        )
-                    except Exception as _exc:
-                        _reply = f"오류가 발생했습니다: {_exc}"
-                        _source_blocks = []
+            with st.spinner("생각 중..."):
+                try:
+                    _chat_result = rag_query(
+                        _pending, model=qa_llm_model, document_id=doc.id
+                    )
+                    _raw_reply = _chat_result.answer
+                    _reply, _followups = _parse_followup_suggestions(_raw_reply)
+                    _source_blocks = _serialize_source_blocks(
+                        _chat_result.source_blocks
+                    )
+                except Exception as _exc:
+                    _reply = f"오류가 발생했습니다: {_exc}"
+                    _followups = []
+                    _source_blocks = []
             st.session_state["chat_messages"].append(
                 {
                     "role": "assistant",
                     "content": _reply,
                     "source_blocks": _source_blocks,
+                    "followup_suggestions": _followups,
                 }
             )
             st.rerun()
 
+    # Chat input OUTSIDE the gray box (prevents double-box visual during spinner)
     if user_input := st.chat_input("질문을 입력하세요"):
-        st.session_state["chat_messages"].append(
-            {"role": "user", "content": user_input}
-        )
+        st.session_state["chat_messages"].append({"role": "user", "content": user_input})
         st.session_state["_pending_chat"] = user_input
         st.rerun()
 
@@ -1600,21 +1733,164 @@ if not st.session_state.get(_indexed_key):
         st.warning(f"RAG 인덱싱 실패: {_idx_exc}")
 
 # ===================================================================
-# RESULTS — Navigation
+# RESULTS — Study note (default view) + Chat panel
 # ===================================================================
-active_tab = st.radio(
-    "탭 선택",
-    ["📊 파싱 결과", "📝 학습 노트"],
-    horizontal=True,
-    key="active_tab",
-    label_visibility="collapsed",
-)
+col_content, col_chat = st.columns([1.12, 1], gap="large")
 
-# ─── Tab 1: Parsing results ───────────────────────────────────────────
-if active_tab == "📊 파싱 결과":
+with col_content:
+    title = result.get("title") or doc.source
+    summary = result.get("summary")
+    note_markdown = result.get("note_markdown")
+    key_concepts = result.get("key_concepts") or []
+    difficulty = result.get("difficulty_level")
+    read_time = result.get("estimated_read_time_min")
+    errors = result.get("errors") or []
+
+    if errors:
+        for err in errors:
+            st.info(str(err))
+
+    if is_image:
+        preview_controls, preview_action = st.columns([3, 1])
+        with preview_controls:
+            zoom_percent = st.slider(
+                "이미지 확대",
+                min_value=100,
+                max_value=300,
+                value=160,
+                step=10,
+                key=f"image_zoom_{cache_key}",
+                help="작은 글씨가 있는 이미지라면 확대 후 스크롤해서 확인하세요.",
+            )
+        with preview_action:
+            st.caption("")
+            if st.button(
+                "전체화면 보기",
+                use_container_width=True,
+                key=f"open_image_lightbox_{cache_key}",
+            ):
+                _show_image_lightbox(
+                    uploaded_file.name, file_bytes, suffix, cache_key
+                )
+        st.markdown(
+            _render_image_preview_card(
+                uploaded_file.name, file_bytes, suffix, zoom_percent
+            ),
+            unsafe_allow_html=True,
+        )
+    elif note_markdown:
+        raw_md = _normalize_note_markdown(note_markdown)
+        file_stem = Path(doc.source).stem
+        full_md = f"# {title}\n\n{raw_md}"
+
+        # Toolbar row: edit toggle + export popover
+        toolbar_col, export_col = st.columns([3, 1])
+        with toolbar_col:
+            edit_mode = st.toggle(
+                "✏️ 편집 모드", value=False, key="note_edit_toggle"
+            )
+        with export_col:
+            with st.popover("📤 내보내기 ▾", use_container_width=True):
+                st.download_button(
+                    "📥 마크다운 다운로드",
+                    data=full_md,
+                    file_name=f"{file_stem}_note.md",
+                    mime="text/markdown",
+                    use_container_width=True,
+                )
+                if st.button("📋 클립보드 복사", use_container_width=True, key="copy_note_btn"):
+                    try:
+                        pyperclip.copy(full_md)
+                        st.toast("📋 클립보드에 복사됐어요!")
+                    except Exception:
+                        st.toast("복사 실패")
+
+        # Title + meta outside scroll container
+        st.markdown(f"### {title}")
+        meta_html = ""
+        if difficulty:
+            meta_html += f'<span class="meta-badge">난이도: {difficulty}</span>'
+        if read_time:
+            meta_html += f'<span class="meta-badge">읽기 시간: {read_time}분</span>'
+        if meta_html:
+            st.markdown(meta_html, unsafe_allow_html=True)
+        if summary:
+            st.markdown(f'<div class="summary-card">{summary}</div>', unsafe_allow_html=True)
+        if key_concepts:
+            st.markdown("**핵심 개념**")
+            st.markdown(_render_concept_tags(key_concepts), unsafe_allow_html=True)
+
+        _NOTE_PANEL_H = 840
+        note_scroll = st.container(height=_NOTE_PANEL_H)
+        with note_scroll:
+            if edit_mode:
+                # Section-level edit mode: flow as one document, ✏️ per section
+                sections = _split_note_sections(raw_md)
+                first_rendered = True
+                for _sec_heading, _sec_body in sections:
+                    content_md = (
+                        f"{_sec_heading}\n\n{_sec_body}".strip() if _sec_heading else _sec_body
+                    )
+                    if not content_md:
+                        continue
+                    if not first_rendered:
+                        st.markdown('<hr class="note-sep">', unsafe_allow_html=True)
+                    st.markdown(_render_note_section_html(content_md), unsafe_allow_html=True)
+                    if _sec_heading:
+                        _, _action_col = st.columns([6, 1])
+                        with _action_col:
+                            st.markdown('<div class="sec-action-btns">', unsafe_allow_html=True)
+                            if st.button(
+                                "✏️",
+                                key=f"edit_sec_{_sec_heading}",
+                                help=f"'{_sec_heading}' 섹션 수정",
+                            ):
+                                st.session_state["selected_edit_section"] = _sec_heading
+                                st.session_state["edit_section_selectbox"] = _sec_heading
+                                st.session_state["active_right_panel"] = "✏️ 노트 수정"
+                                st.rerun()
+                            _sec_stack = st.session_state.get("note_section_undo", {}).get(_sec_heading, [])
+                            if st.button(
+                                "↩",
+                                key=f"undo_sec_{_sec_heading}",
+                                disabled=len(_sec_stack) == 0,
+                                help=f"'{_sec_heading}' 섹션 되돌리기",
+                            ):
+                                prev_body = _sec_stack.pop()
+                                result["note_markdown"] = _replace_section_body(raw_md, _sec_heading, prev_body)
+                                st.rerun()
+                            st.markdown('</div>', unsafe_allow_html=True)
+                    first_rendered = False
+            else:
+                # Pure read view
+                st.markdown(_render_note_html(raw_md), unsafe_allow_html=True)
+    else:
+        st.info("노트 내용이 없습니다.")
+
+with col_chat:
+    if is_image:
+        # Image mode: Q&A only, no note editor
+        _render_qa_panel(doc, result, llm_model, is_image=True, chat_height=960)
+    else:
+        # Non-image mode: Q&A tab + Note editor tab
+        right_panel = st.radio(
+            "right_panel",
+            ["💬 Q&A", "✏️ 노트 수정"],
+            horizontal=True,
+            key="active_right_panel",
+            label_visibility="collapsed",
+        )
+        if right_panel == "💬 Q&A":
+            _render_qa_panel(
+                doc, result, llm_model, is_image=False, chat_height=960
+            )
+        else:
+            _render_note_editor_panel(result, llm_model, chat_height=837)
+
+# ─── Pipeline details (collapsed by default) ─────────────────────────
+st.markdown('<div style="height:96px"></div>', unsafe_allow_html=True)
+with st.expander("🔧 파이프라인 상세", expanded=False):
     type_counts = Counter(block.type.value for block in doc.blocks)
-
-    # Metric cards
     mc1, mc2, mc3 = st.columns(3)
     with mc1:
         st.markdown(
@@ -1629,176 +1905,12 @@ if active_tab == "📊 파싱 결과":
         st.markdown(
             _render_metric_card(doc.status.value, "처리 상태"), unsafe_allow_html=True
         )
-
     st.markdown("<br>", unsafe_allow_html=True)
-
-    # Block type badges
     st.markdown("**블록 구성**")
     st.markdown(_render_block_type_badges(type_counts), unsafe_allow_html=True)
-
-    # Block detail expander
     with st.expander("블록 상세 보기", expanded=False):
         for i, block in enumerate(doc.blocks[:30]):
             content_preview = block.content[:120].replace("\n", " ")
             st.text(f"[{i}] {block.type.value}: {content_preview}")
         if len(doc.blocks) > 30:
             st.caption(f"... 외 {len(doc.blocks) - 30}개 블록")
-
-# ─── Tab 2: Study note + Q&A (side by side) ──────────────────────────
-if active_tab == "📝 학습 노트":
-    title = result.get("title") or doc.source
-    summary = result.get("summary")
-    note_markdown = result.get("note_markdown")
-    key_concepts = result.get("key_concepts") or []
-    difficulty = result.get("difficulty_level")
-    read_time = result.get("estimated_read_time_min")
-    errors = result.get("errors") or []
-
-    if errors:
-        for err in errors:
-            st.warning(str(err))
-
-    if not is_image:
-        # Title
-        st.markdown(f"### {title}")
-
-        # Meta badges
-        meta_html = ""
-        if difficulty:
-            meta_html += f'<span class="meta-badge">난이도: {difficulty}</span>'
-        if read_time:
-            meta_html += f'<span class="meta-badge">읽기 시간: {read_time}분</span>'
-        if meta_html:
-            st.markdown(meta_html, unsafe_allow_html=True)
-
-        # Summary card
-        if summary:
-            st.markdown(
-                f'<div class="summary-card">{summary}</div>', unsafe_allow_html=True
-            )
-
-        # Key concepts as tags
-        if key_concepts:
-            st.markdown("**핵심 개념**")
-            st.markdown(_render_concept_tags(key_concepts), unsafe_allow_html=True)
-
-    col_content, col_chat = st.columns([1.12, 1], gap="large")
-
-    with col_content:
-        if is_image:
-            preview_controls, preview_action = st.columns([3, 1])
-            with preview_controls:
-                zoom_percent = st.slider(
-                    "이미지 확대",
-                    min_value=100,
-                    max_value=300,
-                    value=160,
-                    step=10,
-                    key=f"image_zoom_{cache_key}",
-                    help="작은 글씨가 있는 이미지라면 확대 후 스크롤해서 확인하세요.",
-                )
-            with preview_action:
-                st.caption("")
-                if st.button(
-                    "전체화면 보기",
-                    use_container_width=True,
-                    key=f"open_image_lightbox_{cache_key}",
-                ):
-                    _show_image_lightbox(
-                        uploaded_file.name, file_bytes, suffix, cache_key
-                    )
-            st.markdown(
-                _render_image_preview_card(
-                    uploaded_file.name, file_bytes, suffix, zoom_percent
-                ),
-                unsafe_allow_html=True,
-            )
-        elif note_markdown:
-            raw_md = _normalize_note_markdown(note_markdown)
-            file_stem = Path(doc.source).stem
-
-            # Toolbar row: edit toggle + undo button
-            toolbar_col, undo_col = st.columns([3, 1])
-            with toolbar_col:
-                edit_mode = st.toggle(
-                    "✏️ 편집 모드", value=False, key="note_edit_toggle"
-                )
-            with undo_col:
-                edit_history = st.session_state.get("note_edit_history", [])
-                if st.button(
-                    "↩ 되돌리기",
-                    disabled=len(edit_history) == 0,
-                    use_container_width=True,
-                    key="note_undo_btn",
-                ):
-                    last = edit_history.pop()
-                    result["note_markdown"] = last["markdown_before"]
-                    st.rerun()
-
-            # Shared panel height — note scroll container and chat_height are
-            # calibrated so total visual heights approximately match.
-            # Note: toolbar(~55px) + PANEL_H + download(~45px) ≈ chat header(~155px) + chat_height
-            _NOTE_PANEL_H = 700
-
-            note_scroll = st.container(height=_NOTE_PANEL_H)
-            with note_scroll:
-                if edit_mode:
-                    # Section-level edit mode: flow as one document, ✏️ per section
-                    sections = _split_note_sections(raw_md)
-                    first_rendered = True
-                    for _sec_heading, _sec_body in sections:
-                        content_md = (
-                            f"{_sec_heading}\n\n{_sec_body}".strip() if _sec_heading else _sec_body
-                        )
-                        if not content_md:
-                            continue
-                        if not first_rendered:
-                            st.markdown('<hr class="note-sep">', unsafe_allow_html=True)
-                        st.markdown(_render_note_section_html(content_md), unsafe_allow_html=True)
-                        if _sec_heading:
-                            if st.button(
-                                "✏️",
-                                key=f"edit_sec_{_sec_heading}",
-                                help=f"'{_sec_heading}' 섹션 수정",
-                            ):
-                                st.session_state["selected_edit_section"] = _sec_heading
-                                # Directly set selectbox key — Streamlit ignores
-                                # index= when the key already exists in session state
-                                st.session_state["edit_section_selectbox"] = _sec_heading
-                                st.session_state["active_right_panel"] = "✏️ 노트 수정"
-                                st.rerun()
-                        first_rendered = False
-                else:
-                    # Pure read view: single note block (Claude Artifact MD preview style)
-                    st.markdown(_render_note_html(raw_md), unsafe_allow_html=True)
-            download_md = raw_md
-
-            full_md = f"# {title}\n\n{download_md}"
-            st.download_button(
-                label="📥 마크다운 다운로드",
-                data=full_md,
-                file_name=f"{file_stem}_note.md",
-                mime="text/markdown",
-            )
-        else:
-            st.info("노트 내용이 없습니다.")
-
-    with col_chat:
-        if is_image:
-            # Image mode: Q&A only, no note editor
-            _render_qa_panel(doc, result, llm_model, is_image=True, chat_height=580)
-        else:
-            # Non-image mode: Q&A tab + Note editor tab
-            right_panel = st.radio(
-                "right_panel",
-                ["💬 Q&A", "✏️ 노트 수정"],
-                horizontal=True,
-                key="active_right_panel",
-                label_visibility="collapsed",
-            )
-            if right_panel == "💬 Q&A":
-                _render_qa_panel(
-                    doc, result, llm_model, is_image=False, chat_height=580
-                )
-            else:
-                _render_note_editor_panel(result, llm_model, chat_height=550)

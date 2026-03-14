@@ -51,8 +51,13 @@ def _normalize_text(value: Any) -> str:
     if value is None:
         return ""
     if isinstance(value, list):
-        return "".join(str(item) for item in value)
-    return str(value)
+        text = "".join(str(item) for item in value)
+    else:
+        text = str(value)
+    # Strip JavaScript object placeholders that appear in Jupyter rich display outputs
+    import re as _re
+    text = _re.sub(r",?\[object Object\],?", "", text)
+    return text
 
 
 def _extract_text_from_data(data: dict[str, Any]) -> str:
