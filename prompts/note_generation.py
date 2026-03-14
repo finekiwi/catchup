@@ -1,7 +1,7 @@
 """LLM prompt for generating study notes from structured document blocks."""
 
 PROMPT_NAME = "note_generation"
-PROMPT_VERSION = "v1.4.1"
+PROMPT_VERSION = "v1.5.0"
 
 PROMPT = """You are a study-note generator.
 Given structured document blocks, produce one coherent learning note.
@@ -22,13 +22,13 @@ INSTRUCTIONS:
     - Note any design patterns used (e.g. factory, strategy, decorator)
     - Include short, essential code snippets (class/function signatures, key logic, usage examples) inside markdown code fences. Keep each snippet under 10 lines — do NOT dump entire code blocks verbatim.
 - Skip only truly boilerplate lines (e.g. bare import statements, assert env checks). Do NOT skip conceptual content.
-- For large documents (100+ blocks): organize into 5-10 major sections, each with meaningful depth. Cover the full scope of the document, not just the beginning.
-- MINIMUM LENGTH: "note_markdown" must be at least 2000 characters. Write detailed, informative paragraphs — not one-liners. If a section could be expanded with more explanation from the source blocks, do so.
+- Cover EVERY distinct topic found in the blocks. Create a dedicated ## section for each major topic — do NOT merge unrelated topics or omit any section. If the document has a table of contents or section headings, every heading must appear as a ## section in note_markdown.
+- MINIMUM LENGTH: "note_markdown" MUST be at least 3000 characters. Write detailed, substantive paragraphs — not one-liners. Every section must have at least 3-5 sentences. Do NOT stop early.
 - If information is missing, keep it empty instead of guessing.
 
 OUTPUT FORMAT (JSON only, no markdown fences):
 {
-  "schema_version": "v1.4.1",
+  "schema_version": "v1.5.0",
   "title": "Note title in original language",
   "summary": "2-3 sentence summary in original language",
   "note_markdown": "## Section\\n\\nParagraph text here.\\n\\n### Subsection\\n\\n- bullet",
@@ -40,7 +40,7 @@ OUTPUT FORMAT (JSON only, no markdown fences):
 }
 
 RULES:
-- "schema_version": always "v1.4.1"
+- "schema_version": always "v1.5.0"
 - "note_markdown": MUST be a pure markdown string. Strict heading hierarchy:
     - ## (h2) for main sections only (e.g. ## 개요, ## 핵심 개념)
     - ### (h3) for subsections only

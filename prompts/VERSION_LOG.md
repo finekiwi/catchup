@@ -32,6 +32,7 @@
 | v1.4.0 | 2026-03-05 | (1) Section depth 상향: 5-8문장/4-6불릿 + what/why/how 필수. (2) 코드 설명 상세화: 클래스/함수 역할, 알고리즘, I/O, 디자인 패턴. (3) 최소 길이 강제: `note_markdown` 2000자 이상. (4) Code-level: `max_tokens=4096` 명시. | gpt-4o-mini의 축약 경향 대응 — 짧은 응답 방지 |
 | v1.4.1 | 2026-03-05 | 핵심 코드 스니펫 허용: "DO NOT include raw code" → "Include short key code snippets (signatures, core logic) inside code fences — max 10 lines each. Do NOT dump entire blocks verbatim." 학습노트에 클래스/함수 시그니처, 핵심 로직, 사용 예시 포함 가능. | 코드 중심 자료(ipynb)에서 학습 효과 향상 — 설명만으론 부족한 구현 디테일 보완 |
 | v1.4.1 | 2026-03-15 | note_generator.py: OpenAI `response_format={"type":"json_object"}` 강제 + JSON 파싱 실패 시 1회 retry (nudge 메시지 추가). 프롬프트 텍스트 변경 없음 — 동작 레이어 수정. | gpt-4o-mini가 JSON 대신 마크다운 텍스트 반환하는 케이스 방어 |
+| v1.5.0 | 2026-03-15 | "5-10 major sections" → "Cover EVERY distinct topic, dedicated ## section per topic, TOC headings must all appear"; MINIMUM LENGTH 2000 → 3000자; max_tokens 4096 → 8192. | LLM이 섹션 누락하거나 1060 토큰에서 자발적으로 멈추는 문제 해결 |
 
 ## eval_judge.py
 | Version | Date | Change | Quality Impact |

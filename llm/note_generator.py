@@ -15,12 +15,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from typing import Any
 
 from dotenv import load_dotenv
 
-from models.document import BlockType, Document, ProcessingStatus
+from models.document import Block, BlockType, Document, ProcessingStatus
 from prompts.note_generation import PROMPT, PROMPT_VERSION
 from utils.logging import log_api_call
 from llm.schemas import NoteGenerationOutput
@@ -78,7 +79,7 @@ def _call_openai(model: str, system: str, user: str) -> tuple[str, int, int]:
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        max_tokens=4096,
+        max_tokens=8192,
         response_format={"type": "json_object"},
     )
     raw = resp.choices[0].message.content or ""
@@ -92,7 +93,7 @@ def _call_anthropic(model: str, system: str, user: str) -> tuple[str, int, int]:
     client = anthropic.Anthropic()
     resp = client.messages.create(
         model=model,
-        max_tokens=4096,
+        max_tokens=8192,
         system=system,
         messages=[{"role": "user", "content": user}],
     )
@@ -122,23 +123,47 @@ _PROVIDER_DISPATCH: dict[str, Any] = {
 
 
 _MIN_FIGURE_CONTENT_LEN = 20  # figure blocks shorter than this carry no useful text
+_NOISE_TEXT_MAX_LEN = 60      # text blocks below this length are candidates for noise filtering
+_NOISE_DOT_RATIO = 0.3        # if >30% of chars are dots/dashes, treat as TOC/page-num line
+
+# Compiled pattern for purely numeric or dot-leader lines (e.g. "........... 54", "3.1  ......53")
+_NOISE_PATTERN = re.compile(r'^[\s\d\.\-\·\•·]+$')
+
+
+def _is_noise_block(block: Block) -> bool:
+    """Return True if the block carries no substantive content.
+
+    Filters out:
+    - Empty/very-short figure blocks (no VLM description)
+    - Short text blocks that are page numbers, TOC dot-leaders, headers/footers
+      e.g. ".......... 54" or "3.1 기본 명령어 ............ 53"
+    """
+    content = block.content.strip()
+    if block.type == BlockType.FIGURE:
+        return len(content) < _MIN_FIGURE_CONTENT_LEN
+    if block.type == BlockType.TEXT and len(content) < _NOISE_TEXT_MAX_LEN:
+        # Purely numeric/dot-leader line
+        if _NOISE_PATTERN.match(content):
+            return True
+        # High dot/dash ratio (TOC lines like "기본 명령어 ........... 53")
+        dot_count = content.count('.') + content.count('·') + content.count('-')
+        if len(content) > 0 and dot_count / len(content) > _NOISE_DOT_RATIO:
+            return True
+    return False
 
 
 def _sample_blocks(doc: Document, max_blocks: int = _MAX_BLOCKS) -> list:
     """Return a representative block sample from the document.
 
-    Figure blocks with very short content (< _MIN_FIGURE_CONTENT_LEN chars) are
-    excluded before sampling — they have no extractable text and only waste tokens.
-    Figure blocks with VLM-generated descriptions (longer content) are kept.
+    Noise blocks are excluded before sampling: empty figure blocks, page numbers,
+    TOC dot-leader lines, and short header/footer text. This ensures the same
+    max_blocks budget is spent on substantive content blocks.
 
     For large documents, evenly samples across the filtered block list so the
     LLM sees content from beginning, middle, and end rather than just the
     first N blocks.
     """
-    blocks = [
-        b for b in doc.blocks
-        if not (b.type == BlockType.FIGURE and len(b.content.strip()) < _MIN_FIGURE_CONTENT_LEN)
-    ]
+    blocks = [b for b in doc.blocks if not _is_noise_block(b)]
     if len(blocks) <= max_blocks:
         return blocks
 
