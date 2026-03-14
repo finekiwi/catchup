@@ -369,50 +369,10 @@ _PROVIDER_DISPATCH: dict[str, Callable[..., tuple[str, int, int]]] = {
     "google":    _call_google,
 }
 
-_QUERY_REWRITE_PROMPT = """Rewrite the user's question for vector retrieval.
-
-Requirements:
-- Preserve the original language.
-- Keep the core intent, entities, and terminology.
-- Make the query shorter and retrieval-friendly.
-- Return only the rewritten query text.
-- Do not answer the question.
-"""
-
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-
-def rewrite_query(question: str, model: str = "gpt-4o-mini") -> str:
-    """Rewrite a user question into a retrieval-friendly query string.
-
-    Raises:
-        ValueError: If model is unsupported.
-        RuntimeError: If no provider dispatch exists for the model.
-        Exception: Propagates provider call failures to the caller.
-    """
-    if model not in _MODEL_REGISTRY:
-        raise ValueError(f"Unsupported model: {model!r}. Choose from: {SUPPORTED_MODELS}")
-
-    provider = _MODEL_REGISTRY.get(model, {}).get("provider", "openai")
-    call_fn = _PROVIDER_DISPATCH.get(provider)
-    if call_fn is None:
-        raise RuntimeError(f"No provider dispatch found for model={model}")
-
-    t0 = time.perf_counter()
-    raw_query, input_tokens, output_tokens = call_fn(model, _QUERY_REWRITE_PROMPT, question)
-    latency_ms = (time.perf_counter() - t0) * 1000
-    log_api_call(
-        model=model,
-        stage="rag_rewrite",
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        latency_ms=latency_ms,
-        cost_usd=_compute_cost(model, input_tokens, output_tokens),
-        success=True,
-    )
-    return raw_query.strip()
 
 def index_document(document: Document) -> None:
     """Embed and store all blocks of a Document in ChromaDB.

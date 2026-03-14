@@ -45,7 +45,7 @@ from db.sqlite import (  # noqa: E402
     save_document,
     save_note,
 )
-from rag import delete_document_index, has_document_vectors, index_document, query as rag_query, rewrite_query  # noqa: E402
+from rag import delete_document_index, has_document_vectors, index_document, query as rag_query  # noqa: E402
 from vlm.client import SUPPORTED_MODELS  # noqa: E402
 
 # Keys injected by the LLM schema but not rendered as note content
@@ -1535,12 +1535,6 @@ def _render_qa_panel(
             label_visibility="collapsed",
         )
         st.session_state[qa_model_pref_key] = qa_llm_model
-    qa_rewrite_enabled = st.checkbox(
-        "Query Rewriting",
-        value=st.session_state.get(f"qa_query_rewrite_{doc.id}", False),
-        key=f"qa_query_rewrite_{doc.id}",
-        help="질문을 검색 친화적으로 다시 써서 RAG 검색 품질을 높입니다.",
-    )
 
     _qa_chat_key = f"chat_messages_{doc.id}"
     if _qa_chat_key not in st.session_state:
@@ -1616,17 +1610,9 @@ def _render_qa_panel(
         st.rerun()
 
     if _pending := st.session_state.pop("_pending_chat", None):
-        retrieval_query = _pending
-        if qa_rewrite_enabled:
-            try:
-                rewritten = rewrite_query(_pending, model=qa_llm_model)
-                if rewritten:
-                    retrieval_query = rewritten
-            except Exception:
-                retrieval_query = _pending
         try:
             _chat_result = rag_query(
-                retrieval_query, model=qa_llm_model, document_id=doc.id, top_k=8
+                _pending, model=qa_llm_model, document_id=doc.id, top_k=8
             )
             _raw_reply = _chat_result.answer
             _reply, _followups = _parse_followup_suggestions(_raw_reply)
