@@ -1377,7 +1377,7 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
             "노트 수정 모델",
             options=SUPPORTED_LLM_MODELS,
             index=SUPPORTED_LLM_MODELS.index(llm_model) if llm_model in SUPPORTED_LLM_MODELS else 0,
-            key="note_editor_model_select",
+            key=f"{_sk}note_editor_model_select",
             label_visibility="collapsed",
         )
 
@@ -1386,11 +1386,11 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
         "수정할 섹션",
         options=list(range(len(section_headings))),
         format_func=lambda i: section_headings[i],
-        key="edit_section_selectbox",
+        key=f"{_sk}edit_section_selectbox",
     )
     selected = section_headings[selected_section_idx]
-    st.session_state["selected_edit_section"] = selected
-    st.session_state["selected_edit_section_idx"] = selected_section_idx
+    st.session_state[f"{_sk}selected_edit_section"] = selected
+    st.session_state[f"{_sk}selected_edit_section_idx"] = selected_section_idx
 
     # Session state init — chat/undo keyed by integer section index (not heading text)
     chat_key = f"{_sk}edit_chat_messages"
@@ -1478,13 +1478,13 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
 
     # Chat input OUTSIDE the gray box
     if edit_instruction := st.chat_input("수정 지시를 입력하세요 (예: 코드 예제 추가해줘)"):
-        _cur_idx = st.session_state.get("selected_edit_section_idx", 0)
+        _cur_idx = st.session_state.get(f"{_sk}selected_edit_section_idx", 0)
         st.session_state[chat_key].setdefault(_cur_idx, []).append(
             {"role": "user", "content": edit_instruction}
         )
         st.session_state["_pending_edit"] = {
             "instruction": edit_instruction,
-            "section": st.session_state.get("selected_edit_section", section_headings[0]),
+            "section": st.session_state.get(f"{_sk}selected_edit_section", section_headings[0]),
             "section_idx": _cur_idx,
         }
         st.rerun()
@@ -1719,7 +1719,7 @@ with st.sidebar:
                         for _k in (
                             "_library_mode", "_library_doc_id", "_library_cache_key",
                             "_library_doc_cache_key", "_library_used_vlm", "_library_used_llm",
-                            "_library_file_hash", "_library_just_loaded",
+                            "_library_file_hash",
                         ):
                             st.session_state.pop(_k, None)
                     delete_document_index(_ld.id)  # Remove ChromaDB vectors so re-upload re-indexes
@@ -1770,9 +1770,6 @@ if "_library_load" in st.session_state:
         st.session_state["_library_used_vlm"] = _used_vlm
         st.session_state["_library_used_llm"] = _used_llm
         st.session_state["_library_file_hash"] = _fh
-        # Mark this rerun as a fresh library load so the uploaded-file override below
-        # does not immediately cancel the restore when the uploader still holds a file.
-        st.session_state["_library_just_loaded"] = True
         _lib_mode = True
 
 if uploaded_file is None and not _lib_mode:
@@ -1804,7 +1801,6 @@ if _lib_mode:
         f'(모델: {html.escape(_used_vlm)} / {html.escape(_used_llm)})</div>',
         unsafe_allow_html=True,
     )
-    st.session_state.pop("_library_just_loaded", None)
     if uploaded_file is not None:
         # Exit library mode only when the user uploads a *different* file.
         # Compare the uploader's file hash against the library document's hash so
@@ -2052,9 +2048,10 @@ with col_content:
                                 key=f"edit_sec_{_cur_named_idx}",
                                 help=f"'{_sec_heading}' 섹션 수정",
                             ):
-                                st.session_state["selected_edit_section"] = _sec_heading
-                                st.session_state["selected_edit_section_idx"] = _cur_named_idx
-                                st.session_state["edit_section_selectbox"] = _cur_named_idx
+                                _editor_sk = f"editor_{doc.id}_"
+                                st.session_state[f"{_editor_sk}selected_edit_section"] = _sec_heading
+                                st.session_state[f"{_editor_sk}selected_edit_section_idx"] = _cur_named_idx
+                                st.session_state[f"{_editor_sk}edit_section_selectbox"] = _cur_named_idx
                                 st.session_state["active_right_panel"] = "✏️ 노트 수정"
                                 st.rerun()
                             _undo_key = f"editor_{doc.id}_note_section_undo"
