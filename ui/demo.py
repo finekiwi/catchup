@@ -1786,7 +1786,7 @@ if active_tab == "📝 학습 노트":
     with col_chat:
         if is_image:
             # Image mode: Q&A only, no note editor
-            _render_qa_panel(doc, result, llm_model, is_image=True, chat_height=640)
+            _render_qa_panel(doc, result, llm_model, is_image=True, chat_height=580)
         else:
             # Non-image mode: Q&A tab + Note editor tab
             right_panel = st.radio(
@@ -1798,7 +1798,7 @@ if active_tab == "📝 학습 노트":
             )
             if right_panel == "💬 Q&A":
                 _render_qa_panel(
-                    doc, result, llm_model, is_image=False, chat_height=600
+                    doc, result, llm_model, is_image=False, chat_height=580
                 )
             else:
-                _render_note_editor_panel(result, llm_model, chat_height=420)
+                _render_note_editor_panel(result, llm_model, chat_height=550)
