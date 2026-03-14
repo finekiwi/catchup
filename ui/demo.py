@@ -879,14 +879,17 @@ def _downshift_headings(md_text: str) -> str:
 def _render_note_html(note_md: str) -> str:
     """Convert note markdown to scoped HTML for consistent rendering."""
     clean_md = _downshift_headings(_normalize_note_markdown(note_md))
-    html_body = md_lib.markdown(clean_md, extensions=["fenced_code", "tables", "nl2br"])
+    # nl2br intentionally excluded: it injects <br> inside <pre><code> blocks which
+    # causes Streamlit's react-markdown code renderer to receive an array of nodes
+    # instead of a plain string, producing [object Object] for each line.
+    html_body = md_lib.markdown(clean_md, extensions=["fenced_code", "tables"])
     return f'<div class="note-wrapper"><div class="note-content">\n{html_body}\n</div></div>'
 
 
 def _render_note_section_html(note_md: str) -> str:
     """Render a single section without card border (used in edit mode)."""
     clean_md = _downshift_headings(_normalize_note_markdown(note_md))
-    html_body = md_lib.markdown(clean_md, extensions=["fenced_code", "tables", "nl2br"])
+    html_body = md_lib.markdown(clean_md, extensions=["fenced_code", "tables"])
     return f'<div class="note-section"><div class="note-content">\n{html_body}\n</div></div>'
 
 
