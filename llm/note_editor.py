@@ -322,11 +322,18 @@ def edit_section(
     instruction: str,
     model: str = "gpt-4o-mini",
     history: list[dict[str, str]] | None = None,
+    document_id: str | None = None,
+    top_k: int = 5,
 ) -> NoteEditResult:
     """Edit one section of a study note using a natural-language instruction.
 
     Splits the note at ## boundaries, sends the target section + instruction to
     the LLM, and splices the result back into the full note.
+
+    When document_id is provided, retrieves top_k relevant chunks from ChromaDB
+    using the instruction as the query and includes them as grounding context in
+    the system prompt. This allows edits like "add a .gitignore example" to be
+    backed by the actual document content rather than LLM parametric knowledge.
 
     Supports multi-turn editing via the history parameter: each entry is a
     {"role": "user"/"assistant", "content": "..."} dict from a prior edit turn.
@@ -339,6 +346,9 @@ def edit_section(
         instruction: Natural-language edit instruction from the user.
         model: LLM model identifier. Must be one of SUPPORTED_EDIT_MODELS.
         history: Optional list of prior {"role", "content"} messages for multi-turn editing.
+        document_id: Optional document id for RAG context retrieval. When provided,
+                     the top_k most relevant chunks are embedded in the system prompt.
+        top_k: Number of document chunks to retrieve when document_id is given.
 
     Returns:
         NoteEditResult with the updated full markdown and section body preview.
@@ -379,12 +389,29 @@ def edit_section(
     actual_heading, section_body = sections[target_idx]
     section_list = "\n".join(f"- {h}" for h, _ in sections if h) or "(no sections)"
 
+    # Retrieve grounding context from ChromaDB when document_id is provided
+    context_section = ""
+    if document_id:
+        try:
+            from rag.qa_chain import retrieve_context  # lazy import to avoid circular dependency
+            chunks = retrieve_context(instruction, document_id, top_k=top_k)
+            if chunks:
+                joined = "\n---\n".join(chunks)
+                context_section = (
+                    "DOCUMENT CONTEXT (retrieved from source document — "
+                    "prefer this over general knowledge when adding examples or facts):\n"
+                    f"{joined}\n\n"
+                )
+        except Exception:
+            LOGGER.warning("RAG context retrieval failed for document_id=%s — proceeding without context", document_id)
+
     # Build system prompt by filling in context
     system = PROMPT.format(
         section_list=section_list,
         target_heading=actual_heading or "(preamble)",
         instruction=instruction,
         section_body=section_body,
+        context_section=context_section,
     )
 
     # Build message list: prior history + current instruction

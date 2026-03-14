@@ -877,6 +877,61 @@ def query(
         )
 
 
+def retrieve_context(
+    query_text: str,
+    document_id: str,
+    top_k: int = 5,
+) -> list[str]:
+    """Retrieve top_k content chunks from ChromaDB scoped to a single document.
+
+    Embeds query_text and returns the matching chunk strings. Used to ground
+    note edits in actual document content rather than LLM parametric knowledge.
+
+    Returns an empty list on any error (network, ChromaDB, or embedding failure).
+
+    Args:
+        query_text: The edit instruction or keyword string to embed.
+        document_id: Restrict retrieval to this document's indexed chunks.
+        top_k: Maximum number of chunks to return.
+    """
+    collection = _get_rag_collection()
+    if collection is None:
+        return []
+
+    try:
+        query_vector, embed_tokens = _get_openai_embedding(query_text)
+        log_api_call(
+            model=EMBED_MODEL,
+            stage="note_edit_retrieve",
+            input_tokens=embed_tokens,
+            output_tokens=0,
+            latency_ms=0.0,
+            cost_usd=embed_tokens * _EMBED_COST_PER_1M_USD / 1_000_000,
+            success=True,
+            error=None,
+        )
+    except Exception:
+        LOGGER.exception("Failed to embed query for context retrieval")
+        return []
+
+    try:
+        filtered = collection.get(where={"document_id": {"$eq": document_id}})
+        filtered_count = len(filtered.get("ids") or [])
+        if filtered_count == 0:
+            return []
+        n_results = min(top_k, filtered_count)
+        raw = collection.query(
+            query_embeddings=[query_vector],
+            n_results=n_results,
+            include=["documents"],
+            where={"document_id": {"$eq": document_id}},
+        )
+        return (raw.get("documents") or [[]])[0]
+    except Exception:
+        LOGGER.exception("ChromaDB context retrieval failed for document_id=%s", document_id)
+        return []
+
+
 def delete_document_index(document_id: str) -> None:
     """Delete all ChromaDB entries for a document from both RAG collections.
 
@@ -904,6 +959,7 @@ __all__ = [
     "index_document", "index_document_chunked",
     "delete_document_index",
     "query", "query_chunked",
+    "retrieve_context",
     "rechunk_blocks",
     "QAResult", "SourceBlock", "SUPPORTED_MODELS",
     "RAG_COLLECTION_NAME", "RAG_CHUNKED_COLLECTION_NAME",

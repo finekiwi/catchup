@@ -1439,6 +1439,7 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
                     instruction=instruction,
                     model=editor_model,
                     history=history,
+                    document_id=doc_key if doc_key else None,
                 )
             if edit_result.success:
                 st.session_state[pending_md_key] = edit_result.edited_markdown

@@ -56,6 +56,7 @@
 | Version | Date | Change | Quality Impact |
 |---------|------|--------|----------------|
 | v1.0.0 | 2026-03-13 | Initial prompt: section-level study note editing via natural-language instruction. Outputs raw markdown body (no heading, no JSON). Includes security guard against prompt injection in user instruction. Multi-turn context supported via section_list + history. | Baseline |
+| v1.1.0 | 2026-03-15 | Add `{context_section}` placeholder for RAG-retrieved document chunks. When document_id is provided, `edit_section()` embeds the instruction, retrieves top_k chunks from ChromaDB, and injects them before the section body. New rule: prefer DOCUMENT CONTEXT over LLM parametric knowledge for added examples/facts. | Edit requests like "add a .gitignore example" now use actual document content instead of LLM knowledge. Figure block VLM text (indexed in ChromaDB) also becomes accessible to note editor. |
 
 ## rag_qa.py (continued)
 | v1.4.0 | 2026-03-13 | Update note-modification response: redirect user to '✏️ 노트 수정' tab instead of edit mode toggle, reflecting new CU-11 note editor UI. | Aligns prompt with new UI affordance |
