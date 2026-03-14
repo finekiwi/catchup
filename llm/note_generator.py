@@ -68,7 +68,7 @@ def _compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
 # ---------------------------------------------------------------------------
 
 def _call_openai(model: str, system: str, user: str) -> tuple[str, int, int]:
-    """Call OpenAI chat completion API."""
+    """Call OpenAI chat completion API with JSON mode enforced."""
     import openai  # lazy import
 
     client = openai.OpenAI()
@@ -79,6 +79,7 @@ def _call_openai(model: str, system: str, user: str) -> tuple[str, int, int]:
             {"role": "user", "content": user},
         ],
         max_tokens=4096,
+        response_format={"type": "json_object"},
     )
     raw = resp.choices[0].message.content or ""
     return raw, resp.usage.prompt_tokens, resp.usage.completion_tokens
@@ -261,20 +262,35 @@ def generate_note(doc: Document, model: str = "gpt-4o-mini") -> dict[str, Any]:
             except Exception as val_exc:
                 LOGGER.warning("NoteGenerationOutput schema validation warning: %s", val_exc)
         except (json.JSONDecodeError, ValueError) as parse_exc:
-            LOGGER.warning("Note generation JSON parse failed: %s", parse_exc)
-            log_api_call(
-                model=model,
-                stage="note_generation",
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                latency_ms=latency_ms,
-                cost_usd=cost_usd,
-                success=False,
-                error=f"JSON parse failed: {parse_exc}",
-            )
-            if "note_generation_failed" not in doc.metadata.tags:
-                doc.metadata.tags.append("note_generation_failed")
-            return _make_fallback(doc, raw, "노트 구조 분석이 불완전합니다. 원문 형식으로 표시됩니다.")
+            LOGGER.warning("Note generation JSON parse failed (attempt 1): %s — retrying", parse_exc)
+            # Retry once with an explicit JSON-only nudge in the user message
+            retry_user = user_content + "\n\nIMPORTANT: Respond with valid JSON only. No markdown fences, no extra text."
+            try:
+                raw, input_tokens, output_tokens = call_fn(model, PROMPT, retry_user)
+                latency_ms = (time.perf_counter() - t0) * 1000
+                cost_usd = _compute_cost(model, input_tokens, output_tokens)
+                result = json.loads(_strip_markdown_fence(raw))
+                if not isinstance(result, dict):
+                    raise ValueError("LLM retry response JSON must be an object")
+                try:
+                    result = NoteGenerationOutput.model_validate(result).model_dump()
+                except Exception as val_exc:
+                    LOGGER.warning("NoteGenerationOutput schema validation warning (retry): %s", val_exc)
+            except (json.JSONDecodeError, ValueError) as retry_exc:
+                LOGGER.warning("Note generation JSON parse failed (retry): %s", retry_exc)
+                log_api_call(
+                    model=model,
+                    stage="note_generation",
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    latency_ms=latency_ms,
+                    cost_usd=cost_usd,
+                    success=False,
+                    error=f"JSON parse failed after retry: {retry_exc}",
+                )
+                if "note_generation_failed" not in doc.metadata.tags:
+                    doc.metadata.tags.append("note_generation_failed")
+                return _make_fallback(doc, raw, "노트 구조 분석이 불완전합니다. 원문 형식으로 표시됩니다.")
 
         log_api_call(
             model=model,
