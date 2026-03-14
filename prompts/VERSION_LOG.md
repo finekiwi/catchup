@@ -31,6 +31,10 @@
 | v1.3.0 | 2026-03-05 | (1) Large document instruction: "organize into 5-10 major sections, each with meaningful depth. Cover the full scope, not just the beginning." (2) Code-level: `_MAX_BLOCKS` 40→80, `_MAX_CONTENT_LEN` 800→1200, `_MAX_CONTENT_LEN_LARGE` 400→600, `_LARGE_DOC_THRESHOLD` 30→40. LLM now sees 2x more blocks with 50% more content per block. | Fixes thin 1-sentence sections on large PDFs (225-block Git textbook produced only surface-level summary) |
 | v1.4.0 | 2026-03-05 | (1) Section depth 상향: 5-8문장/4-6불릿 + what/why/how 필수. (2) 코드 설명 상세화: 클래스/함수 역할, 알고리즘, I/O, 디자인 패턴. (3) 최소 길이 강제: `note_markdown` 2000자 이상. (4) Code-level: `max_tokens=4096` 명시. | gpt-4o-mini의 축약 경향 대응 — 짧은 응답 방지 |
 | v1.4.1 | 2026-03-05 | 핵심 코드 스니펫 허용: "DO NOT include raw code" → "Include short key code snippets (signatures, core logic) inside code fences — max 10 lines each. Do NOT dump entire blocks verbatim." 학습노트에 클래스/함수 시그니처, 핵심 로직, 사용 예시 포함 가능. | 코드 중심 자료(ipynb)에서 학습 효과 향상 — 설명만으론 부족한 구현 디테일 보완 |
+| v1.4.1 | 2026-03-15 | note_generator.py: OpenAI `response_format={"type":"json_object"}` 강제 + JSON 파싱 실패 시 1회 retry (nudge 메시지 추가). 프롬프트 텍스트 변경 없음 — 동작 레이어 수정. | gpt-4o-mini가 JSON 대신 마크다운 텍스트 반환하는 케이스 방어 |
+| v1.5.0 | 2026-03-15 | "5-10 major sections" → "Cover EVERY distinct topic, dedicated ## section per topic, TOC headings must all appear"; MINIMUM LENGTH 2000 → 3000자; max_tokens 4096 → 8192. | LLM이 섹션 누락하거나 1060 토큰에서 자발적으로 멈추는 문제 해결 |
+| v1.5.1 | 2026-03-15 | No-merge rule 강화: "one heading = one ## section, no exceptions. Do NOT merge adjacent or similar-sounding sections (e.g. 'git commit' and 'git commit -a' are separate sections)." | 유사 섹션 병합으로 인한 TOC 커버리지 누락 방지 (3.5/3.7/3.8 섹션 누락 케이스) |
+| v1.5.2 | 2026-03-15 | EXCLUDE auxiliary content rule 추가: 부록(Appendix), 참고문헌, 색인, 챕터 개요 blurb는 노트에 포함 금지. 코드 레벨: `_HEADING_PATTERN`에 `부록/Appendix` 추가 + `_CHAPTER_INTRO_MAX_LEN=450` — 첫 줄이 CHAPTER/부록 패턴인 짧은 multi-line 블록도 노이즈 필터 적용. | "CHAPTER 5 소개합니다…" 블록과 "부록 B GitLab" 섹션이 노트에 포함되는 문제 수정 |
 
 ## eval_judge.py
 | Version | Date | Change | Quality Impact |
@@ -53,10 +57,12 @@
 | Version | Date | Change | Quality Impact |
 |---------|------|--------|----------------|
 | v1.0.0 | 2026-03-13 | Initial prompt: section-level study note editing via natural-language instruction. Outputs raw markdown body (no heading, no JSON). Includes security guard against prompt injection in user instruction. Multi-turn context supported via section_list + history. | Baseline |
+| v1.1.0 | 2026-03-15 | Add `{context_section}` placeholder for RAG-retrieved document chunks. When document_id is provided, `edit_section()` embeds the instruction, retrieves top_k chunks from ChromaDB, and injects them before the section body. New rule: prefer DOCUMENT CONTEXT over LLM parametric knowledge for added examples/facts. | Edit requests like "add a .gitignore example" now use actual document content instead of LLM knowledge. Figure block VLM text (indexed in ChromaDB) also becomes accessible to note editor. |
 
 ## rag_qa.py (continued)
 | v1.4.0 | 2026-03-13 | Update note-modification response: redirect user to '✏️ 노트 수정' tab instead of edit mode toggle, reflecting new CU-11 note editor UI. | Aligns prompt with new UI affordance |
 | v1.5.0 | 2026-03-14 | Add follow-up suggestion block (---SUGGESTIONS---/---END--- delimiters) appended after genuine document answers. UI parses and renders as clickable buttons (NotebookLM-style). Skip for note-mod redirects, emotional responses, and "not found" fallbacks. | Improves discovery of follow-on questions; no impact on main answer quality |
+| v1.5.1 | 2026-03-15 | Add indirect-evidence rule: if context touches topic implicitly (e.g. explains life without X), synthesize answer instead of falling back. Fallback reserved for genuinely unrelated context only. | Fixes false "찾을 수 없습니다" on implicit/indirect evidence blocks |
 
 ## Known Limitations & v2 Roadmap (recorded 2026-03-05, CU-07 demo)
 

@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 from db.chroma import _build_client
+from llm.note_generator import _is_noise_block
 from models.document import Document
 from prompts.rag_qa import PROMPT
 from utils.logging import log_api_call
@@ -200,7 +201,7 @@ def rechunk_blocks(
     flat: list[tuple[str, dict]] = []
     for block in document.blocks:
         content = block.content.strip()
-        if not content:
+        if not content or _is_noise_block(block):
             continue
         meta = {
             "document_id": document.id,
@@ -390,15 +391,23 @@ def index_document(document: Document) -> None:
         LOGGER.error("RAG collection unavailable — skipping index for document id=%s", document.id)
         return
 
-    non_empty_blocks = [b for b in document.blocks if b.content.strip()]
-    if _is_document_indexed(collection, document.id, len(non_empty_blocks)):
+    indexable_blocks = [b for b in document.blocks if b.content.strip() and not _is_noise_block(b)]
+
+    # Guard: if noise filtering removed every block there is nothing to embed.
+    # Treat this as a no-op rather than letting expected_block_count==0 cause
+    # _is_document_indexed to always return True and silently suppress future attempts.
+    if not indexable_blocks:
+        LOGGER.warning(
+            "index_document skipped for document id=%s: all blocks filtered as noise", document.id
+        )
+        return
+
+    if _is_document_indexed(collection, document.id, len(indexable_blocks)):
         LOGGER.info("Document id=%s already indexed, skipping", document.id)
         return
 
-    for block in document.blocks:
+    for block in indexable_blocks:
         content = block.content.strip()
-        if not content:
-            continue
 
         t0 = time.perf_counter()
         try:
@@ -878,9 +887,112 @@ def query(
         )
 
 
+def retrieve_context(
+    query_text: str,
+    document_id: str,
+    top_k: int = 5,
+) -> list[str]:
+    """Retrieve top_k content chunks from ChromaDB scoped to a single document.
+
+    Embeds query_text and returns the matching chunk strings. Used to ground
+    note edits in actual document content rather than LLM parametric knowledge.
+
+    Returns an empty list on any error (network, ChromaDB, or embedding failure).
+
+    Args:
+        query_text: The edit instruction or keyword string to embed.
+        document_id: Restrict retrieval to this document's indexed chunks.
+        top_k: Maximum number of chunks to return.
+    """
+    collection = _get_rag_collection()
+    if collection is None:
+        return []
+
+    try:
+        t0 = time.perf_counter()
+        query_vector, embed_tokens = _get_openai_embedding(query_text)
+        latency_ms = (time.perf_counter() - t0) * 1000
+        log_api_call(
+            model=EMBED_MODEL,
+            stage="note_edit_retrieve",
+            input_tokens=embed_tokens,
+            output_tokens=0,
+            latency_ms=latency_ms,
+            cost_usd=embed_tokens * _EMBED_COST_PER_1M_USD / 1_000_000,
+            success=True,
+            error=None,
+        )
+    except Exception:
+        LOGGER.exception("Failed to embed query for context retrieval")
+        return []
+
+    try:
+        filtered = collection.get(where={"document_id": {"$eq": document_id}})
+        filtered_count = len(filtered.get("ids") or [])
+        if filtered_count == 0:
+            return []
+        n_results = min(top_k, filtered_count)
+        raw = collection.query(
+            query_embeddings=[query_vector],
+            n_results=n_results,
+            include=["documents"],
+            where={"document_id": {"$eq": document_id}},
+        )
+        return (raw.get("documents") or [[]])[0]
+    except Exception:
+        LOGGER.exception("ChromaDB context retrieval failed for document_id=%s", document_id)
+        return []
+
+
+def has_document_vectors(document_id: str) -> bool:
+    """Return True if at least one vector is stored for this document in the RAG collection.
+
+    Used by the UI to decide whether to set the indexed session-state flag when restoring
+    a document from the library — avoids marking a document as indexed when embeddings were
+    never stored or were deleted.
+
+    Args:
+        document_id: Document.id to check.
+    """
+    collection = _get_rag_collection()
+    if collection is None:
+        return False
+    try:
+        result = collection.get(where={"document_id": {"$eq": document_id}})
+        return len(result.get("ids") or []) > 0
+    except Exception:
+        return False
+
+
+def delete_document_index(document_id: str) -> None:
+    """Delete all ChromaDB entries for a document from both RAG collections.
+
+    Called when a document is removed from the library so stale vectors don't
+    persist and re-uploads trigger a fresh index with current filters applied.
+
+    Args:
+        document_id: Document.id whose entries should be removed.
+    """
+    for name in (RAG_COLLECTION_NAME, RAG_CHUNKED_COLLECTION_NAME):
+        collection = _get_rag_collection(name)
+        if collection is None:
+            continue
+        try:
+            result = collection.get(where={"document_id": document_id})
+            ids = result.get("ids", [])
+            if ids:
+                collection.delete(ids=ids)
+                LOGGER.info("Deleted %d vectors for document id=%s from %s", len(ids), document_id, name)
+        except Exception as exc:
+            LOGGER.warning("Failed to delete vectors for document id=%s from %s: %s", document_id, name, exc)
+
+
 __all__ = [
     "index_document", "index_document_chunked",
+    "delete_document_index",
+    "has_document_vectors",
     "query", "query_chunked",
+    "retrieve_context",
     "rechunk_blocks",
     "QAResult", "SourceBlock", "SUPPORTED_MODELS",
     "RAG_COLLECTION_NAME", "RAG_CHUNKED_COLLECTION_NAME",

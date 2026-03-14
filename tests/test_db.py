@@ -80,6 +80,62 @@ def test_sqlite_creates_db_file_automatically(tmp_path, monkeypatch) -> None:
     assert sqlite_path.exists()
 
 
+def test_notes_save_and_get(tmp_path, monkeypatch) -> None:
+    """save_note -> get_note should round-trip the result dict."""
+    monkeypatch.setenv("CATCHUP_SQLITE_PATH", str(tmp_path / "test.db"))
+
+    result = {"title": "Test Note", "note_markdown": "## Hello\nWorld"}
+    sqlite_db.save_note("doc-1", "abc123hash", result, "gpt-4o", "gpt-4o")
+
+    fetched = sqlite_db.get_note("doc-1", "gpt-4o", "gpt-4o")
+    assert fetched is not None
+    assert fetched["result"] == result
+    assert fetched["file_hash"] == "abc123hash"
+    assert fetched["vlm_model"] == "gpt-4o"
+    assert fetched["llm_model"] == "gpt-4o"
+    assert fetched["is_image"] is False
+    assert fetched["updated_at"]  # non-empty
+
+
+def test_notes_upsert(tmp_path, monkeypatch) -> None:
+    """Saving with the same PK should overwrite the previous note."""
+    monkeypatch.setenv("CATCHUP_SQLITE_PATH", str(tmp_path / "test.db"))
+
+    sqlite_db.save_note("doc-1", "hash1", {"v": 1}, "gpt-4o", "gpt-4o")
+    sqlite_db.save_note("doc-1", "hash1", {"v": 2}, "gpt-4o", "gpt-4o")
+
+    fetched = sqlite_db.get_note("doc-1", "gpt-4o", "gpt-4o")
+    assert fetched is not None
+    assert fetched["result"] == {"v": 2}
+
+
+def test_notes_list_for_document(tmp_path, monkeypatch) -> None:
+    """list_notes_for_document should filter by document_id."""
+    monkeypatch.setenv("CATCHUP_SQLITE_PATH", str(tmp_path / "test.db"))
+
+    sqlite_db.save_note("doc-A", "h1", {"a": 1}, "vlm1", "llm1")
+    sqlite_db.save_note("doc-A", "h1", {"a": 2}, "vlm2", "llm2")
+    sqlite_db.save_note("doc-B", "h2", {"b": 1}, "vlm1", "llm1")
+
+    notes_a = sqlite_db.list_notes_for_document("doc-A")
+    assert len(notes_a) == 2
+
+    notes_b = sqlite_db.list_notes_for_document("doc-B")
+    assert len(notes_b) == 1
+    assert notes_b[0]["result"] == {"b": 1}
+
+
+def test_notes_delete(tmp_path, monkeypatch) -> None:
+    """delete_note should remove the note, get_note returns None after."""
+    monkeypatch.setenv("CATCHUP_SQLITE_PATH", str(tmp_path / "test.db"))
+
+    sqlite_db.save_note("doc-1", "h", {"x": 1}, "vlm", "llm")
+    assert sqlite_db.get_note("doc-1", "vlm", "llm") is not None
+
+    sqlite_db.delete_note("doc-1", "vlm", "llm")
+    assert sqlite_db.get_note("doc-1", "vlm", "llm") is None
+
+
 class _FakeCollection:
     """Simple in-memory fake Chroma collection."""
 

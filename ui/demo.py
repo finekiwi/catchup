@@ -36,7 +36,16 @@ from llm.note_generator import SUPPORTED_LLM_MODELS, generate_note  # noqa: E402
 from parsers.image_parser import parse_image  # noqa: E402
 from parsers.ipynb_parser import parse_ipynb  # noqa: E402
 from parsers.pdf_parser import parse_pdf  # noqa: E402
-from rag import index_document, query as rag_query  # noqa: E402
+from db.sqlite import (  # noqa: E402
+    delete_document,
+    get_document,
+    get_note,
+    list_documents,
+    list_notes_for_document,
+    save_document,
+    save_note,
+)
+from rag import delete_document_index, has_document_vectors, index_document, query as rag_query  # noqa: E402
 from vlm.client import SUPPORTED_MODELS  # noqa: E402
 
 # Keys injected by the LLM schema but not rendered as note content
@@ -870,14 +879,17 @@ def _downshift_headings(md_text: str) -> str:
 def _render_note_html(note_md: str) -> str:
     """Convert note markdown to scoped HTML for consistent rendering."""
     clean_md = _downshift_headings(_normalize_note_markdown(note_md))
-    html_body = md_lib.markdown(clean_md, extensions=["fenced_code", "tables", "nl2br"])
+    # nl2br intentionally excluded: it injects <br> inside <pre><code> blocks which
+    # causes Streamlit's react-markdown code renderer to receive an array of nodes
+    # instead of a plain string, producing [object Object] for each line.
+    html_body = md_lib.markdown(clean_md, extensions=["fenced_code", "tables"])
     return f'<div class="note-wrapper"><div class="note-content">\n{html_body}\n</div></div>'
 
 
 def _render_note_section_html(note_md: str) -> str:
     """Render a single section without card border (used in edit mode)."""
     clean_md = _downshift_headings(_normalize_note_markdown(note_md))
-    html_body = md_lib.markdown(clean_md, extensions=["fenced_code", "tables", "nl2br"])
+    html_body = md_lib.markdown(clean_md, extensions=["fenced_code", "tables"])
     return f'<div class="note-section"><div class="note-content">\n{html_body}\n</div></div>'
 
 
@@ -1327,7 +1339,7 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
         "edit_method",
         ["💬 챗봇", "⌨️ 직접 편집"],
         horizontal=True,
-        key="note_editor_method",
+        key=f"{_sk}note_editor_method",
         label_visibility="collapsed",
     )
 
@@ -1341,10 +1353,10 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
             "마크다운 직접 편집",
             value=raw_md,
             height=chat_height,
-            key="direct_edit_textarea",
+            key=f"{_sk}direct_edit_textarea",
             label_visibility="collapsed",
         )
-        if st.button("✅ 저장", use_container_width=True, type="primary", key="direct_edit_save"):
+        if st.button("✅ 저장", use_container_width=True, type="primary", key=f"{_sk}direct_edit_save"):
             if edited != raw_md:
                 # Store full note under special key for direct edits
                 undo_stack = st.session_state[undo_key].setdefault("__direct__", [])
@@ -1352,6 +1364,7 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
                 if len(undo_stack) > 10:
                     undo_stack.pop(0)
                 result["note_markdown"] = edited
+                st.session_state["_note_dirty"] = True
                 st.rerun()
         return
 
@@ -1364,7 +1377,7 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
             "노트 수정 모델",
             options=SUPPORTED_LLM_MODELS,
             index=SUPPORTED_LLM_MODELS.index(llm_model) if llm_model in SUPPORTED_LLM_MODELS else 0,
-            key="note_editor_model_select",
+            key=f"{_sk}note_editor_model_select",
             label_visibility="collapsed",
         )
 
@@ -1373,11 +1386,11 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
         "수정할 섹션",
         options=list(range(len(section_headings))),
         format_func=lambda i: section_headings[i],
-        key="edit_section_selectbox",
+        key=f"{_sk}edit_section_selectbox",
     )
     selected = section_headings[selected_section_idx]
-    st.session_state["selected_edit_section"] = selected
-    st.session_state["selected_edit_section_idx"] = selected_section_idx
+    st.session_state[f"{_sk}selected_edit_section"] = selected
+    st.session_state[f"{_sk}selected_edit_section_idx"] = selected_section_idx
 
     # Session state init — chat/undo keyed by integer section index (not heading text)
     chat_key = f"{_sk}edit_chat_messages"
@@ -1404,11 +1417,9 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
                     unsafe_allow_html=True,
                 )
             else:
-                body_html = md_lib.markdown(msg["content"], extensions=["fenced_code", "tables"])
-                st.markdown(
-                    f'<div class="chat-assistant-msg">{body_html}</div>',
-                    unsafe_allow_html=True,
-                )
+                # Use st.markdown directly — double-processing (md_lib → HTML → st.markdown)
+                # causes react-markdown to re-parse * as emphasis nodes → [object Object]
+                st.markdown(msg["content"])
 
         # Process pending edit
         if _pending_edit := st.session_state.pop("_pending_edit", None):
@@ -1428,6 +1439,7 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
                     instruction=instruction,
                     model=editor_model,
                     history=history,
+                    document_id=doc_key if doc_key else None,
                 )
             if edit_result.success:
                 st.session_state[pending_md_key] = edit_result.edited_markdown
@@ -1455,6 +1467,7 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
                     result["note_markdown"] = st.session_state.pop(pending_md_key)
                     st.session_state.pop(pending_sec_key, None)
                     st.session_state.pop(pending_idx_key, None)
+                    st.session_state["_note_dirty"] = True
                     st.rerun()
             with col_cancel:
                 if st.button("❌ 취소", use_container_width=True):
@@ -1465,13 +1478,13 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
 
     # Chat input OUTSIDE the gray box
     if edit_instruction := st.chat_input("수정 지시를 입력하세요 (예: 코드 예제 추가해줘)"):
-        _cur_idx = st.session_state.get("selected_edit_section_idx", 0)
+        _cur_idx = st.session_state.get(f"{_sk}selected_edit_section_idx", 0)
         st.session_state[chat_key].setdefault(_cur_idx, []).append(
             {"role": "user", "content": edit_instruction}
         )
         st.session_state["_pending_edit"] = {
             "instruction": edit_instruction,
-            "section": st.session_state.get("selected_edit_section", section_headings[0]),
+            "section": st.session_state.get(f"{_sk}selected_edit_section", section_headings[0]),
             "section_idx": _cur_idx,
         }
         st.rerun()
@@ -1495,11 +1508,12 @@ def _render_qa_panel(
             label_visibility="collapsed",
         )
 
-    if "chat_messages" not in st.session_state:
-        st.session_state["chat_messages"] = []
+    _qa_chat_key = f"chat_messages_{doc.id}"
+    if _qa_chat_key not in st.session_state:
+        st.session_state[_qa_chat_key] = []
 
     # Suggestion card shown above the gray box only while no messages
-    if not st.session_state["chat_messages"]:
+    if not st.session_state[_qa_chat_key]:
         if is_image:
             st.markdown(
                 _render_chat_suggestion_card(
@@ -1519,7 +1533,7 @@ def _render_qa_panel(
 
     chat_container = st.container(height=chat_height)
     with chat_container:
-        msgs = st.session_state["chat_messages"]
+        msgs = st.session_state[_qa_chat_key]
         for msg in msgs:
             if msg["role"] == "user":
                 st.markdown(
@@ -1527,54 +1541,66 @@ def _render_qa_panel(
                     unsafe_allow_html=True,
                 )
             else:
-                st.markdown(
-                    f'<div class="chat-assistant-msg">{md_lib.markdown(msg["content"], extensions=["fenced_code", "tables"])}</div>',
-                    unsafe_allow_html=True,
-                )
+                # Use st.markdown directly — avoid double-processing that causes [object Object]
+                st.markdown(msg["content"])
                 _render_source_block_expanders(msg.get("source_blocks", []))
 
         # Follow-up question buttons after the last assistant message
-        if msgs and msgs[-1]["role"] == "assistant":
+        if msgs and msgs[-1]["role"] == "assistant" and not st.session_state.get("_pending_chat"):
             followups = msgs[-1].get("followup_suggestions", [])
             if followups:
                 last_idx = len(msgs) - 1
                 st.markdown('<div class="followup-btns">', unsafe_allow_html=True)
                 for fq_idx, fq in enumerate(followups):
                     if st.button(fq, key=f"fq_{last_idx}_{fq_idx}", use_container_width=True):
-                        st.session_state["chat_messages"].append({"role": "user", "content": fq})
+                        st.session_state[_qa_chat_key].append({"role": "user", "content": fq})
                         st.session_state["_pending_chat"] = fq
                         st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
 
-        if _pending := st.session_state.pop("_pending_chat", None):
-            with st.spinner("생각 중..."):
-                try:
-                    _chat_result = rag_query(
-                        _pending, model=qa_llm_model, document_id=doc.id
-                    )
-                    _raw_reply = _chat_result.answer
-                    _reply, _followups = _parse_followup_suggestions(_raw_reply)
-                    _source_blocks = _serialize_source_blocks(
-                        _chat_result.source_blocks
-                    )
-                except Exception as _exc:
-                    _reply = f"오류가 발생했습니다: {_exc}"
-                    _followups = []
-                    _source_blocks = []
-            st.session_state["chat_messages"].append(
-                {
-                    "role": "assistant",
-                    "content": _reply,
-                    "source_blocks": _source_blocks,
-                    "followup_suggestions": _followups,
-                }
+        # Thinking indicator rendered as last item inside the container.
+        # st.markdown (HTML) does NOT trigger the two-box split; only st.spinner does.
+        if st.session_state.get("_pending_chat"):
+            st.markdown(
+                '<div style="display:flex;align-items:center;gap:8px;color:#7A6555;'
+                'font-size:0.88rem;padding:6px 4px">'
+                '<div style="width:14px;height:14px;border:2px solid #E5D9CD;'
+                'border-top-color:#C4553A;border-radius:50%;'
+                'animation:qa-spin 0.8s linear infinite;flex-shrink:0"></div>'
+                '생각 중...</div>'
+                '<style>@keyframes qa-spin{to{transform:rotate(360deg)}}</style>',
+                unsafe_allow_html=True,
             )
-            st.rerun()
 
-    # Chat input OUTSIDE the gray box (prevents double-box visual during spinner)
+    # Chat input rendered BEFORE the LLM blocking call so it always renders on
+    # every cycle. Streamlit shows a stale-placeholder gray box for any widget
+    # that hasn't been reached yet when the script blocks — moving chat_input
+    # above the LLM call prevents the second gray box on the first message.
     if user_input := st.chat_input("질문을 입력하세요"):
-        st.session_state["chat_messages"].append({"role": "user", "content": user_input})
+        st.session_state[_qa_chat_key].append({"role": "user", "content": user_input})
         st.session_state["_pending_chat"] = user_input
+        st.rerun()
+
+    if _pending := st.session_state.pop("_pending_chat", None):
+        try:
+            _chat_result = rag_query(
+                _pending, model=qa_llm_model, document_id=doc.id, top_k=8
+            )
+            _raw_reply = _chat_result.answer
+            _reply, _followups = _parse_followup_suggestions(_raw_reply)
+            _source_blocks = _serialize_source_blocks(_chat_result.source_blocks)
+        except Exception as _exc:
+            _reply = f"오류가 발생했습니다: {_exc}"
+            _followups = []
+            _source_blocks = []
+        st.session_state[_qa_chat_key].append(
+            {
+                "role": "assistant",
+                "content": _reply,
+                "source_blocks": _source_blocks,
+                "followup_suggestions": _followups,
+            }
+        )
         st.rerun()
 
 
@@ -1659,13 +1685,94 @@ with st.sidebar:
 
     st.markdown("---")
 
+    # ── Recent documents library ──────────────────────────────────────
+    _FORMAT_ICON = {"pdf": "📄", "ipynb": "📓", "image": "🖼️"}
+    _lib_docs = list_documents(limit=10)
+    if _lib_docs:
+        st.caption("📚 최근 문서")
+        for _ld in _lib_docs:
+            _icon = _FORMAT_ICON.get(_ld.format.value, "📄")
+            _date_str = _ld.created_at.strftime("%m/%d")
+            _label = f"{_icon} {_ld.source}  ({_date_str})"
+            _col_load, _col_del = st.columns([5, 1])
+            with _col_load:
+                if st.button(_label, key=f"lib_{_ld.id}", use_container_width=True):
+                    st.session_state["_library_load"] = {"doc_id": _ld.id}
+                    st.rerun()
+            with _col_del:
+                if st.button("🗑️", key=f"lib_del_{_ld.id}", help=f"{_ld.source} 삭제"):
+                    # Evict session_state note caches for this document before DB delete
+                    for _nr in list_notes_for_document(_ld.id):
+                        _evict_key = f"result_{_nr['file_hash']}_{_nr['vlm_model']}_{_nr['llm_model']}"
+                        st.session_state.pop(_evict_key, None)
+                        st.session_state.pop(f"doc_{_nr['file_hash']}_{_nr['vlm_model']}", None)
+                        st.session_state.pop(f"is_image_{_evict_key}", None)
+                        st.session_state.pop(f"_toast_shown_{_evict_key}", None)
+                    st.session_state.pop(f"indexed_{_ld.id}", None)
+                    # If the document being deleted is currently open in library mode,
+                    # clear all library pointers so the next rerun returns to landing state
+                    # rather than dereferencing missing session keys and crashing.
+                    if (
+                        st.session_state.get("_library_mode")
+                        and st.session_state.get("_library_doc_id") == _ld.id
+                    ):
+                        for _k in (
+                            "_library_mode", "_library_doc_id", "_library_cache_key",
+                            "_library_doc_cache_key", "_library_used_vlm", "_library_used_llm",
+                            "_library_file_hash",
+                        ):
+                            st.session_state.pop(_k, None)
+                    delete_document_index(_ld.id)  # Remove ChromaDB vectors so re-upload re-indexes
+                    delete_document(_ld.id)
+                    st.rerun()
+        st.markdown("---")
+
     if st.button("캐시 초기화", use_container_width=True):
         st.session_state.clear()
         st.rerun()
 
     st.caption("Built with Streamlit + OpenAI / Anthropic / Google")
 
-if uploaded_file is None:
+# ===================================================================
+# LIBRARY RESTORATION — load a previously saved document from sidebar
+# ===================================================================
+_lib_mode = st.session_state.get("_library_mode", False)
+
+if "_library_load" in st.session_state:
+    _lib_req = st.session_state.pop("_library_load")
+    _lib_doc_id = _lib_req["doc_id"]
+    # 1. Try matching current sidebar model selection
+    _note_row = get_note(_lib_doc_id, vlm_model, llm_model)
+    if _note_row is None:
+        # 2. Fallback: most recent note for this document
+        _all_notes = list_notes_for_document(_lib_doc_id)
+        _note_row = _all_notes[0] if _all_notes else None
+    _lib_doc = get_document(_lib_doc_id)
+
+    if _note_row and _lib_doc:
+        _fh = _note_row["file_hash"]
+        _used_vlm = _note_row["vlm_model"]
+        _used_llm = _note_row["llm_model"]
+        _ck = f"result_{_fh}_{_used_vlm}_{_used_llm}"
+        _dck = f"doc_{_fh}_{_used_vlm}"
+        st.session_state[_ck] = _note_row["result"]
+        st.session_state[_dck] = _lib_doc
+        st.session_state[f"is_image_{_ck}"] = _note_row["is_image"]
+        # Only mark as indexed when ChromaDB actually has vectors for this document.
+        # An unconditional True would suppress re-indexing even when embeddings are absent
+        # (e.g. after a crash or indexing failure), causing Q&A/note-editor to retrieve nothing.
+        if has_document_vectors(_lib_doc.id):
+            st.session_state[f"indexed_{_lib_doc.id}"] = True
+        st.session_state["_library_mode"] = True
+        st.session_state["_library_doc_id"] = _lib_doc.id
+        st.session_state["_library_cache_key"] = _ck
+        st.session_state["_library_doc_cache_key"] = _dck
+        st.session_state["_library_used_vlm"] = _used_vlm
+        st.session_state["_library_used_llm"] = _used_llm
+        st.session_state["_library_file_hash"] = _fh
+        _lib_mode = True
+
+if uploaded_file is None and not _lib_mode:
     # Landing state
     st.markdown("#### 지원 형식")
     c1, c2, c3 = st.columns(3)
@@ -1677,105 +1784,149 @@ if uploaded_file is None:
         st.markdown("🖼️ **이미지**\nVLM 기반 분류 + 분석")
     st.stop()
 
-# Update pipeline
-st.session_state.setdefault("_pipeline_steps", {})["upload"] = True
-
-st.markdown(f"**{uploaded_file.name}** ({uploaded_file.size:,} bytes)")
-
-# ===================================================================
-# ANALYSIS PIPELINE
-# ===================================================================
-file_bytes = uploaded_file.read()
-file_hash = hashlib.sha256(file_bytes).hexdigest()
-cache_key = f"result_{file_hash}_{vlm_model}_{llm_model}"
-doc_cache_key = f"doc_{file_hash}_{vlm_model}"
-
-if not st.button("분석 시작", type="primary", use_container_width=False):
-    if cache_key not in st.session_state:
-        st.stop()
-
-if cache_key in st.session_state:
-    doc = st.session_state[doc_cache_key]
-    result = st.session_state[cache_key]
+if _lib_mode:
+    # Library restoration: load from session_state cache
+    cache_key = st.session_state["_library_cache_key"]
+    doc_cache_key = st.session_state["_library_doc_cache_key"]
+    doc: Document = st.session_state[doc_cache_key]
+    result: dict = st.session_state[cache_key]
     is_image = st.session_state.get(f"is_image_{cache_key}", False)
-    if not st.session_state.get(f"_toast_shown_{cache_key}"):
-        st.toast("캐시된 결과를 불러왔습니다", icon="⚡")
-        st.session_state[f"_toast_shown_{cache_key}"] = True
+    file_hash = st.session_state.get("_library_file_hash", "")
+    _used_vlm = st.session_state.get("_library_used_vlm", vlm_model)
+    _used_llm = st.session_state.get("_library_used_llm", llm_model)
+    st.markdown(
+        f'<div style="background:#F2DDD6;border:1px solid #EACFC5;border-radius:8px;'
+        f'padding:0.5em 0.85em;color:#7A6555;font-size:0.82rem;margin-bottom:0.5em">'
+        f'📚 라이브러리에서 로드됨 — <b style="color:#3D2E24">{html.escape(doc.source)}</b> '
+        f'(모델: {html.escape(_used_vlm)} / {html.escape(_used_llm)})</div>',
+        unsafe_allow_html=True,
+    )
+    if uploaded_file is not None:
+        # Exit library mode only when the user uploads a *different* file.
+        # Compare the uploader's file hash against the library document's hash so
+        # that a stale file_uploader value (still holding the same file across reruns)
+        # does not cancel library mode on every subsequent rerun.
+        _uploaded_hash = hashlib.sha256(uploaded_file.getvalue()).hexdigest()
+        _lib_file_hash = st.session_state.get("_library_file_hash", "")
+        if _uploaded_hash != _lib_file_hash:
+            for _k in (
+                "_library_mode", "_library_doc_id", "_library_cache_key",
+                "_library_doc_cache_key", "_library_used_vlm", "_library_used_llm",
+                "_library_file_hash",
+            ):
+                st.session_state.pop(_k, None)
+            st.rerun()
 else:
-    tmp_path: str | None = None
-    doc = None
+    # Normal upload flow
+    st.session_state.setdefault("_pipeline_steps", {})["upload"] = True
+    st.markdown(f"**{uploaded_file.name}** ({uploaded_file.size:,} bytes)")
 
-    with st.status("분석 진행 중...", expanded=True) as status:
-        # Step 1: Parse
-        parse_status_label = (
-            "1/1 — 이미지 분석 중..." if is_image else "1/2 — 파일 파싱 중..."
-        )
-        status.update(label=parse_status_label, state="running")
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                tmp.write(file_bytes)
-                tmp_path = tmp.name
+# ===================================================================
+# ANALYSIS PIPELINE (skipped in library mode)
+# ===================================================================
+if not _lib_mode:
+    file_bytes = uploaded_file.read()
+    file_hash = hashlib.sha256(file_bytes).hexdigest()
+    cache_key = f"result_{file_hash}_{vlm_model}_{llm_model}"
+    doc_cache_key = f"doc_{file_hash}_{vlm_model}"
 
-            if suffix.lower() == ".pdf":
-                doc = parse_pdf(tmp_path)
-            elif suffix.lower() == ".ipynb":
-                doc = parse_ipynb(tmp_path)
-            else:
-                try:
-                    doc = parse_image(tmp_path, model=vlm_model)
-                except Exception as exc:
-                    if any(kw in str(exc).lower() for kw in ("api", "key", "auth")):
-                        st.error("API 키를 .env에 설정해주세요")
-                    else:
-                        st.error(f"이미지 파싱 실패: {exc}")
-                    st.stop()
-        finally:
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-
-        if doc is None:
-            st.error("파일 처리 중 오류가 발생했습니다.")
+    if not st.button("분석 시작", type="primary", use_container_width=False):
+        if cache_key not in st.session_state:
             st.stop()
 
-        doc.source = uploaded_file.name
-        st.session_state.setdefault("_pipeline_steps", {})["parse"] = True
+    if cache_key in st.session_state:
+        doc = st.session_state[doc_cache_key]
+        result = st.session_state[cache_key]
+        is_image = st.session_state.get(f"is_image_{cache_key}", False)
+        if not st.session_state.get(f"_toast_shown_{cache_key}"):
+            st.toast("캐시된 결과를 불러왔습니다", icon="⚡")
+            st.session_state[f"_toast_shown_{cache_key}"] = True
+    else:
+        tmp_path: str | None = None
+        doc = None
 
-        parse_failed = not doc.blocks or "parse_failed" in doc.metadata.tags
-        if parse_failed:
-            status.update(label="파싱 실패", state="error")
-            st.stop()
-
-        st.write(f"파싱 완료 — {doc.block_count}개 블록 추출")
-
-        # Step 2: Generate note
-        if not is_image:
-            status.update(label="2/2 — 학습 노트 생성 중...", state="running")
+        with st.status("분석 진행 중...", expanded=True) as status:
+            # Step 1: Parse
+            parse_status_label = (
+                "1/1 — 이미지 분석 중..." if is_image else "1/2 — 파일 파싱 중..."
+            )
+            status.update(label=parse_status_label, state="running")
             try:
-                result = generate_note(doc, model=llm_model)
-            except Exception as exc:
-                st.error(f"노트 생성 실패: {exc}")
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                    tmp.write(file_bytes)
+                    tmp_path = tmp.name
+
+                if suffix.lower() == ".pdf":
+                    doc = parse_pdf(tmp_path)
+                elif suffix.lower() == ".ipynb":
+                    doc = parse_ipynb(tmp_path)
+                else:
+                    try:
+                        doc = parse_image(tmp_path, model=vlm_model)
+                    except Exception as exc:
+                        if any(kw in str(exc).lower() for kw in ("api", "key", "auth")):
+                            st.error("API 키를 .env에 설정해주세요")
+                        else:
+                            st.error(f"이미지 파싱 실패: {exc}")
+                        st.stop()
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+
+            if doc is None:
+                st.error("파일 처리 중 오류가 발생했습니다.")
                 st.stop()
 
-            st.session_state.setdefault("_pipeline_steps", {})["note"] = True
-        else:
-            result = {}
-        status.update(label="분석 완료!", state="complete", expanded=False)
+            doc.source = uploaded_file.name
+            st.session_state.setdefault("_pipeline_steps", {})["parse"] = True
 
-    # Cache
-    st.session_state[doc_cache_key] = doc
-    st.session_state[cache_key] = result
-    st.session_state[f"is_image_{cache_key}"] = is_image
+            parse_failed = not doc.blocks or "parse_failed" in doc.metadata.tags
+            if parse_failed:
+                status.update(label="파싱 실패", state="error")
+                st.stop()
+
+            st.write(f"파싱 완료 — {doc.block_count}개 블록 추출")
+
+            # Step 2: Generate note
+            if not is_image:
+                status.update(label="2/2 — 학습 노트 생성 중...", state="running")
+                try:
+                    result = generate_note(doc, model=llm_model)
+                except Exception as exc:
+                    st.error(f"노트 생성 실패: {exc}")
+                    st.stop()
+
+                st.session_state.setdefault("_pipeline_steps", {})["note"] = True
+            else:
+                result = {}
+            status.update(label="분석 완료!", state="complete", expanded=False)
+
+        # Cache
+        st.session_state[doc_cache_key] = doc
+        st.session_state[cache_key] = result
+        st.session_state[f"is_image_{cache_key}"] = is_image
+
+        # Persist to SQLite
+        save_document(doc)
+        save_note(doc.id, file_hash, result, vlm_model, llm_model, is_image)
+        st.rerun()  # Refresh sidebar to show newly saved document
 
 # ===================================================================
 # RAG INDEXING — run once per document (session-cached)
 # ===================================================================
 _indexed_key = f"indexed_{doc.id}"
 if not st.session_state.get(_indexed_key):
-    try:
-        index_document(doc)
-        st.session_state[_indexed_key] = True
-    except Exception as _idx_exc:
-        st.warning(f"RAG 인덱싱 실패: {_idx_exc}")
+    if doc.blocks:  # Library mode has blocks=[] — skip indexing
+        try:
+            index_document(doc)
+            st.session_state[_indexed_key] = True
+        except Exception as _idx_exc:
+            st.warning(f"RAG 인덱싱 실패: {_idx_exc}")
+    else:
+        # Library mode: blocks are not available locally. Mark as indexed only when
+        # ChromaDB actually holds vectors — avoids silently grounding Q&A on an empty index.
+        if has_document_vectors(doc.id):
+            st.session_state[_indexed_key] = True
 
 # ===================================================================
 # RESULTS — Study note (default view) + Chat panel
@@ -1796,33 +1947,36 @@ with col_content:
             st.info(str(err))
 
     if is_image:
-        preview_controls, preview_action = st.columns([3, 1])
-        with preview_controls:
-            zoom_percent = st.slider(
-                "이미지 확대",
-                min_value=100,
-                max_value=300,
-                value=160,
-                step=10,
-                key=f"image_zoom_{cache_key}",
-                help="작은 글씨가 있는 이미지라면 확대 후 스크롤해서 확인하세요.",
-            )
-        with preview_action:
-            st.caption("")
-            if st.button(
-                "전체화면 보기",
-                use_container_width=True,
-                key=f"open_image_lightbox_{cache_key}",
-            ):
-                _show_image_lightbox(
-                    uploaded_file.name, file_bytes, suffix, cache_key
+        if _lib_mode:
+            st.info("이미지 미리보기는 원본 파일이 필요합니다. 파일을 다시 업로드하면 미리보기를 확인할 수 있습니다.")
+        else:
+            preview_controls, preview_action = st.columns([3, 1])
+            with preview_controls:
+                zoom_percent = st.slider(
+                    "이미지 확대",
+                    min_value=100,
+                    max_value=300,
+                    value=160,
+                    step=10,
+                    key=f"image_zoom_{cache_key}",
+                    help="작은 글씨가 있는 이미지라면 확대 후 스크롤해서 확인하세요.",
                 )
-        st.markdown(
-            _render_image_preview_card(
-                uploaded_file.name, file_bytes, suffix, zoom_percent
-            ),
-            unsafe_allow_html=True,
-        )
+            with preview_action:
+                st.caption("")
+                if st.button(
+                    "전체화면 보기",
+                    use_container_width=True,
+                    key=f"open_image_lightbox_{cache_key}",
+                ):
+                    _show_image_lightbox(
+                        uploaded_file.name, file_bytes, suffix, cache_key
+                    )
+            st.markdown(
+                _render_image_preview_card(
+                    uploaded_file.name, file_bytes, suffix, zoom_percent
+                ),
+                unsafe_allow_html=True,
+            )
     elif note_markdown:
         raw_md = _normalize_note_markdown(note_markdown)
         file_stem = Path(doc.source).stem
@@ -1894,9 +2048,10 @@ with col_content:
                                 key=f"edit_sec_{_cur_named_idx}",
                                 help=f"'{_sec_heading}' 섹션 수정",
                             ):
-                                st.session_state["selected_edit_section"] = _sec_heading
-                                st.session_state["selected_edit_section_idx"] = _cur_named_idx
-                                st.session_state["edit_section_selectbox"] = _cur_named_idx
+                                _editor_sk = f"editor_{doc.id}_"
+                                st.session_state[f"{_editor_sk}selected_edit_section"] = _sec_heading
+                                st.session_state[f"{_editor_sk}selected_edit_section_idx"] = _cur_named_idx
+                                st.session_state[f"{_editor_sk}edit_section_selectbox"] = _cur_named_idx
                                 st.session_state["active_right_panel"] = "✏️ 노트 수정"
                                 st.rerun()
                             _undo_key = f"editor_{doc.id}_note_section_undo"
@@ -1909,6 +2064,7 @@ with col_content:
                             ):
                                 prev_body = _sec_stack.pop()
                                 result["note_markdown"] = _replace_section_body(raw_md, _cur_named_idx, prev_body)
+                                st.session_state["_note_dirty"] = True
                                 st.rerun()
                             st.markdown('</div>', unsafe_allow_html=True)
                         _named_sec_idx += 1
@@ -1939,30 +2095,44 @@ with col_chat:
         else:
             _render_note_editor_panel(result, llm_model, chat_height=837, doc_key=doc.id)
 
+# ─── Persist dirty note edits to SQLite ──────────────────────────────
+if st.session_state.pop("_note_dirty", False):
+    # Determine the vlm/llm models used for this result
+    if _lib_mode:
+        _sv_vlm = st.session_state.get("_library_used_vlm", vlm_model)
+        _sv_llm = st.session_state.get("_library_used_llm", llm_model)
+        _sv_hash = st.session_state.get("_library_file_hash", "")
+    else:
+        _sv_vlm = vlm_model
+        _sv_llm = llm_model
+        _sv_hash = file_hash
+    save_note(doc.id, _sv_hash, result, _sv_vlm, _sv_llm, is_image)
+
 # ─── Pipeline details (collapsed by default) ─────────────────────────
 st.markdown('<div style="height:96px"></div>', unsafe_allow_html=True)
-with st.expander("🔧 파이프라인 상세", expanded=False):
-    type_counts = Counter(block.type.value for block in doc.blocks)
-    mc1, mc2, mc3 = st.columns(3)
-    with mc1:
-        st.markdown(
-            _render_metric_card(doc.block_count, "총 블록 수"), unsafe_allow_html=True
-        )
-    with mc2:
-        st.markdown(
-            _render_metric_card(doc.format.value.upper(), "문서 형식"),
-            unsafe_allow_html=True,
-        )
-    with mc3:
-        st.markdown(
-            _render_metric_card(doc.status.value, "처리 상태"), unsafe_allow_html=True
-        )
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("**블록 구성**")
-    st.markdown(_render_block_type_badges(type_counts), unsafe_allow_html=True)
-    with st.expander("블록 상세 보기", expanded=False):
-        for i, block in enumerate(doc.blocks[:30]):
-            content_preview = block.content[:120].replace("\n", " ")
-            st.text(f"[{i}] {block.type.value}: {content_preview}")
-        if len(doc.blocks) > 30:
-            st.caption(f"... 외 {len(doc.blocks) - 30}개 블록")
+if doc.blocks:
+    with st.expander("🔧 파이프라인 상세", expanded=False):
+        type_counts = Counter(block.type.value for block in doc.blocks)
+        mc1, mc2, mc3 = st.columns(3)
+        with mc1:
+            st.markdown(
+                _render_metric_card(doc.block_count, "총 블록 수"), unsafe_allow_html=True
+            )
+        with mc2:
+            st.markdown(
+                _render_metric_card(doc.format.value.upper(), "문서 형식"),
+                unsafe_allow_html=True,
+            )
+        with mc3:
+            st.markdown(
+                _render_metric_card(doc.status.value, "처리 상태"), unsafe_allow_html=True
+            )
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("**블록 구성**")
+        st.markdown(_render_block_type_badges(type_counts), unsafe_allow_html=True)
+        with st.expander("블록 상세 보기", expanded=False):
+            for i, block in enumerate(doc.blocks[:30]):
+                content_preview = block.content[:120].replace("\n", " ")
+                st.text(f"[{i}] {block.type.value}: {content_preview}")
+            if len(doc.blocks) > 30:
+                st.caption(f"... 외 {len(doc.blocks) - 30}개 블록")

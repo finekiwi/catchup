@@ -15,12 +15,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from typing import Any
 
 from dotenv import load_dotenv
 
-from models.document import BlockType, Document, ProcessingStatus
+from models.document import Block, BlockType, Document, ProcessingStatus
 from prompts.note_generation import PROMPT, PROMPT_VERSION
 from utils.logging import log_api_call
 from llm.schemas import NoteGenerationOutput
@@ -29,7 +30,7 @@ load_dotenv()
 
 LOGGER = logging.getLogger(__name__)
 
-_MAX_BLOCKS = 80
+_MAX_BLOCKS = 200
 _MAX_CONTENT_LEN = 1200      # per block in normal mode
 _MAX_CONTENT_LEN_LARGE = 600 # per block when doc has many blocks
 _LARGE_DOC_THRESHOLD = 40    # blocks: above this, use large-doc strategy
@@ -68,7 +69,7 @@ def _compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
 # ---------------------------------------------------------------------------
 
 def _call_openai(model: str, system: str, user: str) -> tuple[str, int, int]:
-    """Call OpenAI chat completion API."""
+    """Call OpenAI chat completion API with JSON mode enforced."""
     import openai  # lazy import
 
     client = openai.OpenAI()
@@ -78,7 +79,8 @@ def _call_openai(model: str, system: str, user: str) -> tuple[str, int, int]:
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        max_tokens=4096,
+        max_tokens=8192,
+        response_format={"type": "json_object"},
     )
     raw = resp.choices[0].message.content or ""
     return raw, resp.usage.prompt_tokens, resp.usage.completion_tokens
@@ -91,7 +93,7 @@ def _call_anthropic(model: str, system: str, user: str) -> tuple[str, int, int]:
     client = anthropic.Anthropic()
     resp = client.messages.create(
         model=model,
-        max_tokens=4096,
+        max_tokens=8192,
         system=system,
         messages=[{"role": "user", "content": user}],
     )
@@ -120,14 +122,70 @@ _PROVIDER_DISPATCH: dict[str, Any] = {
 }
 
 
+_MIN_FIGURE_CONTENT_LEN = 20  # figure blocks shorter than this carry no useful text
+_NOISE_TEXT_MAX_LEN = 60      # text blocks below this length are candidates for noise filtering
+_NOISE_DOT_RATIO = 0.3        # if >30% of chars are dots/dashes, treat as TOC/page-num line
+_HEADING_MAX_LEN = 80         # standalone chapter/part/section headings below this length
+_CHAPTER_INTRO_MAX_LEN = 450  # chapter/appendix intro blurbs below this length are noise
+
+# Compiled pattern for purely numeric or dot-leader lines (e.g. "........... 54", "3.1  ......53")
+_NOISE_PATTERN = re.compile(r'^[\s\d\.\-\·\•·]+$')
+# Standalone chapter/part/appendix heading (e.g. "CHAPTER 3 Git 기초", "PART II IDE 활용", "부록 B GitLab")
+_HEADING_PATTERN = re.compile(r'^(CHAPTER|PART|chapter|part|부록|Appendix|APPENDIX)\s+\S', re.IGNORECASE)
+_SECTION_NUM_PATTERN = re.compile(r'^\d{1,2}\s+\S')
+
+
+def _is_noise_block(block: Block) -> bool:
+    """Return True if the block carries no substantive content.
+
+    Filters out:
+    - Empty/very-short figure blocks (no VLM description)
+    - Short text blocks that are page numbers, TOC dot-leaders, headers/footers
+      e.g. ".......... 54" or "3.1 기본 명령어 ............ 53"
+    - Standalone chapter/part/appendix headings with no body text
+      e.g. "CHAPTER 7 Visual Studio에서의 Git 사용법", "부록 B GitLab"
+    - Chapter/appendix intro blurbs: first line is a chapter-level marker and
+      total content is short (< _CHAPTER_INTRO_MAX_LEN chars), e.g.
+      "CHAPTER 5 Git의 다양한 활용법\n\n다양한 IDE가 Git을 통합해 관리할 수 있도록..."
+      These are structural summaries, not the actual substantive section content.
+    """
+    content = block.content.strip()
+    if block.type == BlockType.FIGURE:
+        return len(content) < _MIN_FIGURE_CONTENT_LEN
+    if block.type == BlockType.TEXT:
+        if len(content) < _NOISE_TEXT_MAX_LEN:
+            # Purely numeric/dot-leader line
+            if _NOISE_PATTERN.match(content):
+                return True
+            # High dot/dash ratio (TOC lines like "기본 명령어 ........... 53")
+            dot_count = content.count('.') + content.count('·') + content.count('-')
+            if len(content) > 0 and dot_count / len(content) > _NOISE_DOT_RATIO:
+                return True
+        # Standalone CHAPTER/PART/부록 heading with no body
+        if len(content) < _HEADING_MAX_LEN and '\n' not in content:
+            if _HEADING_PATTERN.match(content) or _SECTION_NUM_PATTERN.match(content):
+                return True
+        # Multi-line chapter/appendix intro blurb: first line is a chapter-level marker
+        # and total block is short — these are structural summaries, not learning content
+        if len(content) < _CHAPTER_INTRO_MAX_LEN:
+            first_line = content.split('\n')[0].strip()
+            if _HEADING_PATTERN.match(first_line):
+                return True
+    return False
+
+
 def _sample_blocks(doc: Document, max_blocks: int = _MAX_BLOCKS) -> list:
     """Return a representative block sample from the document.
 
-    For large documents, evenly samples across the full block list so the
+    Noise blocks are excluded before sampling: empty figure blocks, page numbers,
+    TOC dot-leader lines, and short header/footer text. This ensures the same
+    max_blocks budget is spent on substantive content blocks.
+
+    For large documents, evenly samples across the filtered block list so the
     LLM sees content from beginning, middle, and end rather than just the
     first N blocks.
     """
-    blocks = doc.blocks
+    blocks = [b for b in doc.blocks if not _is_noise_block(b)]
     if len(blocks) <= max_blocks:
         return blocks
 
@@ -235,6 +293,16 @@ def generate_note(doc: Document, model: str = "gpt-4o-mini") -> dict[str, Any]:
     provider = _MODEL_REGISTRY[model]["provider"]
     call_fn = _PROVIDER_DISPATCH[provider]
     user_content = _serialize_blocks(doc)
+
+    # Guard: if noise filtering removed every block, fail fast rather than letting
+    # the LLM hallucinate a note from an empty context.
+    if not user_content.strip():
+        error_msg = "All document blocks were filtered as noise — no content to generate a note from."
+        LOGGER.warning("generate_note aborted for document id=%s: %s", doc.id, error_msg)
+        if "note_generation_failed" not in doc.metadata.tags:
+            doc.metadata.tags.append("note_generation_failed")
+        return _make_fallback(doc, "", error_msg)
+
     t0 = time.perf_counter()
 
     try:
@@ -251,7 +319,8 @@ def generate_note(doc: Document, model: str = "gpt-4o-mini") -> dict[str, Any]:
             except Exception as val_exc:
                 LOGGER.warning("NoteGenerationOutput schema validation warning: %s", val_exc)
         except (json.JSONDecodeError, ValueError) as parse_exc:
-            LOGGER.warning("Note generation JSON parse failed: %s", parse_exc)
+            LOGGER.warning("Note generation JSON parse failed (attempt 1): %s — retrying", parse_exc)
+            # Log attempt-1 failure so every API call is accounted for in the audit log
             log_api_call(
                 model=model,
                 stage="note_generation",
@@ -260,11 +329,53 @@ def generate_note(doc: Document, model: str = "gpt-4o-mini") -> dict[str, Any]:
                 latency_ms=latency_ms,
                 cost_usd=cost_usd,
                 success=False,
-                error=f"JSON parse failed: {parse_exc}",
+                error=f"JSON parse failed (attempt 1): {parse_exc}",
             )
-            if "note_generation_failed" not in doc.metadata.tags:
-                doc.metadata.tags.append("note_generation_failed")
-            return _make_fallback(doc, raw, "노트 구조 분석이 불완전합니다. 원문 형식으로 표시됩니다.")
+            # Retry once with an explicit JSON-only nudge in the user message
+            retry_user = user_content + "\n\nIMPORTANT: Respond with valid JSON only. No markdown fences, no extra text."
+            t1 = time.perf_counter()
+            try:
+                raw, input_tokens, output_tokens = call_fn(model, PROMPT, retry_user)
+                retry_latency_ms = (time.perf_counter() - t1) * 1000
+                retry_cost_usd = _compute_cost(model, input_tokens, output_tokens)
+                result = json.loads(_strip_markdown_fence(raw))
+                if not isinstance(result, dict):
+                    raise ValueError("LLM retry response JSON must be an object")
+                try:
+                    result = NoteGenerationOutput.model_validate(result).model_dump()
+                except Exception as val_exc:
+                    LOGGER.warning("NoteGenerationOutput schema validation warning (retry): %s", val_exc)
+                # Log successful retry with its own latency/tokens — not end-to-end
+                log_api_call(
+                    model=model,
+                    stage="note_generation_retry",
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    latency_ms=retry_latency_ms,
+                    cost_usd=retry_cost_usd,
+                    success=True,
+                    error=None,
+                )
+            except (json.JSONDecodeError, ValueError) as retry_exc:
+                retry_latency_ms = (time.perf_counter() - t1) * 1000
+                retry_cost_usd = _compute_cost(model, input_tokens, output_tokens)
+                LOGGER.warning("Note generation JSON parse failed (retry): %s", retry_exc)
+                log_api_call(
+                    model=model,
+                    stage="note_generation_retry",
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    latency_ms=retry_latency_ms,
+                    cost_usd=retry_cost_usd,
+                    success=False,
+                    error=f"JSON parse failed after retry: {retry_exc}",
+                )
+                if "note_generation_failed" not in doc.metadata.tags:
+                    doc.metadata.tags.append("note_generation_failed")
+                return _make_fallback(doc, raw, "노트 구조 분석이 불완전합니다. 원문 형식으로 표시됩니다.")
+            # Retry succeeded — return early without logging via the normal success path below
+            doc.status = ProcessingStatus.NOTE_GENERATED
+            return result
 
         log_api_call(
             model=model,
