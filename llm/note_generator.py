@@ -125,9 +125,13 @@ _PROVIDER_DISPATCH: dict[str, Any] = {
 _MIN_FIGURE_CONTENT_LEN = 20  # figure blocks shorter than this carry no useful text
 _NOISE_TEXT_MAX_LEN = 60      # text blocks below this length are candidates for noise filtering
 _NOISE_DOT_RATIO = 0.3        # if >30% of chars are dots/dashes, treat as TOC/page-num line
+_HEADING_MAX_LEN = 80         # standalone chapter/part/section headings below this length
 
 # Compiled pattern for purely numeric or dot-leader lines (e.g. "........... 54", "3.1  ......53")
 _NOISE_PATTERN = re.compile(r'^[\s\d\.\-\·\•·]+$')
+# Standalone chapter/part heading (e.g. "CHAPTER 3 Git 기초", "PART II IDE 활용", "13 파일 제외하기")
+_HEADING_PATTERN = re.compile(r'^(CHAPTER|PART|chapter|part)\s+\S', re.IGNORECASE)
+_SECTION_NUM_PATTERN = re.compile(r'^\d{1,2}\s+\S')
 
 
 def _is_noise_block(block: Block) -> bool:
@@ -137,18 +141,25 @@ def _is_noise_block(block: Block) -> bool:
     - Empty/very-short figure blocks (no VLM description)
     - Short text blocks that are page numbers, TOC dot-leaders, headers/footers
       e.g. ".......... 54" or "3.1 기본 명령어 ............ 53"
+    - Standalone chapter/part/section headings with no body text
+      e.g. "CHAPTER 7 Visual Studio에서의 Git 사용법", "PART II 네 가지 주요 IDE"
     """
     content = block.content.strip()
     if block.type == BlockType.FIGURE:
         return len(content) < _MIN_FIGURE_CONTENT_LEN
-    if block.type == BlockType.TEXT and len(content) < _NOISE_TEXT_MAX_LEN:
-        # Purely numeric/dot-leader line
-        if _NOISE_PATTERN.match(content):
-            return True
-        # High dot/dash ratio (TOC lines like "기본 명령어 ........... 53")
-        dot_count = content.count('.') + content.count('·') + content.count('-')
-        if len(content) > 0 and dot_count / len(content) > _NOISE_DOT_RATIO:
-            return True
+    if block.type == BlockType.TEXT:
+        if len(content) < _NOISE_TEXT_MAX_LEN:
+            # Purely numeric/dot-leader line
+            if _NOISE_PATTERN.match(content):
+                return True
+            # High dot/dash ratio (TOC lines like "기본 명령어 ........... 53")
+            dot_count = content.count('.') + content.count('·') + content.count('-')
+            if len(content) > 0 and dot_count / len(content) > _NOISE_DOT_RATIO:
+                return True
+        # Standalone CHAPTER/PART heading or numbered section title with no body
+        if len(content) < _HEADING_MAX_LEN and '\n' not in content:
+            if _HEADING_PATTERN.match(content) or _SECTION_NUM_PATTERN.match(content):
+                return True
     return False
 
 

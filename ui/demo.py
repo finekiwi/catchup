@@ -1575,7 +1575,7 @@ def _render_qa_panel(
     if _pending := st.session_state.pop("_pending_chat", None):
         try:
             _chat_result = rag_query(
-                _pending, model=qa_llm_model, document_id=doc.id
+                _pending, model=qa_llm_model, document_id=doc.id, top_k=8
             )
             _raw_reply = _chat_result.answer
             _reply, _followups = _parse_followup_suggestions(_raw_reply)
