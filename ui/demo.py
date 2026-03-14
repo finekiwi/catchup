@@ -1735,42 +1735,35 @@ if active_tab == "📝 학습 노트":
                     result["note_markdown"] = last["markdown_before"]
                     st.rerun()
 
-            # Shared panel height — note scroll container and chat_height are
-            # calibrated so total visual heights approximately match.
-            # Note: toolbar(~55px) + PANEL_H + download(~45px) ≈ chat header(~155px) + chat_height
-            _NOTE_PANEL_H = 700
-
-            note_scroll = st.container(height=_NOTE_PANEL_H)
-            with note_scroll:
-                if edit_mode:
-                    # Section-level edit mode: flow as one document, ✏️ per section
-                    sections = _split_note_sections(raw_md)
-                    first_rendered = True
-                    for _sec_heading, _sec_body in sections:
-                        content_md = (
-                            f"{_sec_heading}\n\n{_sec_body}".strip() if _sec_heading else _sec_body
-                        )
-                        if not content_md:
-                            continue
-                        if not first_rendered:
-                            st.markdown('<hr class="note-sep">', unsafe_allow_html=True)
-                        st.markdown(_render_note_section_html(content_md), unsafe_allow_html=True)
-                        if _sec_heading:
-                            if st.button(
-                                "✏️",
-                                key=f"edit_sec_{_sec_heading}",
-                                help=f"'{_sec_heading}' 섹션 수정",
-                            ):
-                                st.session_state["selected_edit_section"] = _sec_heading
-                                # Directly set selectbox key — Streamlit ignores
-                                # index= when the key already exists in session state
-                                st.session_state["edit_section_selectbox"] = _sec_heading
-                                st.session_state["active_right_panel"] = "✏️ 노트 수정"
-                                st.rerun()
-                        first_rendered = False
-                else:
-                    # Pure read view: single note block (Claude Artifact MD preview style)
-                    st.markdown(_render_note_html(raw_md), unsafe_allow_html=True)
+            if edit_mode:
+                # Section-level edit mode: flow as one document, ✏️ per section
+                sections = _split_note_sections(raw_md)
+                first_rendered = True
+                for _sec_heading, _sec_body in sections:
+                    content_md = (
+                        f"{_sec_heading}\n\n{_sec_body}".strip() if _sec_heading else _sec_body
+                    )
+                    if not content_md:
+                        continue
+                    if not first_rendered:
+                        st.markdown('<hr class="note-sep">', unsafe_allow_html=True)
+                    st.markdown(_render_note_section_html(content_md), unsafe_allow_html=True)
+                    if _sec_heading:
+                        if st.button(
+                            "✏️",
+                            key=f"edit_sec_{_sec_heading}",
+                            help=f"'{_sec_heading}' 섹션 수정",
+                        ):
+                            st.session_state["selected_edit_section"] = _sec_heading
+                            # Directly set selectbox key — Streamlit ignores
+                            # index= when the key already exists in session state
+                            st.session_state["edit_section_selectbox"] = _sec_heading
+                            st.session_state["active_right_panel"] = "✏️ 노트 수정"
+                            st.rerun()
+                    first_rendered = False
+            else:
+                # Pure read view: single note block (Claude Artifact MD preview style)
+                st.markdown(_render_note_html(raw_md), unsafe_allow_html=True)
             download_md = raw_md
 
             full_md = f"# {title}\n\n{download_md}"
