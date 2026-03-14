@@ -1546,7 +1546,7 @@ def _render_qa_panel(
                 _render_source_block_expanders(msg.get("source_blocks", []))
 
         # Follow-up question buttons after the last assistant message
-        if msgs and msgs[-1]["role"] == "assistant":
+        if msgs and msgs[-1]["role"] == "assistant" and not st.session_state.get("_pending_chat"):
             followups = msgs[-1].get("followup_suggestions", [])
             if followups:
                 last_idx = len(msgs) - 1
@@ -1558,19 +1558,19 @@ def _render_qa_panel(
                         st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
 
-    # Spinner renders BELOW the container (between box and chat_input).
-    # Rendered before the LLM call so it's visible while Python executes.
-    if st.session_state.get("_pending_chat"):
-        st.markdown(
-            '<div style="display:flex;align-items:center;gap:8px;color:#7A6555;'
-            'font-size:0.88rem;padding:4px 2px">'
-            '<div style="width:14px;height:14px;border:2px solid #E5D9CD;'
-            'border-top-color:#C4553A;border-radius:50%;'
-            'animation:qa-spin 0.8s linear infinite;flex-shrink:0"></div>'
-            '생각 중...</div>'
-            '<style>@keyframes qa-spin{to{transform:rotate(360deg)}}</style>',
-            unsafe_allow_html=True,
-        )
+        # Thinking indicator rendered as last item inside the container.
+        # st.markdown (HTML) does NOT trigger the two-box split; only st.spinner does.
+        if st.session_state.get("_pending_chat"):
+            st.markdown(
+                '<div style="display:flex;align-items:center;gap:8px;color:#7A6555;'
+                'font-size:0.88rem;padding:6px 4px">'
+                '<div style="width:14px;height:14px;border:2px solid #E5D9CD;'
+                'border-top-color:#C4553A;border-radius:50%;'
+                'animation:qa-spin 0.8s linear infinite;flex-shrink:0"></div>'
+                '생각 중...</div>'
+                '<style>@keyframes qa-spin{to{transform:rotate(360deg)}}</style>',
+                unsafe_allow_html=True,
+            )
 
     if _pending := st.session_state.pop("_pending_chat", None):
         try:
