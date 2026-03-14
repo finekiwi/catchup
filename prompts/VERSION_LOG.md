@@ -34,6 +34,7 @@
 | v1.4.1 | 2026-03-15 | note_generator.py: OpenAI `response_format={"type":"json_object"}` 강제 + JSON 파싱 실패 시 1회 retry (nudge 메시지 추가). 프롬프트 텍스트 변경 없음 — 동작 레이어 수정. | gpt-4o-mini가 JSON 대신 마크다운 텍스트 반환하는 케이스 방어 |
 | v1.5.0 | 2026-03-15 | "5-10 major sections" → "Cover EVERY distinct topic, dedicated ## section per topic, TOC headings must all appear"; MINIMUM LENGTH 2000 → 3000자; max_tokens 4096 → 8192. | LLM이 섹션 누락하거나 1060 토큰에서 자발적으로 멈추는 문제 해결 |
 | v1.5.1 | 2026-03-15 | No-merge rule 강화: "one heading = one ## section, no exceptions. Do NOT merge adjacent or similar-sounding sections (e.g. 'git commit' and 'git commit -a' are separate sections)." | 유사 섹션 병합으로 인한 TOC 커버리지 누락 방지 (3.5/3.7/3.8 섹션 누락 케이스) |
+| v1.5.2 | 2026-03-15 | EXCLUDE auxiliary content rule 추가: 부록(Appendix), 참고문헌, 색인, 챕터 개요 blurb는 노트에 포함 금지. 코드 레벨: `_HEADING_PATTERN`에 `부록/Appendix` 추가 + `_CHAPTER_INTRO_MAX_LEN=450` — 첫 줄이 CHAPTER/부록 패턴인 짧은 multi-line 블록도 노이즈 필터 적용. | "CHAPTER 5 소개합니다…" 블록과 "부록 B GitLab" 섹션이 노트에 포함되는 문제 수정 |
 
 ## eval_judge.py
 | Version | Date | Change | Quality Impact |

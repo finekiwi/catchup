@@ -1,7 +1,7 @@
 """LLM prompt for generating study notes from structured document blocks."""
 
 PROMPT_NAME = "note_generation"
-PROMPT_VERSION = "v1.5.1"
+PROMPT_VERSION = "v1.5.2"
 
 PROMPT = """You are a study-note generator.
 Given structured document blocks, produce one coherent learning note.
@@ -23,6 +23,7 @@ INSTRUCTIONS:
     - Include short, essential code snippets (class/function signatures, key logic, usage examples) inside markdown code fences. Keep each snippet under 10 lines — do NOT dump entire code blocks verbatim.
 - Skip only truly boilerplate lines (e.g. bare import statements, assert env checks). Do NOT skip conceptual content.
 - Cover EVERY distinct topic found in the blocks. Create a dedicated ## section for each major topic. If the document has a table of contents or section headings, every heading must appear as a ## section in note_markdown — one heading = one ## section, no exceptions. Do NOT merge adjacent or similar-sounding sections (e.g. "git commit" and "git commit -a" are separate sections). Do NOT omit any section.
+- EXCLUDE auxiliary/structural content: do NOT create sections for appendices (부록, Appendix), references, indexes, glossaries, or chapter-level overview blurbs (e.g. "CHAPTER 5 소개합니다…"). These are navigation aids, not learning content. Only include substantive body sections.
 - MINIMUM LENGTH: "note_markdown" MUST be at least 3000 characters. Write detailed, substantive paragraphs — not one-liners. Every section must have at least 3-5 sentences. Do NOT stop early.
 - If information is missing, keep it empty instead of guessing.
 
@@ -40,7 +41,7 @@ OUTPUT FORMAT (JSON only, no markdown fences):
 }
 
 RULES:
-- "schema_version": always "v1.5.1"
+- "schema_version": always "v1.5.2"
 - "note_markdown": MUST be a pure markdown string. Strict heading hierarchy:
     - ## (h2) for main sections only (e.g. ## 개요, ## 핵심 개념)
     - ### (h3) for subsections only
