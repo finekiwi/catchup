@@ -1,0 +1,495 @@
+[
+  {
+    "en_indexed": "sigmoid function",
+    "ko_colloquial": [
+      "시그모이드 함수",
+      "시그모이드함수"
+    ],
+    "mismatch_reason": "Korean users often say '시그모이드 함수' instead of the English 'sigmoid function', which may not be directly matched by embedding similarity.",
+    "source": "deep_learning_ch3.pdf"
+  },
+  {
+    "en_indexed": "dropout",
+    "ko_colloquial": [
+      "드롭아웃",
+      "드롭아웃 기법"
+    ],
+    "mismatch_reason": "Korean users tend to use '드롭아웃' directly, but embedding models might not recognize it as equivalent to the English term.",
+    "source": "deep_learning_ch3.pdf"
+  },
+  {
+    "en_indexed": "MLP",
+    "ko_colloquial": [
+      "다층 퍼셉트론",
+      "엠엘피"
+    ],
+    "mismatch_reason": "Korean users often say '다층 퍼셉트론' or '엠엘피' instead of the abbreviation 'MLP', leading to retrieval failure.",
+    "source": "deep_learning_ch3.pdf"
+  },
+  {
+    "en_indexed": "activation function",
+    "ko_colloquial": [
+      "활성화 함수",
+      "활성화함수"
+    ],
+    "mismatch_reason": "Korean colloquial terms like '활성화 함수' are common, which may not be close enough to the English phrase for embedding similarity.",
+    "source": "deep_learning_ch3.pdf"
+  },
+  {
+    "en_indexed": "softmax",
+    "ko_colloquial": [
+      "소프트맥스",
+      "소프트맥스 함수"
+    ],
+    "mismatch_reason": "Korean users often say '소프트맥스' or '소프트맥스 함수', which may not be matched by the English term in embeddings.",
+    "source": "deep_learning_ch3.pdf"
+  },
+  {
+    "en_indexed": "ReLU",
+    "ko_colloquial": [
+      "렐루",
+      "ReLU 함수"
+    ],
+    "mismatch_reason": "Korean pronunciation '렐루' or 'ReLU 함수' may not be embedded as similar to the English 'ReLU'.",
+    "source": "deep_learning_ch3.pdf"
+  },
+  {
+    "en_indexed": "convolution",
+    "ko_colloquial": [
+      "합성곱",
+      "컨볼루션"
+    ],
+    "mismatch_reason": "Korean terms like '합성곱' or '컨볼루션' are used, which may not be close enough to the English 'convolution' in embedding space.",
+    "source": "deep_learning_ch3.pdf"
+  },
+  {
+    "en_indexed": "batch normalization",
+    "ko_colloquial": [
+      "배치 정규화",
+      "배치노멀라이제이션"
+    ],
+    "mismatch_reason": "Korean users say '배치 정규화' or '배치노멀라이제이션', which may not be recognized as similar to the English phrase.",
+    "source": "deep_learning_ch3.pdf"
+  },
+  {
+    "en_indexed": "Multilayer Perceptrons",
+    "ko_colloquial": [
+      "다층 퍼셉트론",
+      "MLP"
+    ],
+    "mismatch_reason": "Korean users may not use the English abbreviation 'MLP' or the direct transliteration, leading to retrieval failure.",
+    "source": "d2l_ch4.pdf"
+  },
+  {
+    "en_indexed": "sigmoid function",
+    "ko_colloquial": [
+      "시그모이드 함수",
+      "시그모이드함수"
+    ],
+    "mismatch_reason": "Korean colloquial queries often combine the words into a single compound without spacing, which may not match the spaced English term.",
+    "source": "d2l_ch4.pdf"
+  },
+  {
+    "en_indexed": "dropout",
+    "ko_colloquial": [
+      "드롭아웃",
+      "과적합 방지"
+    ],
+    "mismatch_reason": "Korean users might query '드롭아웃' or describe it as '과적합 방지' rather than using the English term.",
+    "source": "d2l_ch4.pdf"
+  },
+  {
+    "en_indexed": "generalization error",
+    "ko_colloquial": [
+      "일반화 오차",
+      "일반화 오류"
+    ],
+    "mismatch_reason": "Korean colloquial queries may use direct translations that are not in the embedding space, causing mismatch.",
+    "source": "d2l_ch4.pdf"
+  },
+  {
+    "en_indexed": "hyperparameter",
+    "ko_colloquial": [
+      "하이퍼파라미터",
+      "초매개변수"
+    ],
+    "mismatch_reason": "Korean users may say '초매개변수' instead of 'hyperparameter', which might not be well-represented in embeddings.",
+    "source": "d2l_ch4.pdf"
+  },
+  {
+    "en_indexed": "weight decay",
+    "ko_colloquial": [
+      "가중치 감쇠",
+      "가중치 감소"
+    ],
+    "mismatch_reason": "Korean queries might use direct translations that are not in the embedding space, leading to retrieval failure.",
+    "source": "d2l_ch4.pdf"
+  },
+  {
+    "en_indexed": "K-Fold Cross-Validation",
+    "ko_colloquial": [
+      "K-겹 교차 검증",
+      "K-폴드 교차 검증"
+    ],
+    "mismatch_reason": "Korean users may not use the English abbreviation or spacing, causing mismatch.",
+    "source": "d2l_ch4.pdf"
+  },
+  {
+    "en_indexed": "Retrieval Augmented Generation",
+    "ko_colloquial": [
+      "RAG",
+      "리트리벌 증강 생성"
+    ],
+    "mismatch_reason": "Korean users are more likely to use the abbreviation 'RAG' or a descriptive phrase rather than the English term.",
+    "source": "llm_app_ch3.pdf"
+  },
+  {
+    "en_indexed": "ChatGPT",
+    "ko_colloquial": [
+      "챗GPT",
+      "채팅GPT",
+      "챗 지피티"
+    ],
+    "mismatch_reason": "Korean colloquial queries often transliterate or abbreviate 'ChatGPT' as '챗GPT' or similar variations.",
+    "source": "llm_app_ch3.pdf"
+  },
+  {
+    "en_indexed": "prompt engineering",
+    "ko_colloquial": [
+      "프롬프트 엔지니어링",
+      "프롬프트 설계",
+      "프롬프트 제작"
+    ],
+    "mismatch_reason": "Korean users tend to use descriptive phrases instead of the direct English compound term.",
+    "source": "llm_app_ch3.pdf"
+  },
+  {
+    "en_indexed": "Function calling",
+    "ko_colloquial": [
+      "함수 호출",
+      "기능 호출",
+      "함수 호출하기"
+    ],
+    "mismatch_reason": "Korean queries are more likely to use the phrase '함수 호출' rather than the English 'Function calling'.",
+    "source": "llm_app_ch3.pdf"
+  },
+  {
+    "en_indexed": "API",
+    "ko_colloquial": [
+      "API",
+      "에이피아이"
+    ],
+    "mismatch_reason": "While 'API' is often used directly, Korean users might also say '에이피아이' as a transliteration.",
+    "source": "llm_app_ch3.pdf"
+  },
+  {
+    "en_indexed": "token",
+    "ko_colloquial": [
+      "토큰",
+      "단어 조각"
+    ],
+    "mismatch_reason": "Korean users may query about '토큰' as a concept, which is a transliteration of 'token'.",
+    "source": "llm_app_ch3.pdf"
+  },
+  {
+    "en_indexed": "large language models",
+    "ko_colloquial": [
+      "대규모 언어 모델",
+      "LLM",
+      "대형 언어모델"
+    ],
+    "mismatch_reason": "Korean users often use descriptive phrases or abbreviations like 'LLM' instead of the full English phrase.",
+    "source": "llm_app_ch3.pdf"
+  },
+  {
+    "en_indexed": "git log --stat",
+    "ko_colloquial": [
+      "깃 로그",
+      "커밋 기록"
+    ],
+    "mismatch_reason": "Korean users typically say '커밋 기록' or '커밋 로그' instead of the English 'git log --stat'.",
+    "source": "git_github_ch3.pdf"
+  },
+  {
+    "en_indexed": "git checkout",
+    "ko_colloquial": [
+      "체크아웃",
+      "브랜치 전환"
+    ],
+    "mismatch_reason": "Korean colloquial queries often use '브랜치 전환' or '체크아웃' instead of the English command.",
+    "source": "git_github_ch3.pdf"
+  },
+  {
+    "en_indexed": "git merge",
+    "ko_colloquial": [
+      "병합",
+      "브랜치 병합"
+    ],
+    "mismatch_reason": "Korean users would likely say '브랜치 병합' or just '병합' rather than 'git merge'.",
+    "source": "git_github_ch3.pdf"
+  },
+  {
+    "en_indexed": "git add",
+    "ko_colloquial": [
+      "스테이징",
+      "추가"
+    ],
+    "mismatch_reason": "Korean users might query '파일 스테이징' or '추가' instead of 'git add'.",
+    "source": "git_github_ch3.pdf"
+  },
+  {
+    "en_indexed": "git commit",
+    "ko_colloquial": [
+      "커밋",
+      "커밋하기",
+      "커밋 메시지"
+    ],
+    "mismatch_reason": "Korean colloquial queries often use '커밋' or '커밋 메시지' rather than the English command.",
+    "source": "git_github_ch3.pdf"
+  },
+  {
+    "en_indexed": "git status",
+    "ko_colloquial": [
+      "상태 확인",
+      "작업 상태"
+    ],
+    "mismatch_reason": "Korean users would likely say '상태 확인' or '작업 상태' instead of 'git status'.",
+    "source": "git_github_ch3.pdf"
+  },
+  {
+    "en_indexed": "git ignore",
+    "ko_colloquial": [
+      "깃 무시",
+      "무시 파일"
+    ],
+    "mismatch_reason": "Korean users might query '깃 무시' or '무시 파일' instead of 'git ignore'.",
+    "source": "git_github_ch3.pdf"
+  },
+  {
+    "en_indexed": "dropout",
+    "ko_colloquial": [
+      "드롭아웃",
+      "과적합 방지"
+    ],
+    "mismatch_reason": "Korean users might say '드롭아웃' or '과적합 방지' instead of the English 'dropout'.",
+    "source": "git_github_ch3.pdf"
+  },
+  {
+    "en_indexed": "sigmoid function",
+    "ko_colloquial": [
+      "시그모이드함수",
+      "시그모이드 함수"
+    ],
+    "mismatch_reason": "Korean users would likely query '시그모이드함수' or '시그모이드 함수' instead of the English term.",
+    "source": "git_github_ch3.pdf"
+  },
+  {
+    "en_indexed": "MLP",
+    "ko_colloquial": [
+      "다층 퍼셉트론",
+      "엠엘피"
+    ],
+    "mismatch_reason": "Korean users would say '다층 퍼셉트론' or '엠엘피' instead of the abbreviation 'MLP'.",
+    "source": "git_github_ch3.pdf"
+  },
+  {
+    "en_indexed": "Neo4j",
+    "ko_colloquial": [
+      "네오4제이",
+      "네오사이티",
+      "네오제이"
+    ],
+    "mismatch_reason": "Korean colloquial queries often pronounce or write 'Neo4j' differently, which may not match the English embedding.",
+    "source": "LLM_034_neo4j_intro.ipynb"
+  },
+  {
+    "en_indexed": "Knowledge Graph",
+    "ko_colloquial": [
+      "지식 그래프",
+      "노하우 그래프",
+      "지식 네트워크"
+    ],
+    "mismatch_reason": "Korean users typically say '지식 그래프' instead of 'Knowledge Graph', leading to embedding mismatch.",
+    "source": "LLM_034_neo4j_intro.ipynb"
+  },
+  {
+    "en_indexed": "Neo4j database",
+    "ko_colloquial": [
+      "네오4제이 데이터베이스",
+      "네오사이티 데이터베이스",
+      "네오제이 DB"
+    ],
+    "mismatch_reason": "Korean colloquial terms for 'Neo4j database' differ from the English term, causing retrieval failure.",
+    "source": "LLM_034_neo4j_intro.ipynb"
+  },
+  {
+    "en_indexed": "MERGE",
+    "ko_colloquial": [
+      "머지",
+      "병합",
+      "합치기"
+    ],
+    "mismatch_reason": "Korean users often say '병합' or '합치기' instead of 'MERGE', which may not be embedded similarly.",
+    "source": "LLM_034_neo4j_intro.ipynb"
+  },
+  {
+    "en_indexed": "CREATE",
+    "ko_colloquial": [
+      "생성",
+      "만들기",
+      "생성하기"
+    ],
+    "mismatch_reason": "Korean colloquial queries might use '생성' or '만들기' instead of 'CREATE', leading to mismatch.",
+    "source": "LLM_034_neo4j_intro.ipynb"
+  },
+  {
+    "en_indexed": "MATCH",
+    "ko_colloquial": [
+      "매치",
+      "일치",
+      "찾기"
+    ],
+    "mismatch_reason": "Korean users may say '일치' or '찾기' instead of 'MATCH', which could cause retrieval issues.",
+    "source": "LLM_034_neo4j_intro.ipynb"
+  },
+  {
+    "en_indexed": "cypher_query",
+    "ko_colloquial": [
+      "사이퍼 쿼리",
+      "Cypher 명령어",
+      "쿼리"
+    ],
+    "mismatch_reason": "Korean colloquial queries may not include 'cypher' explicitly, leading to embedding mismatch.",
+    "source": "LLM_034_neo4j_intro.ipynb"
+  },
+  {
+    "en_indexed": "GraphCypherQAChain",
+    "ko_colloquial": [
+      "그래프 사이퍼 체인",
+      "그래프 쿼리 체인",
+      "Cypher 질문 체인"
+    ],
+    "mismatch_reason": "Korean users are unlikely to mention 'GraphCypherQAChain' directly, causing retrieval failure.",
+    "source": "LLM_034_neo4j_intro.ipynb"
+  },
+  {
+    "en_indexed": "ChatGoogleGenerativeAI",
+    "ko_colloquial": [
+      "구글 제너레이티브 AI",
+      "구글 생성 AI",
+      "구글 AI"
+    ],
+    "mismatch_reason": "Korean colloquial queries would not match the English class name 'ChatGoogleGenerativeAI'.",
+    "source": "LLM_034_neo4j_intro.ipynb"
+  },
+  {
+    "en_indexed": "gpt-4.1-nano",
+    "ko_colloquial": [
+      "GPT-4.1 나노",
+      "GPT-4.1 소형",
+      "GPT-4.1 작은 모델"
+    ],
+    "mismatch_reason": "Korean users would not refer to the model as 'gpt-4.1-nano', leading to embedding mismatch.",
+    "source": "LLM_034_neo4j_intro.ipynb"
+  },
+  {
+    "en_indexed": "OpenAIEmbeddings",
+    "ko_colloquial": [
+      "오픈AI 임베딩",
+      "오픈AI 임베딩 API",
+      "OpenAI 임베딩"
+    ],
+    "mismatch_reason": "한국 사용자들은 'OpenAI 임베딩' 또는 '오픈AI 임베딩'이라고 말할 수 있어, 영어 용어와 일치하지 않음.",
+    "source": "day53_langchain.ipynb"
+  },
+  {
+    "en_indexed": "faiss.IndexFlatL2",
+    "ko_colloquial": [
+      "faiss 인덱스 플랫 엘투",
+      "faiss 인덱스",
+      "faiss"
+    ],
+    "mismatch_reason": "한국 사용자들은 'faiss 인덱스' 또는 'faiss'라고 부르며, 영어 용어를 그대로 사용하지 않을 수 있음.",
+    "source": "day53_langchain.ipynb"
+  },
+  {
+    "en_indexed": "Chroma",
+    "ko_colloquial": [
+      "크로마",
+      "컬러 데이터베이스",
+      "Chroma 컬렉션"
+    ],
+    "mismatch_reason": "한국 사용자들은 '크로마' 또는 '컬러 데이터베이스'라고 말할 수 있어, 영어 이름과 차이가 있음.",
+    "source": "day53_langchain.ipynb"
+  },
+  {
+    "en_indexed": "RecursiveCharacterTextSplitter",
+    "ko_colloquial": [
+      "재귀 문자 텍스트 분할기",
+      "문자 분할기",
+      "텍스트 분할기"
+    ],
+    "mismatch_reason": "한국 사용자들은 '문자 분할기' 또는 '텍스트 분할기'라고 부르며, 영어 용어와 차이가 있음.",
+    "source": "day53_langchain.ipynb"
+  },
+  {
+    "en_indexed": "LongContextReorder",
+    "ko_colloquial": [
+      "긴 문맥 재정렬",
+      "문맥 재정렬기",
+      "LongContextReorder"
+    ],
+    "mismatch_reason": "한국 사용자들은 '긴 문맥 재정렬' 또는 '문맥 재정렬기'라고 말할 수 있어, 영어 이름과 차이 있음.",
+    "source": "day53_langchain.ipynb"
+  },
+  {
+    "en_indexed": "BM25Retriever",
+    "ko_colloquial": [
+      "BM25 검색기",
+      "BM25 리트리버",
+      "BM25"
+    ],
+    "mismatch_reason": "한국 사용자들은 'BM25 검색기' 또는 'BM25'라고 부르며, 영어 용어를 그대로 사용하지 않을 수 있음.",
+    "source": "day53_langchain.ipynb"
+  },
+  {
+    "en_indexed": "PyPDFLoader",
+    "ko_colloquial": [
+      "파이PDF 로더",
+      "PyPDF 로더",
+      "PDF 로더"
+    ],
+    "mismatch_reason": "한국 사용자들은 'PDF 로더' 또는 '파이PDF 로더'라고 말할 수 있어, 영어 이름과 차이 있음.",
+    "source": "day53_langchain.ipynb"
+  },
+  {
+    "en_indexed": "TextLoader",
+    "ko_colloquial": [
+      "텍스트 로더",
+      "파일 로더",
+      "텍스트 파일 로더"
+    ],
+    "mismatch_reason": "한국 사용자들은 '텍스트 로더' 또는 '파일 로더'라고 부르며, 영어 용어와 차이가 있음.",
+    "source": "day53_langchain.ipynb"
+  },
+  {
+    "en_indexed": "faiss",
+    "ko_colloquial": [
+      "페이시스",
+      "faiss",
+      "faiss 인덱스"
+    ],
+    "mismatch_reason": "한국 사용자들은 '페이시스' 또는 'faiss'라고 부르며, 영어 이름과 차이 있음.",
+    "source": "day53_langchain.ipynb"
+  },
+  {
+    "en_indexed": "embeddings_filter",
+    "ko_colloquial": [
+      "임베딩 필터",
+      "임베딩 필터링",
+      "임베딩 유사도 필터"
+    ],
+    "mismatch_reason": "한국 사용자들은 '임베딩 필터' 또는 '임베딩 필터링'이라고 말할 수 있어, 영어 용어와 차이 있음.",
+    "source": "day53_langchain.ipynb"
+  }
+]

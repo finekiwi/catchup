@@ -19,6 +19,7 @@ from db.chroma import _build_client
 from llm.note_generator import _is_noise_block
 from models.document import Document
 from prompts.rag_qa import PROMPT
+from rag.query_rewriter import rewrite_query as _rewrite_query
 from utils.logging import log_api_call
 
 load_dotenv()
@@ -79,6 +80,7 @@ class QAResult(BaseModel):
     latency_ms: float
     input_tokens: int
     output_tokens: int
+    rewritten_query: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -531,7 +533,7 @@ def index_document_chunked(document: Document) -> None:
             LOGGER.exception("Failed to upsert chunk %d, document id=%s", idx, document.id)
 
 
-def query_chunked(question: str, top_k: int = 5, model: str = "gpt-4o-mini") -> QAResult:
+def query_chunked(question: str, top_k: int = 5, model: str = "gpt-4o-mini", rewrite: bool = False) -> QAResult:
     """Answer a question using rechunked CatchUp RAG (1000-char chunks, no adjacent expansion).
 
     Identical control conditions to baseline: same chunk size, same top_k, same LLM.
@@ -541,6 +543,8 @@ def query_chunked(question: str, top_k: int = 5, model: str = "gpt-4o-mini") -> 
         question: Natural language question.
         top_k: Number of chunks to retrieve.
         model: LLM model identifier. Must be in SUPPORTED_MODELS.
+        rewrite: If True, expand the question with LLM query rewriting before embedding.
+                 The original question is still sent to the LLM for answer generation.
 
     Returns:
         QAResult with answer, source_blocks, model name, latency, and token usage.
@@ -562,10 +566,18 @@ def query_chunked(question: str, top_k: int = 5, model: str = "gpt-4o-mini") -> 
             output_tokens=0,
         )
 
+    # Optionally rewrite question for better embedding retrieval
+    embed_target = question
+    rw_query: str | None = None
+    if rewrite:
+        embed_target, _rw_lat, _rw_in, _rw_out = _rewrite_query(question)
+        rw_query = embed_target
+        LOGGER.info("Query rewritten (chunked): %r -> %r", question, embed_target)
+
     # Embed question
     try:
         t_embed = time.perf_counter()
-        question_vector, embed_tokens = _get_openai_embedding(question)
+        question_vector, embed_tokens = _get_openai_embedding(embed_target)
         log_api_call(
             model=EMBED_MODEL,
             stage="rag_embed_chunked",
@@ -662,6 +674,7 @@ def query_chunked(question: str, top_k: int = 5, model: str = "gpt-4o-mini") -> 
             latency_ms=(time.perf_counter() - t_total) * 1000,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            rewritten_query=rw_query,
         )
     except Exception as exc:
         LOGGER.error("Chunked LLM generation failed: %s", exc)
@@ -681,6 +694,7 @@ def query(
     top_k: int = 5,
     model: str = "gpt-4o-mini",
     document_id: str | None = None,
+    rewrite: bool = False,
 ) -> QAResult:
     """Answer a question using RAG: embed question → search ChromaDB → generate answer with LLM.
 
@@ -689,6 +703,8 @@ def query(
         top_k: Number of context blocks to retrieve.
         model: LLM model identifier for answer generation. Must be in SUPPORTED_MODELS.
         document_id: Optional document id to restrict retrieval to a single indexed document.
+        rewrite: If True, expand the question with LLM query rewriting before embedding.
+                 The original question is still sent to the LLM for answer generation.
 
     Returns:
         QAResult with answer, source_blocks, model name, latency, and token usage.
@@ -713,10 +729,18 @@ def query(
             output_tokens=0,
         )
 
+    # Optionally rewrite question for better embedding retrieval
+    embed_target = question
+    rw_query: str | None = None
+    if rewrite:
+        embed_target, _rw_lat, _rw_in, _rw_out = _rewrite_query(question)
+        rw_query = embed_target
+        LOGGER.info("Query rewritten: %r -> %r", question, embed_target)
+
     # Embed question
     try:
         t_embed = time.perf_counter()
-        question_vector, embed_tokens = _get_openai_embedding(question)
+        question_vector, embed_tokens = _get_openai_embedding(embed_target)
         embed_latency_ms = (time.perf_counter() - t_embed) * 1000
         log_api_call(
             model=EMBED_MODEL,
@@ -862,6 +886,7 @@ def query(
             latency_ms=(time.perf_counter() - t_total) * 1000,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            rewritten_query=rw_query,
         )
 
     except Exception as exc:

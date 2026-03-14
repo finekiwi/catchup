@@ -493,11 +493,11 @@ def test_golden_set_loads():
     assert isinstance(data, dict)
 
 
-def test_golden_set_has_15_items():
-    """golden_set.json declares total == 15 and contains exactly 15 items."""
+def test_golden_set_has_16_items():
+    """golden_set.json declares total == 16 and contains exactly 16 items."""
     data = json.loads(GOLDEN_SET_PATH.read_text(encoding="utf-8"))
-    assert data["total"] == 15
-    assert len(data["items"]) == 15
+    assert data["total"] == 16
+    assert len(data["items"]) == 16
 
 
 def test_golden_set_all_required_fields():
@@ -510,12 +510,12 @@ def test_golden_set_all_required_fields():
 
 
 def test_golden_set_tier_distribution():
-    """golden_set.json has exactly 4 items in tier 1, 4 in tier 2, 4 in tier 3, and 3 in tier 4."""
+    """golden_set.json has exactly 5 items in tier 1, 4 in tier 2, 4 in tier 3, and 3 in tier 4."""
     data = json.loads(GOLDEN_SET_PATH.read_text(encoding="utf-8"))
     from collections import Counter
 
     counts = Counter(item["tier"] for item in data["items"])
-    assert counts[1] == 4
+    assert counts[1] == 5
     assert counts[2] == 4
     assert counts[3] == 4
     assert counts[4] == 3
