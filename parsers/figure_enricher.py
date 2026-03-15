@@ -257,6 +257,7 @@ def _reconvert_with_images(file_path: str) -> object | None:
 
         LOGGER.info("Re-converting %s with generate_picture_images=True", file_path)
         pipeline_options = PdfPipelineOptions()
+        pipeline_options.generate_page_images = True
         pipeline_options.generate_picture_images = True
         converter = DocumentConverter(
             format_options={
