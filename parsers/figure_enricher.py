@@ -81,6 +81,34 @@ def enrich_pdf_figures(
     if not figure_blocks or not picture_items:
         return doc
 
+    # Check whether the DoclingDocument actually has extractable picture images.
+    # Docling's JSON cache serialises image=None for PictureItems, so
+    # PictureItem.get_image() returns None for every item when loaded from cache.
+    # We test the first item and fall back to live re-conversion if needed.
+    #
+    # Skip the test when the output directory already exists: parse_pdf pre-saves
+    # all figure images during the initial conversion (while the live DoclingDocument
+    # is available), so _enrich_one can use those files directly without get_image().
+    # This also covers re-uploads where images were saved in a previous session.
+    output_dir_early = figures_dir or (_DEFAULT_FIGURES_DIR / doc.id)
+    _enriched_before = output_dir_early.is_dir()
+    if not _enriched_before:
+        _test_item = picture_items[0][0]
+        _test_img = None
+        try:
+            _test_img = _test_item.get_image(dl_doc)
+        except Exception:  # noqa: BLE001
+            pass
+        if _test_img is None:
+            LOGGER.info(
+                "Cached DoclingDocument has no extractable picture images "
+                "(Docling JSON cache limitation) — re-converting %s with live pipeline",
+                Path(file_path).name,
+            )
+            fresh = _reconvert_with_images(file_path)
+            if fresh is not None:
+                dl_doc = fresh
+
     # Match by zip (document order) with page number cross-check
     matched: list[tuple[Block, object]] = []
     for fb, (pi, pi_page) in zip(figure_blocks, picture_items):
@@ -168,27 +196,30 @@ def _enrich_one(
     seen_hashes: set[str],
 ) -> None:
     """Extract, classify, analyze one figure and replace its block in doc.blocks."""
-    # Extract PIL image from DoclingDocument
-    pil_image = None
-    try:
-        pil_image = picture_item.get_image(dl_doc)
-    except Exception as exc:  # noqa: BLE001
-        LOGGER.warning("get_image() failed for block order=%d: %s", block.order, exc)
-
-    if pil_image is None:
-        LOGGER.warning(
-            "No raster image data for block order=%d (vector graphic?) — keeping placeholder",
-            block.order,
-        )
-        return
-
-    # Save image to disk
     image_path = output_dir / f"{block.order}.png"
-    try:
-        pil_image.save(image_path, format="PNG")
-    except Exception as exc:  # noqa: BLE001
-        LOGGER.warning("Failed to save figure image for block order=%d: %s", block.order, exc)
-        return
+
+    if not image_path.exists():
+        # Image not yet on disk — extract from DoclingDocument.
+        pil_image = None
+        try:
+            pil_image = picture_item.get_image(dl_doc)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("get_image() failed for block order=%d: %s", block.order, exc)
+
+        if pil_image is None:
+            LOGGER.warning(
+                "No raster image data for block order=%d (vector graphic?) — keeping placeholder",
+                block.order,
+            )
+            return
+
+        try:
+            pil_image.save(image_path, format="PNG")
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("Failed to save figure image for block order=%d: %s", block.order, exc)
+            return
+    else:
+        LOGGER.debug("Figure block order=%d: using pre-extracted image from disk", block.order)
 
     image_path_str = str(image_path)
 

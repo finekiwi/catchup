@@ -109,6 +109,11 @@ def parse_pdf(file_path: str) -> Document:
         if not document.blocks:
             _mark_parse_failed(document=document)
         else:
+            # Pre-save figure images while we have the live DoclingDocument.
+            # Docling's JSON cache does not preserve embedded image bytes, so
+            # enrich_pdf_figures cannot call PictureItem.get_image() on a cached
+            # doc.  Saving images here avoids a costly second conversion later.
+            _presave_figure_images(result.document, document)
             save_cached_parse(source_path, document)
             save_docling_doc(source_path, result.document)
         return document
@@ -203,3 +208,48 @@ def _mark_parse_failed(document: Document) -> None:
     """Mark parsing failure in document tags without duplicating entries."""
     if "parse_failed" not in document.metadata.tags:
         document.metadata.tags.append("parse_failed")
+
+
+def _presave_figure_images(dl_doc: object, document: Document) -> None:
+    """Save raw figure images to data/figures/{doc.id}/ while dl_doc is live in memory.
+
+    Docling's JSON cache does not preserve embedded picture image bytes, so
+    PictureItem.get_image() returns None when loaded from cache.  By saving the
+    images here (during parse, when the live DoclingDocument is available) we
+    allow enrich_pdf_figures to skip re-conversion on subsequent uploads.
+
+    Images are saved as {block.order}.png.  Existing files are skipped.
+    Errors are logged at DEBUG level and do not affect parse results.
+    """
+    figure_blocks = [b for b in document.blocks if b.type == BlockType.FIGURE]
+    if not figure_blocks:
+        return
+
+    picture_items = [
+        item
+        for item, _level in dl_doc.iterate_items()
+        if isinstance(item, PictureItem)
+    ] if PictureItem is not None else []
+
+    if not picture_items:
+        return
+
+    output_dir = Path("data/figures") / document.id
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        LOGGER.debug("Could not create figures dir %s: %s", output_dir, exc)
+        return
+
+    for fb, pi in zip(figure_blocks, picture_items):
+        img_path = output_dir / f"{fb.order}.png"
+        if img_path.exists():
+            continue
+        try:
+            pil_image = pi.get_image(dl_doc)
+            if pil_image is None:
+                continue
+            pil_image.save(img_path, format="PNG")
+            LOGGER.debug("Pre-saved figure image: %s", img_path)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.debug("Skipped pre-save for block order=%d: %s", fb.order, exc)
