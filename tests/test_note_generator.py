@@ -489,3 +489,119 @@ def test_generate_note_backward_compat(monkeypatch) -> None:
 
     assert result["title"] == "선형대수 학습 노트"
     assert doc.status == ProcessingStatus.NOTE_GENERATED
+
+
+# ---------------------------------------------------------------------------
+# Heading dedup tests (CU-14 fix)
+# ---------------------------------------------------------------------------
+
+
+def _make_sectioned_call(
+    section_bodies: list[str],
+    assembly_meta: dict | None = None,
+) -> tuple:
+    """Build a _PROVIDER_DISPATCH-compatible mock that returns section_bodies then assembly JSON."""
+    meta = assembly_meta or {
+        "title": "테스트 노트",
+        "summary": "테스트 요약",
+        "key_concepts": [],
+        "difficulty_level": "beginner",
+        "estimated_read_time_min": 5,
+        "confidence": 0.9,
+        "errors": [],
+    }
+    call_index = {"n": 0}
+
+    def _dispatch(model, system, user, **kwargs):
+        if "metadata" in system.lower() or "extract" in system.lower():
+            return json.dumps(meta), 200, 100
+        idx = call_index["n"]
+        call_index["n"] += 1
+        return section_bodies[idx % len(section_bodies)], 100, 80
+
+    return _dispatch
+
+
+def test_assemble_strips_markdown_heading_from_section_body(monkeypatch) -> None:
+    """LLM-added ## heading at top of section body must not appear twice in note_markdown."""
+    doc = _large_document(250)
+    monkeypatch.setattr("llm.note_generator.log_api_call", lambda **kw: None)
+
+    # LLM echoes the heading as ## even though SECTION_PROMPT says not to
+    section_bodies = [
+        "## 1. 개요\n\n개요 본문 내용입니다.",
+        "## 2. 본론\n\n본론 본문 내용입니다.",
+    ]
+    sections = [
+        SectionInfo(heading="1. 개요", level=1, start_block_order=0, end_block_order=125, blocks=doc.blocks[:125]),
+        SectionInfo(heading="2. 본론", level=1, start_block_order=125, end_block_order=None, blocks=doc.blocks[125:]),
+    ]
+    monkeypatch.setitem(note_gen_module._PROVIDER_DISPATCH, "openai", _make_sectioned_call(section_bodies))
+
+    with patch("llm.section_splitter.extract_sections", return_value=sections):
+        with patch("llm.section_splitter.group_blocks_by_section", return_value=sections):
+            result = generate_note_sectioned(doc)
+
+    markdown = result["note_markdown"]
+    # Each heading must appear exactly once
+    assert markdown.count("## 1. 개요") == 1, "Heading '1. 개요' should appear exactly once"
+    assert markdown.count("## 2. 본론") == 1, "Heading '2. 본론' should appear exactly once"
+    assert "개요 본문 내용입니다." in markdown
+    assert "본론 본문 내용입니다." in markdown
+
+
+def test_assemble_strips_plain_text_heading_restatement(monkeypatch) -> None:
+    """Plain-text restatement of section heading on the first line must be stripped."""
+    doc = _large_document(250)
+    monkeypatch.setattr("llm.note_generator.log_api_call", lambda **kw: None)
+
+    # LLM outputs plain-text heading restatement (with colon variant)
+    section_bodies = ["CHAPTER 7: Visual Studio 사용법\n\n본문 내용이 여기 있습니다."]
+    sections = [
+        SectionInfo(
+            heading="CHAPTER 7 Visual Studio 사용법",
+            level=1,
+            start_block_order=0,
+            end_block_order=None,
+            blocks=doc.blocks,
+        )
+    ]
+    monkeypatch.setitem(note_gen_module._PROVIDER_DISPATCH, "openai", _make_sectioned_call(section_bodies))
+
+    with patch("llm.section_splitter.extract_sections", return_value=sections):
+        with patch("llm.section_splitter.group_blocks_by_section", return_value=sections):
+            result = generate_note_sectioned(doc)
+
+    markdown = result["note_markdown"]
+    # The plain-text restatement line should not appear in the body
+    assert "CHAPTER 7: Visual Studio 사용법" not in markdown
+    # But the assembler-prepended heading must be present
+    assert "## CHAPTER 7 Visual Studio 사용법" in markdown
+    assert "본문 내용이 여기 있습니다." in markdown
+
+
+def test_assemble_preserves_normal_body_first_line(monkeypatch) -> None:
+    """Normal body text that does not restate the heading must NOT be stripped."""
+    doc = _large_document(250)
+    monkeypatch.setattr("llm.note_generator.log_api_call", lambda **kw: None)
+
+    section_bodies = ["이 절에서는 Git의 기본 명령어를 살펴봅니다.\n\n세부 내용입니다."]
+    sections = [
+        SectionInfo(
+            heading="3.1 기본 명령어",
+            level=1,
+            start_block_order=0,
+            end_block_order=None,
+            blocks=doc.blocks,
+        )
+    ]
+    monkeypatch.setitem(note_gen_module._PROVIDER_DISPATCH, "openai", _make_sectioned_call(section_bodies))
+
+    with patch("llm.section_splitter.extract_sections", return_value=sections):
+        with patch("llm.section_splitter.group_blocks_by_section", return_value=sections):
+            result = generate_note_sectioned(doc)
+
+    markdown = result["note_markdown"]
+    assert "이 절에서는 Git의 기본 명령어를 살펴봅니다." in markdown, (
+        "Normal body opening sentence must be preserved"
+    )
