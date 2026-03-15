@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
 import time
 from typing import Any
@@ -529,16 +530,29 @@ def _assemble_sections(
         PROMPT_VERSION as SECTION_PROMPT_VERSION,
     )
 
-    def _strip_leading_heading(md: str) -> str:
-        """Remove a leading markdown heading line the LLM may have added despite instructions."""
+    def _normalize_heading(s: str) -> str:
+        """Strip markdown markers, colons, and whitespace for fuzzy heading comparison."""
+        return re.sub(r"[#:\s]", "", s).lower()
+
+    def _strip_leading_heading(md: str, heading: str) -> str:
+        """Remove a leading heading line the LLM may have added despite instructions.
+
+        Handles both ``## Heading`` (markdown) and plain-text restatements
+        (e.g. ``CHAPTER 7: foo`` without a ``#`` prefix).
+        """
         lines = md.lstrip("\n").splitlines()
-        if lines and lines[0].lstrip().startswith("#"):
+        if not lines:
+            return md
+        first = lines[0].lstrip()
+        is_md_heading = first.startswith("#")
+        is_plain_restatement = _normalize_heading(first) == _normalize_heading(heading)
+        if is_md_heading or is_plain_restatement:
             md = "\n".join(lines[1:]).lstrip("\n")
         return md
 
     parts: list[str] = []
     for section, md in zip(sections, section_markdowns):
-        parts.append(f"## {section.heading}\n\n{_strip_leading_heading(md)}")
+        parts.append(f"## {section.heading}\n\n{_strip_leading_heading(md, section.heading)}")
     note_markdown = "\n\n".join(parts)
 
     doc_title = doc.metadata.title or doc.source

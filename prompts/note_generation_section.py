@@ -6,7 +6,7 @@ Two prompts:
 """
 
 PROMPT_NAME = "note_generation_section"
-PROMPT_VERSION = "v1.1.0"
+PROMPT_VERSION = "v1.2.0"
 
 SECTION_PROMPT = """You are a study-note generator working on ONE SECTION of a larger document.
 
@@ -24,6 +24,7 @@ Instructions:
 - For code blocks: describe the algorithm + include key snippets (max 10 lines each).
 - Use ### for subsections within this section if needed.
 - DO NOT include a ## heading — it will be prepended by the assembler.
+- DO NOT restate the section title in the opening sentence.
 - Output ONLY raw markdown body text. No JSON wrapper, no markdown fences around the output."""
 
 ASSEMBLY_PROMPT = """You are a study-note metadata extractor.

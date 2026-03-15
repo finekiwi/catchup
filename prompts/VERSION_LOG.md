@@ -41,6 +41,7 @@
 |---------|------|--------|----------------|
 | v1.0.0 | 2026-03-15 | Initial section-based note generation prompts. SECTION_PROMPT: per-section body generation (raw markdown, no heading). ASSEMBLY_PROMPT: metadata-only JSON extraction from concatenated sectioned notes (title, summary, key_concepts, difficulty, read_time, confidence). | Enables full TOC coverage for large documents via per-section LLM calls |
 | v1.1.0 | 2026-03-15 | ASSEMBLY_PROMPT: replaced full `note_markdown` with per-section snippets (`## heading` + first 2-3 sentences of body). `estimated_read_time_min` pre-computed from word count (200 wpm). ~80% token reduction vs full note while preserving summary quality. | Faster assembly call; summary quality maintained via opening sentences per section |
+| v1.2.0 | 2026-03-15 | SECTION_PROMPT: add "DO NOT restate the section title in the opening sentence." Code-level: `_strip_leading_heading()` extended to also strip plain-text restatements (normalized match against section heading, handles colons/case). | Eliminates duplicate heading lines when LLM outputs plain-text title instead of markdown `##` |
 
 ## eval_judge.py
 | Version | Date | Change | Quality Impact |
