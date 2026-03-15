@@ -1,7 +1,0 @@
-interface:
-  display_name: "Re-review"
-  short_description: "Verify review fixes and post a follow-up verdict"
-  default_prompt: "Use $re-review to verify the author's response on PR #12 and post the formatted re-review comment."
-
-policy:
-  allow_implicit_invocation: false

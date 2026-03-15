@@ -218,7 +218,14 @@ data/chroma/
 data/golden/
 data/parsed/
 data/figures/
+data/*.db
+eval/results/
 refs/
+
+# Tool caches
+.codex/
+.deepeval/
+memory.md
 
 # Internal tooling
 .github/
