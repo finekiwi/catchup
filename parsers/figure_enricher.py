@@ -13,7 +13,7 @@ from parsers.image_parser import (
     map_vlm_output_to_block,
     parse_vlm_output,
 )
-from utils.cache import load_docling_doc
+from utils.cache import load_docling_doc, save_docling_doc
 from vlm.client import call_vlm
 
 LOGGER = logging.getLogger(__name__)
@@ -50,10 +50,14 @@ def enrich_pdf_figures(
     """
     dl_doc = load_docling_doc(Path(file_path))
     if dl_doc is None:
-        LOGGER.warning(
-            "DoclingDocument cache missing for %s — skipping figure enrichment", file_path
-        )
-        return doc
+        # Cache miss or stale (e.g. built without generate_picture_images=True).
+        # Re-run DocumentConverter with picture image generation and rebuild the cache.
+        dl_doc = _reconvert_with_images(file_path)
+        if dl_doc is None:
+            LOGGER.warning(
+                "DoclingDocument unavailable for %s — skipping figure enrichment", file_path
+            )
+            return doc
 
     # Collect figure blocks and picture items in document order
     figure_blocks: list[Block] = [b for b in doc.blocks if b.type == BlockType.FIGURE]
@@ -235,6 +239,34 @@ def _is_picture_item(item: object) -> bool:
         return isinstance(item, PictureItem)
     except ImportError:
         return False
+
+
+def _reconvert_with_images(file_path: str) -> object | None:
+    """Re-run DocumentConverter with generate_picture_images=True and cache the result.
+
+    Used as a fallback when the docling cache is missing or was built without
+    picture image data (stale v1 cache). Returns None on any failure.
+    """
+    try:
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.pipeline_options import PdfPipelineOptions
+        from docling.document_converter import DocumentConverter, PdfFormatOption
+
+        LOGGER.info("Re-converting %s with generate_picture_images=True", file_path)
+        pipeline_options = PdfPipelineOptions()
+        pipeline_options.generate_picture_images = True
+        converter = DocumentConverter(
+            format_options={
+                InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+            }
+        )
+        result = converter.convert(file_path, raises_on_error=False)
+        dl_doc = result.document
+        save_docling_doc(Path(file_path), dl_doc)
+        return dl_doc
+    except Exception as exc:
+        LOGGER.warning("Re-conversion with picture images failed for %s: %s", file_path, exc)
+        return None
 
 
 def _is_streamlit_runtime() -> bool:

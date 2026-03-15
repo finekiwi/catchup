@@ -886,9 +886,33 @@ def _downshift_headings(md_text: str) -> str:
     return "\n".join(result_lines)
 
 
+def _deduplicate_headings(md: str) -> str:
+    """Remove duplicate consecutive ## headings with no body between them.
+
+    The LLM occasionally emits the same ## heading twice in a row (once with
+    no body, once with content). This pass keeps only the last occurrence of
+    each run of identical headings, preserving the one that has content after it.
+    """
+    lines = md.split("\n")
+    result: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("## ") and not line.startswith("### "):
+            # Collect consecutive identical headings with only blank lines between
+            j = i + 1
+            while j < len(lines) and (lines[j].strip() == "" or lines[j] == line):
+                if lines[j] == line:
+                    i = j  # advance to the last duplicate
+                j += 1
+        result.append(lines[i])
+        i += 1
+    return "\n".join(result)
+
+
 def _render_note_html(note_md: str) -> str:
     """Convert note markdown to scoped HTML for consistent rendering."""
-    clean_md = _downshift_headings(_normalize_note_markdown(note_md))
+    clean_md = _downshift_headings(_normalize_note_markdown(_deduplicate_headings(note_md)))
     # nl2br intentionally excluded: it injects <br> inside <pre><code> blocks which
     # causes Streamlit's react-markdown code renderer to receive an array of nodes
     # instead of a plain string, producing [object Object] for each line.
@@ -931,6 +955,10 @@ def _render_note_with_figures(raw_md: str, fig_blocks: list) -> None:
         section_figs[idx].append(b)
 
     for i, (heading, body) in enumerate(sections):
+        # Skip heading-only sections with no body and no figures — these are
+        # LLM duplicates where the same ## heading was emitted twice in a row.
+        if heading and not body and not section_figs.get(i):
+            continue
         section_md = f"{heading}\n\n{body}".strip() if heading else body
         if section_md:
             st.markdown(_render_note_section_html(section_md), unsafe_allow_html=True)
@@ -943,7 +971,7 @@ def _render_note_with_figures(raw_md: str, fig_blocks: list) -> None:
 
 def _render_note_section_html(note_md: str) -> str:
     """Render a single section without card border (used in edit mode)."""
-    clean_md = _downshift_headings(_normalize_note_markdown(note_md))
+    clean_md = _downshift_headings(_normalize_note_markdown(_deduplicate_headings(note_md)))
     html_body = md_lib.markdown(clean_md, extensions=["fenced_code", "tables"])
     return f'<div class="note-section"><div class="note-content">\n{html_body}\n</div></div>'
 
