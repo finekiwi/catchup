@@ -529,9 +529,16 @@ def _assemble_sections(
         PROMPT_VERSION as SECTION_PROMPT_VERSION,
     )
 
+    def _strip_leading_heading(md: str) -> str:
+        """Remove a leading markdown heading line the LLM may have added despite instructions."""
+        lines = md.lstrip("\n").splitlines()
+        if lines and lines[0].lstrip().startswith("#"):
+            md = "\n".join(lines[1:]).lstrip("\n")
+        return md
+
     parts: list[str] = []
     for section, md in zip(sections, section_markdowns):
-        parts.append(f"## {section.heading}\n\n{md}")
+        parts.append(f"## {section.heading}\n\n{_strip_leading_heading(md)}")
     note_markdown = "\n\n".join(parts)
 
     doc_title = doc.metadata.title or doc.source
