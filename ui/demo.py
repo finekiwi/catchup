@@ -966,7 +966,9 @@ def _render_note_with_figures(raw_md: str, fig_blocks: list) -> None:
             img_path = b.image_path
             if img_path and Path(img_path).exists():
                 caption = b.metadata.caption or ""
-                st.image(img_path, caption=caption, width=400)
+                _, _col_img, _ = st.columns([1, 4, 1])
+                with _col_img:
+                    st.image(img_path, caption=caption, width="stretch")
 
 
 def _render_note_section_html(note_md: str) -> str:

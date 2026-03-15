@@ -90,7 +90,9 @@ def parse_pdf(file_path: str) -> Document:
             return document
 
         pipeline_options = PdfPipelineOptions()
+        pipeline_options.generate_page_images = True
         pipeline_options.generate_picture_images = True
+        pipeline_options.images_scale = 2.0
         converter = DocumentConverter(
             format_options={
                 InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
