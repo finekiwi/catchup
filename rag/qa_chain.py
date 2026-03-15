@@ -8,9 +8,8 @@ Workflow:
 from __future__ import annotations
 
 import logging
-import os
 import time
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
@@ -21,6 +20,7 @@ from models.document import Document
 from prompts.rag_qa import PROMPT
 from rag.query_rewriter import rewrite_query as _rewrite_query
 from utils.logging import log_api_call
+from utils.models import MODEL_REGISTRY, call_llm, compute_cost
 
 load_dotenv()
 
@@ -31,41 +31,31 @@ RAG_CHUNKED_COLLECTION_NAME = "catchup_rag_chunked"
 EMBED_MODEL = "text-embedding-3-small"
 _EMBED_COST_PER_1M_USD = 0.02  # USD per 1M tokens for text-embedding-3-small
 
+# Bump this string whenever noise filter logic, chunking strategy, or embedding model changes.
+# index_document() / index_document_chunked() will auto-delete and re-index documents
+# whose stored version does not match.
+INDEXING_VERSION = "v2"
+
 # HybridChunker max_tokens for controlled comparison with baseline
 # cl100k_base: ~4 chars/token → 500 tokens ≈ 2000 chars
 _RECHUNK_MAX_TOKENS = 500
 
-# ---------------------------------------------------------------------------
-# Model registry — mirrors note_generator.py
-# ---------------------------------------------------------------------------
-_MODEL_REGISTRY: dict[str, dict] = {
-    "gpt-4o-mini":                   {"provider": "openai",    "input": 0.15,  "output": 0.60},
-    "gpt-4o":                        {"provider": "openai",    "input": 2.50,  "output": 10.00},
-    "gpt-4.1-mini":                  {"provider": "openai",    "input": 0.40,  "output": 1.60},
-    "gpt-4.1-nano":                  {"provider": "openai",    "input": 0.10,  "output": 0.40},
-    "gpt-5-nano":                    {"provider": "openai",    "input": 0.20,  "output": 0.80},
-    "claude-haiku-4-5-20251001":     {"provider": "anthropic", "input": 0.80,  "output": 4.00},
-    "claude-sonnet-4-6":             {"provider": "anthropic", "input": 3.00,  "output": 15.00},
-    "gemini-3-flash-preview":        {"provider": "google",    "input": 0.10,  "output": 0.40},
-    "gemini-3.1-pro-preview":        {"provider": "google",    "input": 1.25,  "output": 10.00},
-    "gemini-3.1-flash-lite-preview": {"provider": "google",    "input": 0.04,  "output": 0.15},
-}
-
-SUPPORTED_MODELS: list[str] = list(_MODEL_REGISTRY.keys())
+SUPPORTED_MODELS: list[str] = list(MODEL_REGISTRY.keys())
 
 
 # ---------------------------------------------------------------------------
 # Output schemas
 # ---------------------------------------------------------------------------
 
+
 class SourceBlock(BaseModel):
     """A retrieved document block used as evidence for an answer."""
 
     document_id: str
-    source: str            # original filename
+    source: str  # original filename
     block_order: int
     block_type: str
-    content_preview: str   # first 200 chars
+    content_preview: str  # first 200 chars
     page: Optional[int] = None
     cell_index: Optional[int] = None
 
@@ -81,19 +71,6 @@ class QAResult(BaseModel):
     input_tokens: int
     output_tokens: int
     rewritten_query: str | None = None
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-def _compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    """Estimate cost in USD from token counts."""
-    info = _MODEL_REGISTRY.get(model, {})
-    return (
-        input_tokens * info.get("input", 0) / 1_000_000
-        + output_tokens * info.get("output", 0) / 1_000_000
-    )
 
 
 def _get_rag_collection(name: str = RAG_COLLECTION_NAME) -> Optional[Any]:
@@ -176,15 +153,22 @@ def rechunk_blocks(
 
             LOGGER.info(
                 "HybridChunker: %d chunks from %s (max_tokens=%d)",
-                len(chunks), document.source, max_tokens,
+                len(chunks),
+                document.source,
+                max_tokens,
             )
             return chunks
 
         except Exception as exc:
-            LOGGER.warning("HybridChunker failed for %s, falling back: %s", document.source, exc)
+            LOGGER.warning(
+                "HybridChunker failed for %s, falling back: %s", document.source, exc
+            )
 
     # Fallback: flat block iteration with chunk cache for ipynb files
-    LOGGER.warning("rechunk_blocks: DoclingDocument not cached for %s — using flat blocks", document.source)
+    LOGGER.warning(
+        "rechunk_blocks: DoclingDocument not cached for %s — using flat blocks",
+        document.source,
+    )
     from utils.cache import load_cached_chunks, save_cached_chunks
 
     # Try loading previously computed flat chunks to avoid re-iteration on re-runs
@@ -278,10 +262,12 @@ def _expand_with_adjacent_blocks(
     for doc_id, orders in fetch_targets.items():
         try:
             result = collection.get(
-                where={"$and": [
-                    {"document_id": {"$eq": doc_id}},
-                    {"block_order": {"$in": sorted(orders)}},
-                ]},
+                where={
+                    "$and": [
+                        {"document_id": {"$eq": doc_id}},
+                        {"block_order": {"$in": sorted(orders)}},
+                    ]
+                },
                 include=["documents", "metadatas"],
             )
         except Exception:
@@ -297,11 +283,31 @@ def _expand_with_adjacent_blocks(
                 expanded.append((meta, content))
 
     # Sort for coherent context: group by document, ordered within document
-    expanded.sort(key=lambda x: (x[0].get("document_id", ""), int(x[0].get("block_order", 0))))
+    expanded.sort(
+        key=lambda x: (x[0].get("document_id", ""), int(x[0].get("block_order", 0)))
+    )
     return expanded
 
 
-def _is_document_indexed(collection: Any, document_id: str, expected_block_count: int) -> bool:
+def _get_stored_indexing_version(collection: Any, document_id: str) -> str | None:
+    """Return the indexing_version stored for the first chunk of document_id, or None."""
+    try:
+        result = collection.get(
+            where={"document_id": document_id},
+            limit=1,
+            include=["metadatas"],
+        )
+        metas = result.get("metadatas") or []
+        if metas:
+            return metas[0].get("indexing_version")
+    except Exception:
+        pass
+    return None
+
+
+def _is_document_indexed(
+    collection: Any, document_id: str, expected_block_count: int
+) -> bool:
     """Return True only if all expected blocks for this document_id are already stored.
 
     Comparing stored count against expected_block_count prevents partial ingests
@@ -315,66 +321,23 @@ def _is_document_indexed(collection: Any, document_id: str, expected_block_count
         return False
 
 
-# ---------------------------------------------------------------------------
-# Provider-level LLM call functions — mirrors note_generator.py
-# ---------------------------------------------------------------------------
-
 def _call_openai(model: str, system: str, user: str) -> tuple[str, int, int]:
-    """Call OpenAI chat completion API."""
-    import openai  # lazy import
-
-    client = openai.OpenAI()
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[
+    """Compatibility wrapper for modules that still import rag.qa_chain._call_openai."""
+    response = call_llm(
+        model,
+        [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
         max_tokens=2048,
     )
-    raw = resp.choices[0].message.content or ""
-    return raw, resp.usage.prompt_tokens, resp.usage.completion_tokens
-
-
-def _call_anthropic(model: str, system: str, user: str) -> tuple[str, int, int]:
-    """Call Anthropic Claude chat API."""
-    import anthropic  # lazy import
-
-    client = anthropic.Anthropic()
-    resp = client.messages.create(
-        model=model,
-        max_tokens=2048,
-        system=system,
-        messages=[{"role": "user", "content": user}],
-    )
-    raw = resp.content[0].text if resp.content else ""
-    return raw, resp.usage.input_tokens, resp.usage.output_tokens
-
-
-def _call_google(model: str, system: str, user: str) -> tuple[str, int, int]:
-    """Call Google Gemini chat API."""
-    import google.generativeai as genai  # lazy import
-
-    genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
-    gemini = genai.GenerativeModel(model, system_instruction=system)
-    resp = gemini.generate_content(user)
-    raw = resp.text or ""
-    meta = getattr(resp, "usage_metadata", None)
-    input_tokens = getattr(meta, "prompt_token_count", 0) or 0
-    output_tokens = getattr(meta, "candidates_token_count", 0) or 0
-    return raw, input_tokens, output_tokens
-
-
-_PROVIDER_DISPATCH: dict[str, Callable[..., tuple[str, int, int]]] = {
-    "openai":    _call_openai,
-    "anthropic": _call_anthropic,
-    "google":    _call_google,
-}
+    return response.content, response.input_tokens, response.output_tokens
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def index_document(document: Document) -> None:
     """Embed and store all blocks of a Document in ChromaDB.
@@ -390,19 +353,43 @@ def index_document(document: Document) -> None:
     """
     collection = _get_rag_collection()
     if collection is None:
-        LOGGER.error("RAG collection unavailable — skipping index for document id=%s", document.id)
+        LOGGER.error(
+            "RAG collection unavailable — skipping index for document id=%s",
+            document.id,
+        )
         return
 
-    indexable_blocks = [b for b in document.blocks if b.content.strip() and not _is_noise_block(b)]
+    indexable_blocks = [
+        b for b in document.blocks if b.content.strip() and not _is_noise_block(b)
+    ]
 
     # Guard: if noise filtering removed every block there is nothing to embed.
     # Treat this as a no-op rather than letting expected_block_count==0 cause
     # _is_document_indexed to always return True and silently suppress future attempts.
     if not indexable_blocks:
         LOGGER.warning(
-            "index_document skipped for document id=%s: all blocks filtered as noise", document.id
+            "index_document skipped for document id=%s: all blocks filtered as noise",
+            document.id,
         )
         return
+
+    # Auto-reindex if the stored indexing version differs from the current one.
+    # stored_version is None when the document was indexed before versioning was introduced
+    # (no indexing_version field in metadata) — treat as stale and re-index.
+    stored_version = _get_stored_indexing_version(collection, document.id)
+    if stored_version != INDEXING_VERSION:
+        try:
+            existing_ids = collection.get(where={"document_id": document.id}).get("ids", [])
+            if existing_ids:
+                LOGGER.info(
+                    "Indexing version mismatch for document id=%s (stored=%r, current=%r) — re-indexing",
+                    document.id,
+                    stored_version,
+                    INDEXING_VERSION,
+                )
+                collection.delete(ids=existing_ids)
+        except Exception:
+            LOGGER.warning("Failed to delete stale vectors for document id=%s", document.id)
 
     if _is_document_indexed(collection, document.id, len(indexable_blocks)):
         LOGGER.info("Document id=%s already indexed, skipping", document.id)
@@ -427,7 +414,9 @@ def index_document(document: Document) -> None:
         except Exception as exc:
             LOGGER.warning(
                 "Embedding failed for block order=%d, document id=%s: %s",
-                block.order, document.id, exc,
+                block.order,
+                document.id,
+                exc,
             )
             log_api_call(
                 model=EMBED_MODEL,
@@ -446,6 +435,7 @@ def index_document(document: Document) -> None:
             "source": document.source,
             "block_order": block.order,
             "block_type": block.type.value,
+            "indexing_version": INDEXING_VERSION,
         }
         if block.metadata.page is not None:
             metadata["page"] = block.metadata.page
@@ -462,7 +452,8 @@ def index_document(document: Document) -> None:
         except Exception:
             LOGGER.exception(
                 "Failed to upsert block order=%d into ChromaDB, document id=%s",
-                block.order, document.id,
+                block.order,
+                document.id,
             )
 
 
@@ -477,7 +468,9 @@ def index_document_chunked(document: Document) -> None:
     """
     collection = _get_rag_collection(RAG_CHUNKED_COLLECTION_NAME)
     if collection is None:
-        LOGGER.error("Chunked RAG collection unavailable — skipping document id=%s", document.id)
+        LOGGER.error(
+            "Chunked RAG collection unavailable — skipping document id=%s", document.id
+        )
         return
 
     chunks = rechunk_blocks(document)
@@ -485,10 +478,23 @@ def index_document_chunked(document: Document) -> None:
         LOGGER.warning("No chunks produced for document id=%s", document.id)
         return
 
-    # Skip if already fully indexed
+    # Auto-reindex if stored indexing version differs (including None = pre-versioning), then
+    # skip if already up-to-date.
     try:
-        existing = collection.get(where={"document_id": document.id})
-        if len(existing.get("ids", [])) >= len(chunks):
+        existing = collection.get(where={"document_id": document.id}, include=["metadatas"])
+        existing_ids = existing.get("ids", [])
+        stored_version = (existing.get("metadatas") or [{}])[0].get("indexing_version") if existing_ids else None
+        if stored_version != INDEXING_VERSION:
+            if existing_ids:
+                LOGGER.info(
+                    "Chunked indexing version mismatch for document id=%s (stored=%r, current=%r) — re-indexing",
+                    document.id,
+                    stored_version,
+                    INDEXING_VERSION,
+                )
+                collection.delete(ids=existing_ids)
+            existing_ids = []
+        if len(existing_ids) >= len(chunks):
             LOGGER.info("Chunked document id=%s already indexed, skipping", document.id)
             return
     except Exception:
@@ -509,7 +515,12 @@ def index_document_chunked(document: Document) -> None:
                 success=True,
             )
         except Exception as exc:
-            LOGGER.warning("Embedding failed for chunk %d, document id=%s: %s", idx, document.id, exc)
+            LOGGER.warning(
+                "Embedding failed for chunk %d, document id=%s: %s",
+                idx,
+                document.id,
+                exc,
+            )
             log_api_call(
                 model=EMBED_MODEL,
                 stage="rag_embed_chunked",
@@ -526,14 +537,18 @@ def index_document_chunked(document: Document) -> None:
             collection.upsert(
                 ids=[f"{document.id}:chunk:{idx}"],
                 documents=[content],
-                metadatas=[metadata],
+                metadatas=[{**metadata, "indexing_version": INDEXING_VERSION}],
                 embeddings=[vector],
             )
         except Exception:
-            LOGGER.exception("Failed to upsert chunk %d, document id=%s", idx, document.id)
+            LOGGER.exception(
+                "Failed to upsert chunk %d, document id=%s", idx, document.id
+            )
 
 
-def query_chunked(question: str, top_k: int = 5, model: str = "gpt-4o-mini", rewrite: bool = False) -> QAResult:
+def query_chunked(
+    question: str, top_k: int = 5, model: str = "gpt-4o-mini", rewrite: bool = False
+) -> QAResult:
     """Answer a question using rechunked CatchUp RAG (1000-char chunks, no adjacent expansion).
 
     Identical control conditions to baseline: same chunk size, same top_k, same LLM.
@@ -549,8 +564,10 @@ def query_chunked(question: str, top_k: int = 5, model: str = "gpt-4o-mini", rew
     Returns:
         QAResult with answer, source_blocks, model name, latency, and token usage.
     """
-    if model not in _MODEL_REGISTRY:
-        raise ValueError(f"Unsupported model: {model!r}. Choose from: {SUPPORTED_MODELS}")
+    if model not in MODEL_REGISTRY:
+        raise ValueError(
+            f"Unsupported model: {model!r}. Choose from: {SUPPORTED_MODELS}"
+        )
 
     t_total = time.perf_counter()
 
@@ -632,15 +649,17 @@ def query_chunked(question: str, top_k: int = 5, model: str = "gpt-4o-mini", rew
         meta = metadatas[i] if i < len(metadatas) else {}
         page = meta.get("page")
         cell_index = meta.get("cell_index")
-        source_blocks.append(SourceBlock(
-            document_id=meta.get("document_id", ""),
-            source=meta.get("source", ""),
-            block_order=meta.get("block_order", 0),
-            block_type=meta.get("block_type", ""),
-            content_preview=content[:200],
-            page=page,
-            cell_index=cell_index,
-        ))
+        source_blocks.append(
+            SourceBlock(
+                document_id=meta.get("document_id", ""),
+                source=meta.get("source", ""),
+                block_order=meta.get("block_order", 0),
+                block_type=meta.get("block_type", ""),
+                content_preview=content[:200],
+                page=page,
+                cell_index=cell_index,
+            )
+        )
         ref = f"[{meta.get('source', 'unknown')}]"
         if page is not None:
             ref += f" page {page}"
@@ -651,29 +670,37 @@ def query_chunked(question: str, top_k: int = 5, model: str = "gpt-4o-mini", rew
     context = "\n\n---\n\n".join(context_parts)
     user_content = f"Context:\n{context}\n\nQuestion: {question}"
 
-    provider = _MODEL_REGISTRY.get(model, {}).get("provider", "openai")
-    call_fn = _PROVIDER_DISPATCH.get(provider)
-
     try:
         t_llm = time.perf_counter()
-        raw_answer, input_tokens, output_tokens = call_fn(model, PROMPT, user_content)
+        response = call_llm(
+            model,
+            [
+                {"role": "system", "content": PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            max_tokens=2048,
+        )
         log_api_call(
             model=model,
             stage="rag_generate_chunked",
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
             latency_ms=(time.perf_counter() - t_llm) * 1000,
-            cost_usd=_compute_cost(model, input_tokens, output_tokens),
+            cost_usd=compute_cost(
+                model,
+                response.input_tokens,
+                response.output_tokens,
+            ),
             success=True,
         )
         return QAResult(
             question=question,
-            answer=raw_answer.strip(),
+            answer=response.content.strip(),
             source_blocks=source_blocks,
             model=model,
             latency_ms=(time.perf_counter() - t_total) * 1000,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
             rewritten_query=rw_query,
         )
     except Exception as exc:
@@ -712,8 +739,10 @@ def query(
     Raises:
         ValueError: If model is not in SUPPORTED_MODELS.
     """
-    if model not in _MODEL_REGISTRY:
-        raise ValueError(f"Unsupported model: {model!r}. Choose from: {SUPPORTED_MODELS}")
+    if model not in MODEL_REGISTRY:
+        raise ValueError(
+            f"Unsupported model: {model!r}. Choose from: {SUPPORTED_MODELS}"
+        )
 
     t_total = time.perf_counter()
 
@@ -776,7 +805,9 @@ def query(
     # Search ChromaDB
     try:
         if document_id is not None:
-            filtered_count = len(collection.get(where={"document_id": {"$eq": document_id}})["ids"])
+            filtered_count = len(
+                collection.get(where={"document_id": {"$eq": document_id}})["ids"]
+            )
             n_results = min(top_k, filtered_count)
         else:
             n_results = min(top_k, collection.count())
@@ -827,15 +858,17 @@ def query(
 
         # source_blocks tracks original retrieved hits only
         if key in hit_keys:
-            source_blocks.append(SourceBlock(
-                document_id=meta.get("document_id", ""),
-                source=meta.get("source", ""),
-                block_order=meta.get("block_order", 0),
-                block_type=meta.get("block_type", ""),
-                content_preview=content[:200],
-                page=page,
-                cell_index=cell_index,
-            ))
+            source_blocks.append(
+                SourceBlock(
+                    document_id=meta.get("document_id", ""),
+                    source=meta.get("source", ""),
+                    block_order=meta.get("block_order", 0),
+                    block_type=meta.get("block_type", ""),
+                    content_preview=content[:200],
+                    page=page,
+                    cell_index=cell_index,
+                )
+            )
 
         ref = f"[{meta.get('source', 'unknown')}]"
         if page is not None:
@@ -848,44 +881,40 @@ def query(
     user_content = f"Context:\n{context}\n\nQuestion: {question}"
 
     # LLM answer generation
-    provider = _MODEL_REGISTRY.get(model, {}).get("provider", "openai")
-    call_fn = _PROVIDER_DISPATCH.get(provider)
-
-    if call_fn is None:
-        LOGGER.error("No provider dispatch found for model=%s", model)
-        return QAResult(
-            question=question,
-            answer="지원하지 않는 모델입니다.",
-            source_blocks=source_blocks,
-            model=model,
-            latency_ms=(time.perf_counter() - t_total) * 1000,
-            input_tokens=0,
-            output_tokens=0,
-        )
-
     try:
         t_llm = time.perf_counter()
-        raw_answer, input_tokens, output_tokens = call_fn(model, PROMPT, user_content)
+        response = call_llm(
+            model,
+            [
+                {"role": "system", "content": PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            max_tokens=2048,
+        )
         llm_latency_ms = (time.perf_counter() - t_llm) * 1000
-        cost_usd = _compute_cost(model, input_tokens, output_tokens)
+        cost_usd = compute_cost(
+            model,
+            response.input_tokens,
+            response.output_tokens,
+        )
 
         log_api_call(
             model=model,
             stage="rag_generate",
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
             latency_ms=llm_latency_ms,
             cost_usd=cost_usd,
             success=True,
         )
         return QAResult(
             question=question,
-            answer=raw_answer.strip(),
+            answer=response.content.strip(),
             source_blocks=source_blocks,
             model=model,
             latency_ms=(time.perf_counter() - t_total) * 1000,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
             rewritten_query=rw_query,
         )
 
@@ -965,7 +994,9 @@ def retrieve_context(
         )
         return (raw.get("documents") or [[]])[0]
     except Exception:
-        LOGGER.exception("ChromaDB context retrieval failed for document_id=%s", document_id)
+        LOGGER.exception(
+            "ChromaDB context retrieval failed for document_id=%s", document_id
+        )
         return []
 
 
@@ -1007,18 +1038,34 @@ def delete_document_index(document_id: str) -> None:
             ids = result.get("ids", [])
             if ids:
                 collection.delete(ids=ids)
-                LOGGER.info("Deleted %d vectors for document id=%s from %s", len(ids), document_id, name)
+                LOGGER.info(
+                    "Deleted %d vectors for document id=%s from %s",
+                    len(ids),
+                    document_id,
+                    name,
+                )
         except Exception as exc:
-            LOGGER.warning("Failed to delete vectors for document id=%s from %s: %s", document_id, name, exc)
+            LOGGER.warning(
+                "Failed to delete vectors for document id=%s from %s: %s",
+                document_id,
+                name,
+                exc,
+            )
 
 
 __all__ = [
-    "index_document", "index_document_chunked",
+    "index_document",
+    "index_document_chunked",
     "delete_document_index",
     "has_document_vectors",
-    "query", "query_chunked",
+    "query",
+    "query_chunked",
     "retrieve_context",
     "rechunk_blocks",
-    "QAResult", "SourceBlock", "SUPPORTED_MODELS",
-    "RAG_COLLECTION_NAME", "RAG_CHUNKED_COLLECTION_NAME",
+    "QAResult",
+    "SourceBlock",
+    "SUPPORTED_MODELS",
+    "RAG_COLLECTION_NAME",
+    "RAG_CHUNKED_COLLECTION_NAME",
+    "INDEXING_VERSION",
 ]

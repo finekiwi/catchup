@@ -18,7 +18,14 @@ import streamlit as st
 import streamlit.testing.v1.local_script_runner as local_script_runner
 from llm.note_editor import NoteEditResult
 from llm.note_generator import SUPPORTED_LLM_MODELS
-from models.document import Block, BlockMetadata, BlockType, Document, DocumentFormat, DocumentMetadata
+from models.document import (
+    Block,
+    BlockMetadata,
+    BlockType,
+    Document,
+    DocumentFormat,
+    DocumentMetadata,
+)
 from streamlit.runtime.uploaded_file_manager import UploadedFileRec
 from streamlit.testing.v1 import AppTest
 from vlm.client import SUPPORTED_MODELS
@@ -95,7 +102,11 @@ class DemoAppHarness:
         widget_states = self.app._tree.get_widget_states()
         uploader = self.app.get("file_uploader")[0]
         target_state = next(
-            (widget for widget in widget_states.widgets if widget.id == uploader.proto.id),
+            (
+                widget
+                for widget in widget_states.widgets
+                if widget.id == uploader.proto.id
+            ),
             None,
         )
         if target_state is None:
@@ -295,7 +306,9 @@ def _pdf_upload(
     file_id: str = "upload-pdf",
 ) -> UploadFixture:
     """Return a deterministic PDF upload fixture."""
-    return UploadFixture(file_id=file_id, name=name, mime_type="application/pdf", data=data)
+    return UploadFixture(
+        file_id=file_id, name=name, mime_type="application/pdf", data=data
+    )
 
 
 def _image_upload(
@@ -418,7 +431,9 @@ def _sample_edit_result(
     )
 
 
-def _qa_result(answer: str, source_blocks: list[dict[str, Any]] | None = None) -> SimpleNamespace:
+def _qa_result(
+    answer: str, source_blocks: list[dict[str, Any]] | None = None
+) -> SimpleNamespace:
     """Build a lightweight rag.query() response object."""
     return SimpleNamespace(answer=answer, source_blocks=source_blocks or [])
 
@@ -501,7 +516,9 @@ def make_app() -> Iterator[Any]:
         def _get_document(document_id: str) -> Document | None:
             return copy.deepcopy(documents_db.get(document_id))
 
-        def _get_note(document_id: str, vlm_model: str, llm_model: str) -> dict[str, Any] | None:
+        def _get_note(
+            document_id: str, vlm_model: str, llm_model: str
+        ) -> dict[str, Any] | None:
             row = notes_db.get((document_id, vlm_model, llm_model))
             return copy.deepcopy(row) if row is not None else None
 
@@ -548,7 +565,9 @@ def make_app() -> Iterator[Any]:
 
         with ExitStack() as stack:
             stack.enter_context(
-                patch.object(local_script_runner.LocalScriptRunner, "__init__", _patched_init)
+                patch.object(
+                    local_script_runner.LocalScriptRunner, "__init__", _patched_init
+                )
             )
             parse_pdf = stack.enter_context(
                 patch(
@@ -572,26 +591,32 @@ def make_app() -> Iterator[Any]:
                 patch(
                     "parsers.image_parser.parse_image",
                     new=MagicMock(
-                        side_effect=lambda _path, model=DEFAULT_VLM_MODEL: _sample_document(
-                            doc_id="doc-image",
-                            source="sample.png",
-                            fmt=DocumentFormat.IMAGE,
-                            blocks=[
-                                Block(
-                                    type=BlockType.FIGURE,
-                                    content="슬라이드 이미지 설명",
-                                    order=0,
-                                    metadata=BlockMetadata(confidence=0.95),
-                                )
-                            ],
+                        side_effect=lambda _path, model=DEFAULT_VLM_MODEL: (
+                            _sample_document(
+                                doc_id="doc-image",
+                                source="sample.png",
+                                fmt=DocumentFormat.IMAGE,
+                                blocks=[
+                                    Block(
+                                        type=BlockType.FIGURE,
+                                        content="슬라이드 이미지 설명",
+                                        order=0,
+                                        metadata=BlockMetadata(confidence=0.95),
+                                    )
+                                ],
+                            )
                         )
                     ),
                 )
             )
             generate_note = stack.enter_context(
                 patch(
-                    "llm.note_generator.generate_note",
-                    new=MagicMock(side_effect=lambda doc, model=DEFAULT_LLM_MODEL: _sample_note_result()),
+                    "llm.note_generator.generate_note_sectioned",
+                    new=MagicMock(
+                        side_effect=lambda doc, model=DEFAULT_LLM_MODEL: (
+                            _sample_note_result()
+                        )
+                    ),
                 )
             )
             edit_section = stack.enter_context(
@@ -601,19 +626,26 @@ def make_app() -> Iterator[Any]:
                 )
             )
             save_document = stack.enter_context(
-                patch("db.sqlite.save_document", new=MagicMock(side_effect=_save_document))
+                patch(
+                    "db.sqlite.save_document", new=MagicMock(side_effect=_save_document)
+                )
             )
             save_note = stack.enter_context(
                 patch("db.sqlite.save_note", new=MagicMock(side_effect=_save_note))
             )
             get_document = stack.enter_context(
-                patch("db.sqlite.get_document", new=MagicMock(side_effect=_get_document))
+                patch(
+                    "db.sqlite.get_document", new=MagicMock(side_effect=_get_document)
+                )
             )
             get_note = stack.enter_context(
                 patch("db.sqlite.get_note", new=MagicMock(side_effect=_get_note))
             )
             list_documents = stack.enter_context(
-                patch("db.sqlite.list_documents", new=MagicMock(side_effect=_list_documents))
+                patch(
+                    "db.sqlite.list_documents",
+                    new=MagicMock(side_effect=_list_documents),
+                )
             )
             list_notes_for_document = stack.enter_context(
                 patch(
@@ -622,7 +654,10 @@ def make_app() -> Iterator[Any]:
                 )
             )
             delete_document = stack.enter_context(
-                patch("db.sqlite.delete_document", new=MagicMock(side_effect=_delete_document))
+                patch(
+                    "db.sqlite.delete_document",
+                    new=MagicMock(side_effect=_delete_document),
+                )
             )
             delete_document_index = stack.enter_context(
                 patch(
@@ -645,7 +680,9 @@ def make_app() -> Iterator[Any]:
                     new=MagicMock(side_effect=_rag_query),
                 )
             )
-            pyperclip_copy = stack.enter_context(patch("pyperclip.copy", new=MagicMock()))
+            pyperclip_copy = stack.enter_context(
+                patch("pyperclip.copy", new=MagicMock())
+            )
 
             harness = DemoAppHarness(
                 app=AppTest.from_file("ui/demo.py"),
@@ -681,7 +718,9 @@ def test_render_source_block_expanders_deduplicates_by_source_and_location() -> 
     """Duplicate source/page pairs should render only one expander."""
     recorder = _StreamlitRecorder(captions=[], expanders=[], current_stack=[])
     spec = importlib.util.spec_from_file_location("ui_demo_unit_test", DEMO_APP_PATH)
-    assert spec is not None and spec.loader is not None, "ui/demo.py should be importable for testing"
+    assert spec is not None and spec.loader is not None, (
+        "ui/demo.py should be importable for testing"
+    )
     module = importlib.util.module_from_spec(spec)
 
     with (
@@ -721,10 +760,18 @@ def test_render_source_block_expanders_deduplicates_by_source_and_location() -> 
             ]
         )
 
-    assert recorder.captions == ["참조 블록"], "Source block caption should render exactly once"
-    assert len(recorder.expanders) == 2, "Duplicate source/page pairs should collapse into one expander"
-    assert recorder.expanders[0]["captions"] == ["block_order: 0"], "First unique block should keep its metadata"
-    assert recorder.expanders[1]["texts"] == ["다른 위치 미리보기"], "Second unique source should still render its preview"
+    assert recorder.captions == ["참조 블록"], (
+        "Source block caption should render exactly once"
+    )
+    assert len(recorder.expanders) == 2, (
+        "Duplicate source/page pairs should collapse into one expander"
+    )
+    assert recorder.expanders[0]["captions"] == ["block_order: 0"], (
+        "First unique block should keep its metadata"
+    )
+    assert recorder.expanders[1]["texts"] == ["다른 위치 미리보기"], (
+        "Second unique source should still render its preview"
+    )
 
 
 class TestUploadFlow:
@@ -751,9 +798,15 @@ class TestUploadFlow:
             app = harness.click_button(label="분석 시작")
 
             _assert_no_exception(app)
-            assert harness.generate_note.call_count == 0, "generate_note should not run when parsing fails"
-            assert harness.save_document.call_count == 0, "save_document should not run for parse-failed documents"
-            assert harness.save_note.call_count == 0, "save_note should not run for parse-failed documents"
+            assert harness.generate_note.call_count == 0, (
+                "generate_note should not run when parsing fails"
+            )
+            assert harness.save_document.call_count == 0, (
+                "save_document should not run for parse-failed documents"
+            )
+            assert harness.save_note.call_count == 0, (
+                "save_note should not run for parse-failed documents"
+            )
 
     def test_successful_pdf_upload_flow_has_no_exceptions(self, make_app: Any) -> None:
         """PDF upload -> parse -> note generation should finish without runtime errors."""
@@ -764,12 +817,24 @@ class TestUploadFlow:
             cache_key = harness.cache_key(pdf_upload)
 
             _assert_no_exception(app)
-            assert harness.parse_pdf.call_count == 1, "PDF parsing should run exactly once for the first analysis"
-            assert harness.generate_note.call_count == 1, "Note generation should run for non-image uploads"
-            assert harness.save_document.call_count == 1, "Analyzed documents should be persisted"
-            assert harness.save_note.call_count == 1, "Generated notes should be persisted"
-            assert harness.has_session_key(cache_key), "Successful analysis should populate the session cache"
-            assert len(app.chat_input) == 1, "A successful PDF analysis should expose the Q&A chat input"
+            assert harness.parse_pdf.call_count == 1, (
+                "PDF parsing should run exactly once for the first analysis"
+            )
+            assert harness.generate_note.call_count == 1, (
+                "Note generation should run for non-image uploads"
+            )
+            assert harness.save_document.call_count == 1, (
+                "Analyzed documents should be persisted"
+            )
+            assert harness.save_note.call_count == 1, (
+                "Generated notes should be persisted"
+            )
+            assert harness.has_session_key(cache_key), (
+                "Successful analysis should populate the session cache"
+            )
+            assert len(app.chat_input) == 1, (
+                "A successful PDF analysis should expose the Q&A chat input"
+            )
 
     def test_same_file_upload_uses_session_cache(self, make_app: Any) -> None:
         """Re-uploading the same file in one session should not call the APIs again."""
@@ -780,8 +845,88 @@ class TestUploadFlow:
             harness.run(upload=pdf_upload)
 
             _assert_no_exception(harness.app)
-            assert harness.parse_pdf.call_count == 1, "Cached uploads should skip parse_pdf on rerun"
-            assert harness.generate_note.call_count == 1, "Cached uploads should skip generate_note on rerun"
+            assert harness.parse_pdf.call_count == 1, (
+                "Cached uploads should skip parse_pdf on rerun"
+            )
+            assert harness.generate_note.call_count == 1, (
+                "Cached uploads should skip generate_note on rerun"
+            )
+
+    def test_sectioned_note_renders_all_sections(self, make_app: Any) -> None:
+        """Multi-section note_markdown from generate_note_sectioned should render all sections in the UI."""
+        pdf_upload = _pdf_upload()
+        sectioned_result = _sample_note_result(
+            note_markdown=(
+                "## 1. 소개\n\n소개 내용입니다.\n\n"
+                "## 2. 본론\n\n본론 내용입니다.\n\n"
+                "## 3. 결론\n\n결론 내용입니다."
+            ),
+        )
+
+        with make_app() as harness:
+            harness.generate_note.side_effect = (
+                lambda doc, model=DEFAULT_LLM_MODEL: sectioned_result
+            )
+            app = _analyze_upload(harness, pdf_upload)
+
+            _assert_no_exception(app)
+            assert _contains_markdown(app, "소개 내용"), (
+                "Section 1 content should be rendered"
+            )
+            assert _contains_markdown(app, "본론 내용"), (
+                "Section 2 content should be rendered"
+            )
+            assert _contains_markdown(app, "결론 내용"), (
+                "Section 3 content should be rendered"
+            )
+
+    def test_generate_note_sectioned_called_once_on_pdf_upload(
+        self, make_app: Any
+    ) -> None:
+        """generate_note_sectioned must be called exactly once when a PDF is analysed."""
+        pdf_upload = _pdf_upload()
+
+        with make_app() as harness:
+            _analyze_upload(harness, pdf_upload)
+
+            assert harness.generate_note.call_count == 1, (
+                "generate_note_sectioned should be called exactly once per analysis"
+            )
+            _, kwargs = harness.generate_note.call_args
+            assert "model" in kwargs or harness.generate_note.call_args.args, (
+                "generate_note_sectioned should receive a model argument"
+            )
+
+    def test_llm_model_hint_caption_shown_for_known_model(
+        self, make_app: Any
+    ) -> None:
+        """A hint caption should appear below the LLM model selector for known models."""
+        with make_app() as harness:
+            app = harness.run()
+            _assert_no_exception(app)
+            # The default model (index 0, gpt-4o-mini) has a known hint
+            caption_values = [c.value for c in app.caption]
+            assert any("균형" in v or "권장" in v or "저렴" in v for v in caption_values), (
+                "A model hint caption should be visible for the selected LLM model"
+            )
+
+    def test_note_generation_failure_shows_error(self, make_app: Any) -> None:
+        """generate_note_sectioned exceptions should surface an error in the UI."""
+        pdf_upload = _pdf_upload()
+
+        with make_app() as harness:
+            harness.generate_note.side_effect = RuntimeError("LLM API quota exceeded")
+            harness.run()
+            harness.run(upload=pdf_upload)
+            app = harness.click_button(label="분석 시작")
+
+            _assert_no_exception(app)
+            assert any("노트 생성 실패" in err.value for err in app.error), (
+                "Note generation failures should show a user-facing error message"
+            )
+            assert harness.save_document.call_count == 0, (
+                "Failed note generation should not persist documents"
+            )
 
 
 class TestTabState:
@@ -798,17 +943,23 @@ class TestTabState:
             _analyze_upload(harness, pdf_upload)
             harness.set_chat_input("Q&A 메시지", upload=pdf_upload)
             harness.set_radio("active_right_panel", "✏️ 노트 수정", upload=pdf_upload)
-            harness.set_selectbox("editor_doc-pdf_edit_section_selectbox", 1, upload=pdf_upload)
+            harness.set_selectbox(
+                "editor_doc-pdf_edit_section_selectbox", 1, upload=pdf_upload
+            )
             harness.set_radio("active_right_panel", "💬 Q&A", upload=pdf_upload)
 
             _assert_no_exception(harness.app)
-            assert len(_session_messages(harness, "doc-pdf")) == 2, "Q&A history should survive a round-trip to the note editor"
+            assert len(_session_messages(harness, "doc-pdf")) == 2, (
+                "Q&A history should survive a round-trip to the note editor"
+            )
 
             harness.set_radio("active_right_panel", "✏️ 노트 수정", upload=pdf_upload)
             harness.set_toggle("note_edit_toggle", True, upload=pdf_upload)
 
             _assert_no_exception(harness.app)
-            assert harness.session_value("active_right_panel") == "✏️ 노트 수정", "Toggling left-panel edit mode should not reset the active right panel"
+            assert harness.session_value("active_right_panel") == "✏️ 노트 수정", (
+                "Toggling left-panel edit mode should not reset the active right panel"
+            )
 
     def test_qna_and_note_editor_models_are_independent(self, make_app: Any) -> None:
         """The Q&A model selectbox and note-editor model selectbox should not overwrite each other."""
@@ -828,9 +979,16 @@ class TestTabState:
             harness.set_radio("active_right_panel", "💬 Q&A", upload=pdf_upload)
 
             _assert_no_exception(harness.app)
-            assert harness.app.selectbox(key="qa_model_select").value == qa_model, "Q&A model selection should persist after visiting the note editor"
+            assert harness.app.selectbox(key="qa_model_select").value == qa_model, (
+                "Q&A model selection should persist after visiting the note editor"
+            )
             harness.set_radio("active_right_panel", "✏️ 노트 수정", upload=pdf_upload)
-            assert harness.app.selectbox(key="editor_doc-pdf_note_editor_model_select").value == editor_model, "Note editor model selection should stay independent from the Q&A model"
+            assert (
+                harness.app.selectbox(
+                    key="editor_doc-pdf_note_editor_model_select"
+                ).value
+                == editor_model
+            ), "Note editor model selection should stay independent from the Q&A model"
 
 
 class TestRagChat:
@@ -856,8 +1014,12 @@ class TestRagChat:
 
             _assert_no_exception(harness.app)
             messages = _session_messages(harness, "doc-pdf")
-            assert messages[-1]["content"], "Emotional queries should still produce a non-empty assistant message"
-            assert "같이 정리" in messages[-1]["content"], "The assistant should return the empathetic fallback response"
+            assert messages[-1]["content"], (
+                "Emotional queries should still produce a non-empty assistant message"
+            )
+            assert "같이 정리" in messages[-1]["content"], (
+                "The assistant should return the empathetic fallback response"
+            )
 
     def test_followup_pill_renders_and_query_receives_document_filter(
         self,
@@ -875,7 +1037,9 @@ class TestRagChat:
                 "content_preview": "참조 블록 미리보기",
             }
         ]
-        answer = "답변 본문\n---SUGGESTIONS---\n1. 후속 질문 A\n2. 후속 질문 B\n---END---"
+        answer = (
+            "답변 본문\n---SUGGESTIONS---\n1. 후속 질문 A\n2. 후속 질문 B\n---END---"
+        )
 
         with make_app() as harness:
             harness.rag_query.side_effect = lambda question, **kwargs: _qa_result(
@@ -886,8 +1050,12 @@ class TestRagChat:
             harness.set_chat_input("첫 질문", upload=pdf_upload)
 
             _assert_no_exception(harness.app)
-            assert harness.rag_query.call_args.kwargs["document_id"] == "doc-pdf", "rag.query should always be filtered to the active document"
-            assert any(button.label == "후속 질문 A" for button in harness.app.button), "The first follow-up suggestion pill should render after a RAG answer"
+            assert harness.rag_query.call_args.kwargs["document_id"] == "doc-pdf", (
+                "rag.query should always be filtered to the active document"
+            )
+            assert any(
+                button.label == "후속 질문 A" for button in harness.app.button
+            ), "The first follow-up suggestion pill should render after a RAG answer"
 
 
 class TestQueryRewriting:
@@ -905,7 +1073,9 @@ class TestQueryRewriting:
 
             _assert_no_exception(harness.app)
             checkbox = harness.app.checkbox(key="qa_use_rewrite")
-            assert checkbox.label == "Query Rewriting", "The Q&A panel should expose the Query Rewriting checkbox"
+            assert checkbox.label == "Query Rewriting", (
+                "The Q&A panel should expose the Query Rewriting checkbox"
+            )
             assert checkbox.value is False, "Query Rewriting should default to OFF"
 
     def test_rewrite_is_not_called_when_checkbox_is_off(self, make_app: Any) -> None:
@@ -917,8 +1087,12 @@ class TestQueryRewriting:
             harness.set_chat_input("오프 상태 질문", upload=pdf_upload)
 
             _assert_no_exception(harness.app)
-            assert harness.rewrite_query.call_count == 0, "rewrite_query should not run while Query Rewriting is OFF"
-            assert harness.rag_query.call_args.kwargs["rewrite"] is False, "rag.query should receive rewrite=False when the toggle is OFF"
+            assert harness.rewrite_query.call_count == 0, (
+                "rewrite_query should not run while Query Rewriting is OFF"
+            )
+            assert harness.rag_query.call_args.kwargs["rewrite"] is False, (
+                "rag.query should receive rewrite=False when the toggle is OFF"
+            )
 
     def test_rewrite_is_called_once_when_checkbox_is_on(self, make_app: Any) -> None:
         """Enabling the checkbox should route the next question through rewrite_query exactly once."""
@@ -930,8 +1104,12 @@ class TestQueryRewriting:
             harness.set_chat_input("온 상태 질문", upload=pdf_upload)
 
             _assert_no_exception(harness.app)
-            assert harness.rewrite_query.call_count == 1, "rewrite_query should run exactly once for a rewritten question"
-            assert harness.rag_query.call_args.kwargs["rewrite"] is True, "rag.query should receive rewrite=True when the toggle is ON"
+            assert harness.rewrite_query.call_count == 1, (
+                "rewrite_query should run exactly once for a rewritten question"
+            )
+            assert harness.rag_query.call_args.kwargs["rewrite"] is True, (
+                "rag.query should receive rewrite=True when the toggle is ON"
+            )
 
     def test_toggling_query_rewriting_on_then_off_stays_stable(
         self,
@@ -948,8 +1126,12 @@ class TestQueryRewriting:
             harness.set_chat_input("두 번째 질문", upload=pdf_upload)
 
             _assert_no_exception(harness.app)
-            assert harness.rewrite_query.call_count == 1, "rewrite_query should stop being called after the toggle is turned back OFF"
-            assert harness.rag_query.call_args.kwargs["rewrite"] is False, "The second question should pass rewrite=False after toggling OFF"
+            assert harness.rewrite_query.call_count == 1, (
+                "rewrite_query should stop being called after the toggle is turned back OFF"
+            )
+            assert harness.rag_query.call_args.kwargs["rewrite"] is False, (
+                "The second question should pass rewrite=False after toggling OFF"
+            )
 
     def test_rewrite_failure_falls_back_to_original_query(self, make_app: Any) -> None:
         """Rewrite failures should not crash Q&A and should answer from the original query text."""
@@ -962,9 +1144,17 @@ class TestQueryRewriting:
             harness.set_chat_input("원본 쿼리", upload=pdf_upload)
 
             _assert_no_exception(harness.app)
-            assert harness.rewrite_query.call_count == 1, "rewrite_query should still be attempted once when rewriting is enabled"
-            assert harness.rag_query.call_args.kwargs["rewrite"] is True, "rag.query should still be called with rewrite=True when rewrite fails"
-            assert "원본 쿼리" in _session_messages(harness, "doc-pdf")[-1]["content"], "Rewrite failures should fall back to the original query instead of crashing"
+            assert harness.rewrite_query.call_count == 1, (
+                "rewrite_query should still be attempted once when rewriting is enabled"
+            )
+            assert harness.rag_query.call_args.kwargs["rewrite"] is True, (
+                "rag.query should still be called with rewrite=True when rewrite fails"
+            )
+            assert (
+                "원본 쿼리" in _session_messages(harness, "doc-pdf")[-1]["content"]
+            ), (
+                "Rewrite failures should fall back to the original query instead of crashing"
+            )
 
 
 class TestImagePipeline:
@@ -982,30 +1172,48 @@ class TestImagePipeline:
             cache_key = harness.cache_key(image_upload)
 
             _assert_no_exception(harness.app)
-            assert harness.parse_image.call_count == 1, "Image uploads should route through parse_image"
-            assert harness.generate_note.call_count == 0, "Image uploads should bypass note generation"
-            assert harness.session_value(f"is_image_{cache_key}") is True, "Image analyses should set the is_image session flag"
-            assert len(harness.app.radio) == 0, "Image mode should not render the PDF-only right-panel radio"
+            assert harness.parse_image.call_count == 1, (
+                "Image uploads should route through parse_image"
+            )
+            assert harness.generate_note.call_count == 0, (
+                "Image uploads should bypass note generation"
+            )
+            assert harness.session_value(f"is_image_{cache_key}") is True, (
+                "Image analyses should set the is_image session flag"
+            )
+            assert len(harness.app.radio) == 0, (
+                "Image mode should not render the PDF-only right-panel radio"
+            )
 
             harness.run(upload=image_upload)
 
             _assert_no_exception(harness.app)
-            assert harness.parse_image.call_count == 1, "Rerunning the same image should reuse the cached analysis"
-            assert harness.session_value(f"is_image_{cache_key}") is True, "The image workspace should survive reruns while cached"
+            assert harness.parse_image.call_count == 1, (
+                "Rerunning the same image should reuse the cached analysis"
+            )
+            assert harness.session_value(f"is_image_{cache_key}") is True, (
+                "The image workspace should survive reruns while cached"
+            )
 
     def test_image_api_key_error_surfaces_message(self, make_app: Any) -> None:
         """Image parser auth failures should show a user-facing API key error."""
         image_upload = _image_upload(name="slide.webp", file_id="upload-webp")
 
         with make_app() as harness:
-            harness.parse_image.side_effect = RuntimeError("API key missing for image parse")
+            harness.parse_image.side_effect = RuntimeError(
+                "API key missing for image parse"
+            )
             harness.run()
             harness.run(upload=image_upload)
             harness.click_button(label="분석 시작")
 
             _assert_no_exception(harness.app)
-            assert any("API 키" in error.value for error in harness.app.error), "API-key failures should surface the dedicated st.error message"
-            assert harness.generate_note.call_count == 0, "generate_note should never run when image parsing fails"
+            assert any("API 키" in error.value for error in harness.app.error), (
+                "API-key failures should surface the dedicated st.error message"
+            )
+            assert harness.generate_note.call_count == 0, (
+                "generate_note should never run when image parsing fails"
+            )
 
     def test_pdf_upload_still_reaches_qna_after_image_branch_changes(
         self,
@@ -1018,9 +1226,15 @@ class TestImagePipeline:
             _analyze_upload(harness, pdf_upload)
 
             _assert_no_exception(harness.app)
-            assert harness.generate_note.call_count == 1, "PDF uploads should still generate a note after the image branch changes"
-            assert harness.app.radio(key="active_right_panel").value == "💬 Q&A", "Successful PDF analysis should still land on the Q&A panel"
-            assert len(harness.app.chat_input) == 1, "PDF analyses should still expose the Q&A chat input"
+            assert harness.generate_note.call_count == 1, (
+                "PDF uploads should still generate a note after the image branch changes"
+            )
+            assert harness.app.radio(key="active_right_panel").value == "💬 Q&A", (
+                "Successful PDF analysis should still land on the Q&A panel"
+            )
+            assert len(harness.app.chat_input) == 1, (
+                "PDF analyses should still expose the Q&A chat input"
+            )
 
 
 class TestNoteEditor:
@@ -1041,18 +1255,30 @@ class TestNoteEditor:
             harness.set_chat_input("개요 섹션을 수정해줘", upload=pdf_upload)
 
             _assert_no_exception(harness.app)
-            assert harness.edit_section.call_count == 1, "Submitting an edit prompt should call edit_section"
-            assert harness.edit_section.call_args.kwargs["document_id"] == "doc-pdf", "Section-edit RAG grounding should be scoped to the current document"
+            assert harness.edit_section.call_count == 1, (
+                "Submitting an edit prompt should call edit_section"
+            )
+            assert harness.edit_section.call_args.kwargs["document_id"] == "doc-pdf", (
+                "Section-edit RAG grounding should be scoped to the current document"
+            )
 
             harness.click_button(label="✅ 적용", upload=pdf_upload)
             cache_key = harness.cache_key(pdf_upload)
             updated_result = harness.session_value(cache_key)
 
             _assert_no_exception(harness.app)
-            assert updated_result["note_markdown"] == edited_markdown, "Apply should replace the pending note markdown"
-            assert "핵심 내용" in updated_result["note_markdown"], "Applying one section edit must preserve other sections"
-            assert not harness.has_session_key("editor_doc-pdf_edit_pending_markdown"), "Pending preview markdown should be cleared after Apply"
-            assert harness.save_note.call_count >= 2, "Applying a note edit should persist the dirty note back to SQLite"
+            assert updated_result["note_markdown"] == edited_markdown, (
+                "Apply should replace the pending note markdown"
+            )
+            assert "핵심 내용" in updated_result["note_markdown"], (
+                "Applying one section edit must preserve other sections"
+            )
+            assert not harness.has_session_key(
+                "editor_doc-pdf_edit_pending_markdown"
+            ), "Pending preview markdown should be cleared after Apply"
+            assert harness.save_note.call_count >= 2, (
+                "Applying a note edit should persist the dirty note back to SQLite"
+            )
 
     def test_cancel_clears_pending_preview(self, make_app: Any) -> None:
         """Cancel should drop the preview state without mutating the saved markdown."""
@@ -1067,8 +1293,13 @@ class TestNoteEditor:
             harness.click_button(label="❌ 취소", upload=pdf_upload)
 
             _assert_no_exception(harness.app)
-            assert not harness.has_session_key("editor_doc-pdf_edit_pending_markdown"), "Cancel should clear edit_pending_markdown"
-            assert harness.session_value(harness.cache_key(pdf_upload))["note_markdown"] == original_markdown, "Cancel must leave the saved note markdown untouched"
+            assert not harness.has_session_key(
+                "editor_doc-pdf_edit_pending_markdown"
+            ), "Cancel should clear edit_pending_markdown"
+            assert (
+                harness.session_value(harness.cache_key(pdf_upload))["note_markdown"]
+                == original_markdown
+            ), "Cancel must leave the saved note markdown untouched"
 
     def test_empty_edit_input_is_safe(self, make_app: Any) -> None:
         """An empty note-editor chat input should be ignored without crashing."""
@@ -1081,7 +1312,9 @@ class TestNoteEditor:
             harness.run(upload=pdf_upload)
 
             _assert_no_exception(harness.app)
-            assert harness.edit_section.call_count == 0, "Empty edit prompts should not call edit_section"
+            assert harness.edit_section.call_count == 0, (
+                "Empty edit prompts should not call edit_section"
+            )
 
     def test_undo_restores_previous_markdown(self, make_app: Any) -> None:
         """Undo should restore the last applied section body."""
@@ -1097,9 +1330,15 @@ class TestNoteEditor:
             harness.click_button(key="undo_sec_0", upload=pdf_upload)
 
             _assert_no_exception(harness.app)
-            restored_markdown = harness.session_value(harness.cache_key(pdf_upload))["note_markdown"]
-            assert "개요 내용" in restored_markdown, "Undo should restore the previous section body"
-            assert "개요 수정" not in restored_markdown, "Undo should remove the applied edited body"
+            restored_markdown = harness.session_value(harness.cache_key(pdf_upload))[
+                "note_markdown"
+            ]
+            assert "개요 내용" in restored_markdown, (
+                "Undo should restore the previous section body"
+            )
+            assert "개요 수정" not in restored_markdown, (
+                "Undo should remove the applied edited body"
+            )
 
 
 class TestLibraryPersistence:
@@ -1115,9 +1354,15 @@ class TestLibraryPersistence:
             _analyze_upload(harness, pdf_upload)
 
             _assert_no_exception(harness.app)
-            assert harness.save_document.call_count == 1, "Finished analyses should call save_document"
-            assert harness.save_note.call_count == 1, "Finished analyses should call save_note once"
-            assert harness.app.button(key="lib_doc-library").label.startswith("📄"), "Saved documents should render in the sidebar library"
+            assert harness.save_document.call_count == 1, (
+                "Finished analyses should call save_document"
+            )
+            assert harness.save_note.call_count == 1, (
+                "Finished analyses should call save_note once"
+            )
+            assert harness.app.button(key="lib_doc-library").label.startswith("📄"), (
+                "Saved documents should render in the sidebar library"
+            )
 
     def test_library_load_restores_without_reanalysis_and_survives_stale_uploader(
         self,
@@ -1138,16 +1383,28 @@ class TestLibraryPersistence:
             harness.click_button(key="lib_doc-library", upload=None)
 
             _assert_no_exception(harness.app)
-            assert harness.parse_pdf.call_count == 0, "Library restores should not rerun parse_pdf"
-            assert harness.generate_note.call_count == 0, "Library restores should not rerun generate_note"
-            assert harness.session_value("_library_mode") is True, "Loading from the library should enable library mode"
-            assert harness.session_value("_library_doc_id") == document.id, "The active library document ID should be tracked in session state"
+            assert harness.parse_pdf.call_count == 0, (
+                "Library restores should not rerun parse_pdf"
+            )
+            assert harness.generate_note.call_count == 0, (
+                "Library restores should not rerun generate_note"
+            )
+            assert harness.session_value("_library_mode") is True, (
+                "Loading from the library should enable library mode"
+            )
+            assert harness.session_value("_library_doc_id") == document.id, (
+                "The active library document ID should be tracked in session state"
+            )
 
             harness.run(upload=upload)
 
             _assert_no_exception(harness.app)
-            assert harness.session_value("_library_mode") is True, "A stale uploader value for the same file must not cancel library mode"
-            assert harness.parse_pdf.call_count == 0, "A stale uploader value should not restart the pipeline"
+            assert harness.session_value("_library_mode") is True, (
+                "A stale uploader value for the same file must not cancel library mode"
+            )
+            assert harness.parse_pdf.call_count == 0, (
+                "A stale uploader value should not restart the pipeline"
+            )
 
     def test_delete_evicts_cache_then_reupload_reprocesses(self, make_app: Any) -> None:
         """Deleting a library document should clear caches and force re-analysis on re-upload."""
@@ -1178,21 +1435,35 @@ class TestLibraryPersistence:
             harness.click_button(key="lib_del_doc-delete", upload=None)
 
             _assert_no_exception(harness.app)
-            assert deletion_order == ["delete_document_index", "delete_document"], "Sidebar deletion should remove vector index before deleting SQLite rows"
-            assert not harness.has_session_key(cache_key), "Deleting a document should evict its cached note result from session_state"
+            assert deletion_order == ["delete_document_index", "delete_document"], (
+                "Sidebar deletion should remove vector index before deleting SQLite rows"
+            )
+            assert not harness.has_session_key(cache_key), (
+                "Deleting a document should evict its cached note result from session_state"
+            )
 
             harness.run(upload=upload)
             harness.click_button(label="분석 시작", upload=upload)
 
             _assert_no_exception(harness.app)
-            assert harness.parse_pdf.call_count == 2, "Re-uploading a deleted document should rerun parse_pdf instead of hitting the old cache"
+            assert harness.parse_pdf.call_count == 2, (
+                "Re-uploading a deleted document should rerun parse_pdf instead of hitting the old cache"
+            )
 
     def test_library_chats_are_isolated_between_documents(self, make_app: Any) -> None:
         """Loading document B after chatting on document A should start with an empty Q&A history."""
         doc_a = _sample_document_row(doc_id="doc-a", source="alpha.pdf")
         doc_b = _sample_document_row(doc_id="doc-b", source="beta.pdf")
-        note_a = _sample_note_row(document_id=doc_a.id, file_hash="hash-a", result=_sample_note_result(title="알파 노트"))
-        note_b = _sample_note_row(document_id=doc_b.id, file_hash="hash-b", result=_sample_note_result(title="베타 노트"))
+        note_a = _sample_note_row(
+            document_id=doc_a.id,
+            file_hash="hash-a",
+            result=_sample_note_result(title="알파 노트"),
+        )
+        note_b = _sample_note_row(
+            document_id=doc_b.id,
+            file_hash="hash-b",
+            result=_sample_note_result(title="베타 노트"),
+        )
 
         with make_app() as harness:
             harness.seed_library(doc_a, note_a, has_vectors=True)
@@ -1202,18 +1473,26 @@ class TestLibraryPersistence:
             harness.set_chat_input("문서 A 질문", upload=None)
 
             _assert_no_exception(harness.app)
-            assert len(_session_messages(harness, "doc-a")) == 2, "Document A should record its Q&A chat history"
+            assert len(_session_messages(harness, "doc-a")) == 2, (
+                "Document A should record its Q&A chat history"
+            )
 
             harness.click_button(key="lib_doc-b", upload=None)
 
             _assert_no_exception(harness.app)
-            assert _session_messages(harness, "doc-b") == [], "Document B should start with an empty chat history"
-            assert len(_session_messages(harness, "doc-a")) == 2, "Document A chat history should remain isolated under its own session_state key"
+            assert _session_messages(harness, "doc-b") == [], (
+                "Document B should start with an empty chat history"
+            )
+            assert len(_session_messages(harness, "doc-a")) == 2, (
+                "Document A chat history should remain isolated under its own session_state key"
+            )
 
     def test_qna_is_disabled_when_vectors_are_missing(self, make_app: Any) -> None:
         """Library documents without vectors should not render an active Q&A chat input."""
         document = _sample_document_row(doc_id="doc-no-vectors", source="novectors.pdf")
-        note_row = _sample_note_row(document_id=document.id, file_hash="hash-no-vectors")
+        note_row = _sample_note_row(
+            document_id=document.id, file_hash="hash-no-vectors"
+        )
 
         with make_app() as harness:
             harness.seed_library(document, note_row, has_vectors=False)
@@ -1221,12 +1500,18 @@ class TestLibraryPersistence:
             harness.click_button(key="lib_doc-no-vectors", upload=None)
 
             _assert_no_exception(harness.app)
-            assert len(harness.app.chat_input) == 0, "Q&A should be disabled when no document vectors are available"
-            assert any("벡터" in info.value for info in harness.app.info), "The UI should explain why Q&A is unavailable without vectors"
+            assert len(harness.app.chat_input) == 0, (
+                "Q&A should be disabled when no document vectors are available"
+            )
+            assert any("벡터" in info.value for info in harness.app.info), (
+                "The UI should explain why Q&A is unavailable without vectors"
+            )
 
     def test_library_note_edit_persists_dirty_note(self, make_app: Any) -> None:
         """Editing a library-loaded note should save with the restored file hash and models."""
-        document = _sample_document_row(doc_id="doc-library-edit", source="editable.pdf")
+        document = _sample_document_row(
+            doc_id="doc-library-edit", source="editable.pdf"
+        )
         note_row = _sample_note_row(
             document_id=document.id,
             file_hash="editable-hash",
@@ -1249,12 +1534,27 @@ class TestLibraryPersistence:
                 updated_markdown,
                 upload=None,
             )
-            harness.click_button(key="editor_doc-library-edit_direct_edit_save", upload=None)
+            harness.click_button(
+                key="editor_doc-library-edit_direct_edit_save", upload=None
+            )
 
             _assert_no_exception(harness.app)
             last_args = harness.save_note.call_args_list[-1].args
-            assert last_args[0] == document.id, "Dirty library edits should save back to the loaded document"
-            assert last_args[1] == note_row["file_hash"], "Dirty library edits should preserve the restored file_hash"
-            assert last_args[3] == note_row["vlm_model"], "Dirty library edits should preserve the restored VLM model"
-            assert last_args[4] == note_row["llm_model"], "Dirty library edits should preserve the restored LLM model"
-            assert harness.notes_db[(document.id, note_row["vlm_model"], note_row["llm_model"])]["result"]["note_markdown"] == updated_markdown, "Dirty library edits should update the persisted note body"
+            assert last_args[0] == document.id, (
+                "Dirty library edits should save back to the loaded document"
+            )
+            assert last_args[1] == note_row["file_hash"], (
+                "Dirty library edits should preserve the restored file_hash"
+            )
+            assert last_args[3] == note_row["vlm_model"], (
+                "Dirty library edits should preserve the restored VLM model"
+            )
+            assert last_args[4] == note_row["llm_model"], (
+                "Dirty library edits should preserve the restored LLM model"
+            )
+            assert (
+                harness.notes_db[
+                    (document.id, note_row["vlm_model"], note_row["llm_model"])
+                ]["result"]["note_markdown"]
+                == updated_markdown
+            ), "Dirty library edits should update the persisted note body"

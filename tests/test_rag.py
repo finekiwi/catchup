@@ -12,6 +12,7 @@ import chromadb
 import rag.qa_chain as qa_module
 from models.document import Block, BlockMetadata, BlockType, Document, DocumentFormat
 from rag.qa_chain import QAResult, SourceBlock, index_document, query
+from utils.models import LLMResponse
 
 # ---------------------------------------------------------------------------
 # Constants / helpers
@@ -63,11 +64,15 @@ def _patch_embedding(monkeypatch, vector=None, tokens=50):
 
 
 def _patch_llm(monkeypatch, answer="Test answer.", input_tokens=100, output_tokens=50):
-    """Patch the openai dispatch entry to return a canned LLM answer."""
-    monkeypatch.setitem(
-        qa_module._PROVIDER_DISPATCH,
-        "openai",
-        lambda model, system, user: (answer, input_tokens, output_tokens),
+    """Patch the shared LLM dispatcher to return a canned answer."""
+    monkeypatch.setattr(
+        qa_module,
+        "call_llm",
+        lambda model, messages, max_tokens=2048: LLMResponse(
+            content=answer,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        ),
     )
 
 
@@ -80,12 +85,16 @@ def _patch_log(monkeypatch):
 # Tests
 # ---------------------------------------------------------------------------
 
+
 def test_index_and_query_returns_source_blocks(monkeypatch):
     """Normal case: index a document then query returns answer with populated source_blocks."""
     collection = _make_ephemeral_collection()
     monkeypatch.setattr(qa_module, "_get_rag_collection", lambda: collection)
     _patch_embedding(monkeypatch)
-    _patch_llm(monkeypatch, answer="Gradient descent optimizes the loss [intro_ml.pdf, page 1].")
+    _patch_llm(
+        monkeypatch,
+        answer="Gradient descent optimizes the loss [intro_ml.pdf, page 1].",
+    )
     _patch_log(monkeypatch)
 
     doc = _sample_document()
@@ -172,7 +181,11 @@ def test_llm_api_failure_returns_fallback_answer(monkeypatch):
     def _raise(model, system, user):
         raise RuntimeError("API timeout")
 
-    monkeypatch.setitem(qa_module._PROVIDER_DISPATCH, "openai", _raise)
+    monkeypatch.setattr(
+        qa_module,
+        "call_llm",
+        lambda model, messages, max_tokens=2048: _raise(model, "", ""),
+    )
 
     result = query("What is gradient descent?")
 
@@ -235,6 +248,79 @@ def test_query_unsupported_model_raises_value_error():
         query("any question", model="gpt-99-nonexistent")
 
 
+def test_index_document_reindexes_on_version_mismatch(monkeypatch):
+    """Stale chunks (old indexing_version) must be deleted and re-indexed."""
+    collection = _make_ephemeral_collection()
+    monkeypatch.setattr(qa_module, "_get_rag_collection", lambda: collection)
+    _patch_embedding(monkeypatch)
+    _patch_log(monkeypatch)
+
+    doc = _sample_document()
+
+    # Pre-populate with old-version metadata
+    old_meta = {"document_id": doc.id, "block_order": 0, "indexing_version": "v_old"}
+    collection.upsert(
+        ids=["stale-id"],
+        documents=["stale content"],
+        metadatas=[old_meta],
+        embeddings=[FAKE_VECTOR],
+    )
+    assert collection.count() == 1
+
+    # index_document should detect version mismatch, delete stale chunk, then re-index
+    index_document(doc)
+
+    stored = collection.get(where={"document_id": doc.id}, include=["metadatas"])
+    stored_versions = {m.get("indexing_version") for m in stored["metadatas"]}
+    assert "stale-id" not in stored["ids"]
+    assert stored_versions == {qa_module.INDEXING_VERSION}
+    assert len(stored["ids"]) == len(doc.blocks)
+
+
+def test_index_document_reindexes_when_version_missing(monkeypatch):
+    """Chunks indexed before versioning (no indexing_version field) must be re-indexed."""
+    collection = _make_ephemeral_collection()
+    monkeypatch.setattr(qa_module, "_get_rag_collection", lambda: collection)
+    _patch_embedding(monkeypatch)
+    _patch_log(monkeypatch)
+
+    doc = _sample_document()
+
+    # Pre-populate without any indexing_version field (pre-versioning data)
+    old_meta = {"document_id": doc.id, "block_order": 0}
+    collection.upsert(
+        ids=["legacy-id"],
+        documents=["legacy content"],
+        metadatas=[old_meta],
+        embeddings=[FAKE_VECTOR],
+    )
+    assert collection.count() == 1
+
+    # index_document should detect missing version, delete legacy chunk, then re-index
+    index_document(doc)
+
+    stored = collection.get(where={"document_id": doc.id}, include=["metadatas"])
+    assert "legacy-id" not in stored["ids"], "Legacy chunk must be replaced"
+    stored_versions = {m.get("indexing_version") for m in stored["metadatas"]}
+    assert stored_versions == {qa_module.INDEXING_VERSION}
+
+
+def test_index_document_skips_when_version_matches(monkeypatch):
+    """Document already indexed at the current version must not be re-indexed."""
+    collection = _make_ephemeral_collection()
+    monkeypatch.setattr(qa_module, "_get_rag_collection", lambda: collection)
+    _patch_embedding(monkeypatch)
+    _patch_log(monkeypatch)
+
+    doc = _sample_document()
+    index_document(doc)
+    count_after_first = collection.count()
+
+    # Second call with same INDEXING_VERSION must be a no-op
+    index_document(doc)
+    assert collection.count() == count_after_first
+
+
 def test_query_filters_to_current_document(monkeypatch):
     """When document_id is provided, retrieval must be restricted to that document."""
     meta = {
@@ -247,7 +333,9 @@ def test_query_filters_to_current_document(monkeypatch):
     content = "Prompt injection is a representative jailbreak risk."
     mock_collection = MagicMock()
     mock_collection.count.return_value = 5
-    mock_collection.get.return_value = {"ids": ["doc-current:0", "doc-current:1", "doc-current:2"]}
+    mock_collection.get.return_value = {
+        "ids": ["doc-current:0", "doc-current:1", "doc-current:2"]
+    }
     mock_collection.query.return_value = {
         "ids": [["doc-current:0"]],
         "documents": [[content]],
@@ -255,12 +343,20 @@ def test_query_filters_to_current_document(monkeypatch):
         "distances": [[0.01]],
     }
     monkeypatch.setattr(qa_module, "_get_rag_collection", lambda: mock_collection)
-    monkeypatch.setattr(qa_module, "_expand_with_adjacent_blocks", lambda *args, **kwargs: [(meta, content)])
+    monkeypatch.setattr(
+        qa_module,
+        "_expand_with_adjacent_blocks",
+        lambda *args, **kwargs: [(meta, content)],
+    )
     _patch_embedding(monkeypatch)
-    _patch_llm(monkeypatch, answer="Prompt injection is covered [guardrails.pdf, page 3].")
+    _patch_llm(
+        monkeypatch, answer="Prompt injection is covered [guardrails.pdf, page 3]."
+    )
     _patch_log(monkeypatch)
 
     result = query("prompt injection이 뭐야?", document_id="doc-current")
 
     assert result.source_blocks[0].document_id == "doc-current"
-    assert mock_collection.query.call_args.kwargs["where"] == {"document_id": {"$eq": "doc-current"}}
+    assert mock_collection.query.call_args.kwargs["where"] == {
+        "document_id": {"$eq": "doc-current"}
+    }
