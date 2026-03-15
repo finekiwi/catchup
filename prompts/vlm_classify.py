@@ -1,7 +1,7 @@
 """VLM prompt for image type classification."""
 
 PROMPT_NAME = "vlm_classify"
-PROMPT_VERSION = "v1.1.0"
+PROMPT_VERSION = "v1.2.0"
 
 PROMPT = """Classify the educational content type of this image.
 
@@ -10,10 +10,18 @@ OUTPUT FORMAT (JSON only, no markdown fences):
 
 DEFINITIONS — assign to the FIRST matching type:
 - "code_screenshot": source code, terminal/shell output, IDE screenshot, config file snippet
-- "diagram": technical diagram directly explaining a concept — flowchart, architecture diagram, neural network structure, data pipeline, sequence diagram, ER diagram, graph/chart with axes, system topology
-- "text_capture": educational text content — lecture slide, handwritten notes, textbook page section with instructional content, whiteboard explanation
+- "diagram": technical diagram explaining a concept — flowchart, architecture diagram, neural network structure, data pipeline, sequence diagram, ER diagram, graph/chart with labeled axes, system topology
+- "text_capture": educational text WITH instructional content — lecture slide explaining a topic, handwritten notes, textbook page section, whiteboard explanation. The text must teach something technical, not just display a title.
 - "equation": standalone mathematical formulas, LaTeX expressions, derivations
-- "other": NOT educational content — book/report cover, title page, publisher logo, author photo, decorative illustration, animal/nature photo, marketing image, blank/watermark page, table of contents page
+- "other": anything that does NOT convey educational/instructional content:
+    - publisher/company logos (e.g. O'Reilly, Hanbit, Packt)
+    - book title images (large title text, author name, series name — even if it says a technical term like "Deep Learning")
+    - book/report covers or back covers
+    - chapter divider pages with only a chapter number and title
+    - copyright pages, dedication pages, table of contents
+    - author portraits or photos
+    - decorative illustrations, animals, nature photos
+    - blank or near-blank pages
 
-CRITICAL: If the image is a book cover, front matter, publisher branding, or any decorative/non-instructional image, output "other" even if it contains text.
-- Output ONLY valid JSON"""
+ASK YOURSELF: "Would a student learn something technical from this image alone?" If NO → "other".
+Output ONLY valid JSON."""
