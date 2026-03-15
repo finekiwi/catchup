@@ -2,17 +2,28 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from models.document import Block, BlockType, Document
 from parsers.image_parser import (
+    ImageType,
     _PROMPT_BY_IMAGE_TYPE,
     classify_image,
     map_vlm_output_to_block,
     parse_vlm_output,
 )
+
+# Image types worth including in the study note.
+# OTHER = logos, cover art, decorative illustrations → skip.
+_USEFUL_IMAGE_TYPES = {
+    ImageType.CODE_SCREENSHOT,
+    ImageType.DIAGRAM,
+    ImageType.TEXT_CAPTURE,
+    ImageType.EQUATION,
+}
 from utils.cache import load_docling_doc, save_docling_doc
 from vlm.client import call_vlm
 
@@ -101,10 +112,11 @@ def enrich_pdf_figures(
     # Detect Streamlit runtime to avoid ThreadPoolExecutor deadlock
     use_sequential = _is_streamlit_runtime()
 
+    seen_hashes: set[str] = set()  # image dedup across all figures in this doc
     if use_sequential:
-        _process_sequential(doc, matched, dl_doc, output_dir, vlm_model)
+        _process_sequential(doc, matched, dl_doc, output_dir, vlm_model, seen_hashes)
     else:
-        _process_parallel(doc, matched, dl_doc, output_dir, vlm_model)
+        _process_parallel(doc, matched, dl_doc, output_dir, vlm_model, seen_hashes)
 
     return doc
 
@@ -115,10 +127,11 @@ def _process_sequential(
     dl_doc: object,
     output_dir: Path,
     vlm_model: str,
+    seen_hashes: set[str],
 ) -> None:
     """Process figures sequentially (used inside Streamlit runtime)."""
     for fb, pi in matched:
-        _enrich_one(doc, fb, pi, dl_doc, output_dir, vlm_model)
+        _enrich_one(doc, fb, pi, dl_doc, output_dir, vlm_model, seen_hashes)
 
 
 def _process_parallel(
@@ -127,12 +140,13 @@ def _process_parallel(
     dl_doc: object,
     output_dir: Path,
     vlm_model: str,
+    seen_hashes: set[str],
 ) -> None:
     """Process figures in parallel using ThreadPoolExecutor."""
     max_workers = min(len(matched), 5)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(_enrich_one, doc, fb, pi, dl_doc, output_dir, vlm_model): fb
+            executor.submit(_enrich_one, doc, fb, pi, dl_doc, output_dir, vlm_model, seen_hashes): fb
             for fb, pi in matched
         }
         for future in as_completed(futures):
@@ -151,6 +165,7 @@ def _enrich_one(
     dl_doc: object,
     output_dir: Path,
     vlm_model: str,
+    seen_hashes: set[str],
 ) -> None:
     """Extract, classify, analyze one figure and replace its block in doc.blocks."""
     # Extract PIL image from DoclingDocument
@@ -177,9 +192,30 @@ def _enrich_one(
 
     image_path_str = str(image_path)
 
+    # Dedup: skip if identical image content already processed (e.g. repeated cover/logo).
+    try:
+        img_hash = hashlib.md5(image_path.read_bytes()).hexdigest()
+        if img_hash in seen_hashes:
+            LOGGER.info("Duplicate figure skipped for block order=%d (hash=%s)", block.order, img_hash)
+            image_path.unlink(missing_ok=True)
+            return
+        seen_hashes.add(img_hash)
+    except Exception:
+        pass  # File not written (e.g. test mock) — skip dedup
+
     # VLM classify + analyze
     try:
         image_type = classify_image(image_path_str, vlm_model)
+
+        # Skip decorative/logo images — only meaningful types go into the note.
+        if image_type not in _USEFUL_IMAGE_TYPES:
+            LOGGER.info(
+                "Figure block order=%d classified as %s — skipping (non-educational content)",
+                block.order,
+                image_type,
+            )
+            image_path.unlink(missing_ok=True)
+            return
         analysis_prompt = _PROMPT_BY_IMAGE_TYPE[image_type]
         vlm_result = call_vlm(vlm_model, image_path_str, analysis_prompt, stage="figure_analysis")
 
