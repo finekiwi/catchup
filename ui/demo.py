@@ -2053,7 +2053,10 @@ if not _lib_mode:
                         from parsers.figure_enricher import enrich_pdf_figures
 
                         doc = enrich_pdf_figures(doc, vlm_model=vlm_model, file_path=tmp_path)
+                        _fig_count = sum(1 for b in doc.blocks if b.image_path)
+                        st.write(f"[DEBUG] enriched blocks with image_path: {_fig_count} / {len(doc.blocks)}")
                     except Exception as _enrich_exc:
+                        st.write(f"[DEBUG] enrich exception: {_enrich_exc}")
                         LOGGER.warning("Figure enrichment skipped: %s", _enrich_exc)
                 elif suffix.lower() == ".ipynb":
                     doc = parse_ipynb(tmp_path)

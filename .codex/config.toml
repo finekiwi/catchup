@@ -1,0 +1,14 @@
+[features]
+multi_agent = true
+
+[agents.pr_reviewer]
+description = "Read-only GitHub PR reviewer for this repository. Use for first-pass reviews that must follow refs/AGENTS.md and produce the formatted English PR review comment."
+model = "gpt-5.4"
+model_reasoning_effort = "high"
+config_file = "agents/pr-reviewer.md"
+
+[agents.re_reviewer]
+description = "Read-only follow-up reviewer for this repository. Use for re-reviews after an author posts 'Review Response — to Codex review'; verify each claimed fix against the diff and write the exact re-review comment format from refs/AGENTS.md."
+model = "gpt-5.4"
+model_reasoning_effort = "high"
+config_file = "agents/re-reviewer.md"

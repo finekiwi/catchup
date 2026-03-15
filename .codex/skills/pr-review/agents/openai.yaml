@@ -1,0 +1,7 @@
+interface:
+  display_name: "PR Review"
+  short_description: "Review a PR with the repo's Codex format"
+  default_prompt: "Use $pr-review to review PR #12 against refs/AGENTS.md and post the formatted PR comment."
+
+policy:
+  allow_implicit_invocation: false
