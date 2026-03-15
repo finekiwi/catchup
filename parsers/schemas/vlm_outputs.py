@@ -94,6 +94,12 @@ class DiagramVLMOutput(VLMOutputBase):
     relationships: list[DiagramRelationship] = Field(default_factory=list)
     flow_summary: str = ""
 
+    @field_validator("description", "flow_summary", mode="before")
+    @classmethod
+    def _coerce_str(cls, v: object) -> str:
+        """Coerce None/non-string values to empty string."""
+        return str(v) if v is not None else ""
+
 
 TextType = Literal[
     "lecture_slide",

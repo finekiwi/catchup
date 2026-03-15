@@ -38,7 +38,7 @@ def enrich_pdf_figures(
     file_path: str,
     *,
     figures_dir: Path | None = None,
-    max_figures: int = 15,
+    max_figures: int = 30,
 ) -> Document:
     """Enrich FIGURE blocks with VLM analysis. Mutates doc in-place and returns it.
 

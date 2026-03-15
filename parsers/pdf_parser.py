@@ -141,7 +141,7 @@ def _to_blocks(doc: object) -> list[Block]:
 
         if isinstance(item, TableItem):
             content = (
-                item.export_to_markdown()
+                item.export_to_markdown(doc)
                 if hasattr(item, "export_to_markdown")
                 else "[table]"
             )
