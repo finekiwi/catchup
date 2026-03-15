@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import time
 from typing import Any
 
@@ -428,15 +429,21 @@ def _serialize_section_blocks(
         indices = {int(i * step) for i in range(max_blocks)}
         sampled = [blocks[i] for i in sorted(indices)]
 
+    def _sanitize(text: str) -> str:
+        """Strip characters that break JSON serialization (null bytes, surrogates, non-printable)."""
+        # Keep printable chars + newline + tab; drop null bytes, surrogates, other control chars
+        return "".join(c for c in text if c.isprintable() or c in "\n\t")
+
     lines = []
     for block in sampled:
         if block.type == BlockType.CODE:
-            content = _truncate_code(block.content)[:_SECTION_CODE_LIMIT]
+            content = _sanitize(_truncate_code(block.content))[:_SECTION_CODE_LIMIT]
             lines.append(f"[code] {content}")
         elif block.type == BlockType.TEXT:
-            lines.append(f"[text] {block.content[:_SECTION_TEXT_LIMIT]}")
+            lines.append(f"[text] {_sanitize(block.content)[:_SECTION_TEXT_LIMIT]}")
         else:
-            lines.append(f"[{block.type.value}] {block.content}")
+            # TABLE / FIGURE: also truncate to avoid oversized payloads
+            lines.append(f"[{block.type.value}] {_sanitize(block.content)[:_SECTION_TEXT_LIMIT]}")
     return "\n".join(lines)
 
 
@@ -706,23 +713,48 @@ def generate_note_sectioned(
     _SECTION_TIMEOUT = 120  # seconds per individual future result
     _TOTAL_TIMEOUT = _SECTION_TIMEOUT * 2 + 30  # safety net for as_completed
 
+    # Detect Streamlit context: ThreadPoolExecutor deadlocks when Streamlit's
+    # script runner holds a reentrant lock that worker threads cannot acquire.
+    # Simple check: if streamlit is imported we're in a streamlit process.
+    _in_streamlit = "streamlit" in sys.modules
+
     results: dict[int, str] = {}
-    with ThreadPoolExecutor(max_workers=min(total, 10)) as pool:
-        futures = {pool.submit(_call, (idx, sec)): idx for idx, sec in enumerate(sections, start=1)}
-        try:
-            for fut in as_completed(futures, timeout=_TOTAL_TIMEOUT):
-                try:
-                    idx, md = fut.result(timeout=_SECTION_TIMEOUT)
-                except Exception as exc:
-                    idx = futures[fut]
-                    LOGGER.warning("Section %d/%d failed or timed out: %s", idx, total, exc)
-                    md = f"> ⚠️ 섹션 {idx} 생성 실패: {exc}"
-                results[idx] = md
-                LOGGER.info("Section %d/%d done", idx, total)
-        except TimeoutError:
-            LOGGER.warning("as_completed global timeout — %d/%d sections collected", len(results), total)
-            for idx in range(1, total + 1):
-                results.setdefault(idx, f"> ⚠️ 섹션 {idx} 타임아웃")
+
+    if _in_streamlit:
+        # Sequential fallback to avoid ThreadPoolExecutor deadlock in Streamlit
+        LOGGER.info("generate_note_sectioned: running sequentially (Streamlit context)")
+        for idx, section in enumerate(sections, start=1):
+            try:
+                md = _generate_section_note(
+                    section=section,
+                    doc_title=doc_title,
+                    section_idx=idx,
+                    total_sections=total,
+                    model=section_model,
+                    max_blocks=max_blocks_per_section,
+                )
+            except Exception as exc:
+                LOGGER.warning("Section %d/%d failed: %s", idx, total, exc)
+                md = f"> ⚠️ 섹션 {idx} 생성 실패: {exc}"
+            results[idx] = md
+            LOGGER.info("Section %d/%d done", idx, total)
+    else:
+        with ThreadPoolExecutor(max_workers=min(total, 10)) as pool:
+            futures = {pool.submit(_call, (idx, sec)): idx for idx, sec in enumerate(sections, start=1)}
+            try:
+                for fut in as_completed(futures, timeout=_TOTAL_TIMEOUT):
+                    try:
+                        idx, md = fut.result(timeout=_SECTION_TIMEOUT)
+                    except Exception as exc:
+                        idx = futures[fut]
+                        LOGGER.warning("Section %d/%d failed or timed out: %s", idx, total, exc)
+                        md = f"> ⚠️ 섹션 {idx} 생성 실패: {exc}"
+                    results[idx] = md
+                    LOGGER.info("Section %d/%d done", idx, total)
+            except TimeoutError:
+                LOGGER.warning("as_completed global timeout — %d/%d sections collected", len(results), total)
+                for idx in range(1, total + 1):
+                    results.setdefault(idx, f"> ⚠️ 섹션 {idx} 타임아웃")
 
     section_markdowns: list[str] = [results[i] for i in range(1, total + 1)]
 
