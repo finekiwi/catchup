@@ -190,6 +190,13 @@ def _enrich_one(
             return
 
         parsed = parse_vlm_output(vlm_result.content, image_type)
+        if parsed.errors:
+            LOGGER.warning(
+                "VLM analysis returned errors for block order=%d: %s — skipping image",
+                block.order,
+                parsed.errors,
+            )
+            return
         enriched = map_vlm_output_to_block(
             image_type=image_type,
             payload=parsed,
