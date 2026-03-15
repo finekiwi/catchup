@@ -531,21 +531,36 @@ def _assemble_sections(
     )
 
     def _normalize_heading(s: str) -> str:
-        """Strip markdown markers, colons, and whitespace for fuzzy heading comparison."""
-        return re.sub(r"[#:\s]", "", s).lower()
+        """Strip markdown/punctuation markers and whitespace for fuzzy heading comparison."""
+        return re.sub(r"[#:*_\s]", "", s).lower()
 
     def _strip_leading_heading(md: str, heading: str) -> str:
         """Remove a leading heading line the LLM may have added despite instructions.
 
-        Handles both ``## Heading`` (markdown) and plain-text restatements
-        (e.g. ``CHAPTER 7: foo`` without a ``#`` prefix).
+        Handles:
+        - ``## Heading`` (markdown heading, any level)
+        - Plain-text restatements: normalized first line *starts with* the
+          normalized heading AND the remainder is ≤ 3 chars (punctuation only).
+          This prevents stripping real body sentences that happen to open with
+          a word also present in the heading (e.g. "Section B 내용입니다.").
         """
         lines = md.lstrip("\n").splitlines()
         if not lines:
             return md
         first = lines[0].lstrip()
         is_md_heading = first.startswith("#")
-        is_plain_restatement = _normalize_heading(first) == _normalize_heading(heading)
+        if not is_md_heading:
+            norm_h = _normalize_heading(heading)
+            norm_f = _normalize_heading(first)
+            # Restatement: first line starts with heading AND has ≤ 3 extra chars
+            # (allows trailing period, colon, or minor decoration but not body content)
+            is_plain_restatement = (
+                bool(norm_h)
+                and norm_f.startswith(norm_h)
+                and len(norm_f) - len(norm_h) <= 3
+            )
+        else:
+            is_plain_restatement = False
         if is_md_heading or is_plain_restatement:
             md = "\n".join(lines[1:]).lstrip("\n")
         return md
