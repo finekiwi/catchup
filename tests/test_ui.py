@@ -880,6 +880,36 @@ class TestUploadFlow:
                 "Section 3 content should be rendered"
             )
 
+    def test_generate_note_sectioned_called_once_on_pdf_upload(
+        self, make_app: Any
+    ) -> None:
+        """generate_note_sectioned must be called exactly once when a PDF is analysed."""
+        pdf_upload = _pdf_upload()
+
+        with make_app() as harness:
+            _analyze_upload(harness, pdf_upload)
+
+            assert harness.generate_note.call_count == 1, (
+                "generate_note_sectioned should be called exactly once per analysis"
+            )
+            _, kwargs = harness.generate_note.call_args
+            assert "model" in kwargs or harness.generate_note.call_args.args, (
+                "generate_note_sectioned should receive a model argument"
+            )
+
+    def test_llm_model_hint_caption_shown_for_known_model(
+        self, make_app: Any
+    ) -> None:
+        """A hint caption should appear below the LLM model selector for known models."""
+        with make_app() as harness:
+            app = harness.run()
+            _assert_no_exception(app)
+            # The default model (index 0, gpt-4o-mini) has a known hint
+            caption_values = [c.value for c in app.caption]
+            assert any("균형" in v or "권장" in v or "저렴" in v for v in caption_values), (
+                "A model hint caption should be visible for the selected LLM model"
+            )
+
     def test_note_generation_failure_shows_error(self, make_app: Any) -> None:
         """generate_note_sectioned exceptions should surface an error in the UI."""
         pdf_upload = _pdf_upload()
