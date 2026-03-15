@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field, computed_field
 
 class DocumentFormat(str, Enum):
     """Supported input document formats."""
+
     PDF = "pdf"
     IPYNB = "ipynb"
     IMAGE = "image"
@@ -28,6 +29,7 @@ class DocumentFormat(str, Enum):
 
 class BlockType(str, Enum):
     """Content block types extracted from documents."""
+
     TEXT = "text"
     CODE = "code"
     TABLE = "table"
@@ -37,6 +39,7 @@ class BlockType(str, Enum):
 
 class ImageType(str, Enum):
     """Image subtypes for VLM processing strategy."""
+
     CODE_SCREENSHOT = "code_screenshot"
     DIAGRAM = "diagram"
     TEXT_CAPTURE = "text_capture"
@@ -46,10 +49,11 @@ class ImageType(str, Enum):
 
 class ProcessingStatus(str, Enum):
     """Pipeline processing stage tracking."""
-    PARSED = "parsed"                       # parser completed
-    NOTE_GENERATED = "note_generated"       # note generation completed
+
+    PARSED = "parsed"  # parser completed
+    NOTE_GENERATED = "note_generated"  # note generation completed
     CONCEPTS_EXTRACTED = "concepts_extracted"  # concept extraction completed
-    EMBEDDED = "embedded"                   # stored in ChromaDB
+    EMBEDDED = "embedded"  # stored in ChromaDB
 
 
 class BlockMetadata(BaseModel):

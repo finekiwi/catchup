@@ -25,7 +25,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+)
 LOGGER = logging.getLogger(__name__)
 
 _GOLDEN_PATH = Path("eval/golden_set.json")
@@ -50,7 +52,9 @@ def run_before_after(round_num: int, model: str) -> Path:
     out_path = _OUTPUT_DIR / f"before_after_round{round_num}_{ts}.json"
 
     report_dict = asdict(report)
-    out_path.write_text(json.dumps(report_dict, indent=2, ensure_ascii=False), encoding="utf-8")
+    out_path.write_text(
+        json.dumps(report_dict, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     LOGGER.info("Before/After report saved to %s", out_path)
 
     print(f"\n=== Before/After Round {round_num} ===")
@@ -96,8 +100,7 @@ def _build_eval_cases(query_fn, label: str, model: str) -> list:
             result = query_fn(question, top_k=5, model=model)
             actual_answer = result.answer
             retrieved_contexts = [
-                f"[{sb.source}]\n{sb.content_preview}"
-                for sb in result.source_blocks
+                f"[{sb.source}]\n{sb.content_preview}" for sb in result.source_blocks
             ]
             sources = [sb.source for sb in result.source_blocks]
         except Exception as exc:
@@ -106,15 +109,17 @@ def _build_eval_cases(query_fn, label: str, model: str) -> list:
             retrieved_contexts = []
             sources = []
 
-        cases.append(EvalCase(
-            question=question,
-            expected_answer=expected,
-            actual_answer=actual_answer,
-            retrieved_contexts=retrieved_contexts,
-            sources=sources,
-            case_id=case_id,
-            tier=tier,
-        ))
+        cases.append(
+            EvalCase(
+                question=question,
+                expected_answer=expected,
+                actual_answer=actual_answer,
+                retrieved_contexts=retrieved_contexts,
+                sources=sources,
+                case_id=case_id,
+                tier=tier,
+            )
+        )
 
     return cases
 
@@ -126,7 +131,10 @@ def run_deepeval(round_num: int, model: str) -> dict[str, Path]:
     """
     from eval.evaluator import run_evaluation, EvalReport
     from dataclasses import asdict as dc_asdict
-    from rag.qa_chain import query as query_catchup, query_chunked as query_catchup_chunked
+    from rag.qa_chain import (
+        query as query_catchup,
+        query_chunked as query_catchup_chunked,
+    )
     from eval.baseline import query_baseline
 
     _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -147,7 +155,10 @@ def run_deepeval(round_num: int, model: str) -> dict[str, Path]:
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
         slug = label.lower()
         out_path = _OUTPUT_DIR / f"deepeval_{slug}_round{round_num}_{ts}.json"
-        out_path.write_text(json.dumps(dc_asdict(report), indent=2, ensure_ascii=False), encoding="utf-8")
+        out_path.write_text(
+            json.dumps(dc_asdict(report), indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
         LOGGER.info("DeepEval [%s] report saved to %s", label, out_path)
 
         print(f"\n=== DeepEval {label} Round {round_num} ===")
@@ -172,14 +183,20 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser = argparse.ArgumentParser(
         description="Run full evaluation round: before_after + DeepEval"
     )
-    parser.add_argument("--round", type=int, default=2, help="Round number (default: 2)")
-    parser.add_argument("--model", type=str, default=_DEFAULT_MODEL, help="Answer model")
     parser.add_argument(
-        "--skip-deepeval", action="store_true",
+        "--round", type=int, default=2, help="Round number (default: 2)"
+    )
+    parser.add_argument(
+        "--model", type=str, default=_DEFAULT_MODEL, help="Answer model"
+    )
+    parser.add_argument(
+        "--skip-deepeval",
+        action="store_true",
         help="Run before_after only (skip DeepEval — saves cost)",
     )
     parser.add_argument(
-        "--skip-before-after", action="store_true",
+        "--skip-before-after",
+        action="store_true",
         help="Run DeepEval only (skip before_after comparison)",
     )
     args = parser.parse_args(argv)

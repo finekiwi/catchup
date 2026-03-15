@@ -235,6 +235,7 @@ def list_documents(limit: int = 20) -> list[Document]:
 # Notes CRUD
 # ---------------------------------------------------------------------------
 
+
 def save_note(
     document_id: str,
     file_hash: str,
@@ -261,7 +262,15 @@ def save_note(
                 is_image = excluded.is_image,
                 updated_at = excluded.updated_at
             """,
-            (document_id, file_hash, vlm_model, llm_model, result_json, int(is_image), now),
+            (
+                document_id,
+                file_hash,
+                vlm_model,
+                llm_model,
+                result_json,
+                int(is_image),
+                now,
+            ),
         )
         connection.commit()
     except sqlite3.Error:
@@ -324,16 +333,20 @@ def list_notes_for_document(document_id: str) -> list[dict]:
         results = []
         for row in rows:
             try:
-                results.append({
-                    "result": json.loads(row["result_json"]),
-                    "file_hash": row["file_hash"],
-                    "vlm_model": row["vlm_model"],
-                    "llm_model": row["llm_model"],
-                    "is_image": bool(row["is_image"]),
-                    "updated_at": row["updated_at"],
-                })
+                results.append(
+                    {
+                        "result": json.loads(row["result_json"]),
+                        "file_hash": row["file_hash"],
+                        "vlm_model": row["vlm_model"],
+                        "llm_model": row["llm_model"],
+                        "is_image": bool(row["is_image"]),
+                        "updated_at": row["updated_at"],
+                    }
+                )
             except json.JSONDecodeError:
-                LOGGER.warning("Skipping note with invalid JSON for document_id=%s", document_id)
+                LOGGER.warning(
+                    "Skipping note with invalid JSON for document_id=%s", document_id
+                )
         return results
     except sqlite3.Error:
         LOGGER.exception("Failed to list notes for document_id=%s", document_id)

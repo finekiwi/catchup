@@ -38,13 +38,15 @@ BASELINE_COLLECTION = "catchup_baseline"
 _EMBED_COST_PER_1M_USD = 0.02  # USD per 1M tokens for text-embedding-3-small
 
 # Baseline only supports OpenAI models — non-OpenAI providers use _call_openai internally
-_SUPPORTED_BASELINE_MODELS: frozenset[str] = frozenset({
-    "gpt-4o-mini",
-    "gpt-4o",
-    "gpt-4.1-mini",
-    "gpt-4.1-nano",
-    "gpt-5-nano",
-})
+_SUPPORTED_BASELINE_MODELS: frozenset[str] = frozenset(
+    {
+        "gpt-4o-mini",
+        "gpt-4o",
+        "gpt-4.1-mini",
+        "gpt-4.1-nano",
+        "gpt-5-nano",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -156,12 +158,14 @@ def chunk_text(
         if not segment:
             continue
 
-        chunks.append(BaselineChunk(
-            chunk_id=f"{source}:{chunk_index}",
-            source=source,
-            content=segment,
-            chunk_index=chunk_index,
-        ))
+        chunks.append(
+            BaselineChunk(
+                chunk_id=f"{source}:{chunk_index}",
+                source=source,
+                content=segment,
+                chunk_index=chunk_index,
+            )
+        )
         chunk_index += 1
 
         # Stop if we've consumed the end of the text
@@ -182,7 +186,9 @@ def index_baseline(pdf_path: Path) -> None:
     """
     collection = _get_baseline_collection()
     if collection is None:
-        LOGGER.error("Baseline collection unavailable — skipping index for %s", pdf_path)
+        LOGGER.error(
+            "Baseline collection unavailable — skipping index for %s", pdf_path
+        )
         return
 
     source = pdf_path.name
@@ -191,7 +197,11 @@ def index_baseline(pdf_path: Path) -> None:
     try:
         existing = collection.get(where={"source": source})
         if existing.get("ids"):
-            LOGGER.info("Baseline: %s already indexed (%d chunks), skipping", source, len(existing["ids"]))
+            LOGGER.info(
+                "Baseline: %s already indexed (%d chunks), skipping",
+                source,
+                len(existing["ids"]),
+            )
             return
     except Exception:
         LOGGER.debug("Could not check baseline index for %s — proceeding", source)
@@ -369,15 +379,17 @@ def query_baseline(
         source = meta.get("source", "unknown")
         chunk_index = meta.get("chunk_index", 0)
 
-        source_blocks.append(SourceBlock(
-            document_id="",
-            source=source,
-            block_order=chunk_index,
-            block_type="text",
-            content_preview=content[:200],
-            page=None,
-            cell_index=None,
-        ))
+        source_blocks.append(
+            SourceBlock(
+                document_id="",
+                source=source,
+                block_order=chunk_index,
+                block_type="text",
+                content_preview=content[:200],
+                page=None,
+                cell_index=None,
+            )
+        )
 
         context_parts.append(f"[{source}] chunk {chunk_index}\n{content}")
 
@@ -387,7 +399,9 @@ def query_baseline(
     # LLM answer generation — baseline only supports OpenAI for controlled comparison
     try:
         t_llm = time.perf_counter()
-        raw_answer, input_tokens, output_tokens = _call_openai(model, PROMPT, user_content)
+        raw_answer, input_tokens, output_tokens = _call_openai(
+            model, PROMPT, user_content
+        )
         llm_latency_ms = (time.perf_counter() - t_llm) * 1000
 
         log_api_call(
@@ -462,7 +476,11 @@ def extract_text_ipynb(ipynb_path: Path) -> str:
 
     parts: list[str] = []
     for cell in nb.cells:
-        src = "".join(cell.get("source", []) if isinstance(cell.get("source"), list) else [cell.get("source", "")])
+        src = "".join(
+            cell.get("source", [])
+            if isinstance(cell.get("source"), list)
+            else [cell.get("source", "")]
+        )
         if src.strip():
             parts.append(src)
 
@@ -493,7 +511,9 @@ def index_baseline_ipynb(ipynb_path: Path) -> None:
     """
     collection = _get_baseline_collection()
     if collection is None:
-        LOGGER.error("Baseline collection unavailable — skipping index for %s", ipynb_path)
+        LOGGER.error(
+            "Baseline collection unavailable — skipping index for %s", ipynb_path
+        )
         return
 
     source = ipynb_path.name
@@ -501,7 +521,11 @@ def index_baseline_ipynb(ipynb_path: Path) -> None:
     try:
         existing = collection.get(where={"source": source})
         if existing.get("ids"):
-            LOGGER.info("Baseline: %s already indexed (%d chunks), skipping", source, len(existing["ids"]))
+            LOGGER.info(
+                "Baseline: %s already indexed (%d chunks), skipping",
+                source,
+                len(existing["ids"]),
+            )
             return
     except Exception:
         LOGGER.debug("Could not check baseline index for %s — proceeding", source)

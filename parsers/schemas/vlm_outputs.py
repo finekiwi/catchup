@@ -56,7 +56,16 @@ class DiagramRelationship(BaseModel):
     label: str | None = None
 
 
-DiagramType = Literal["flowchart", "architecture", "sequence", "er", "class", "mindmap", "network", "other"]
+DiagramType = Literal[
+    "flowchart",
+    "architecture",
+    "sequence",
+    "er",
+    "class",
+    "mindmap",
+    "network",
+    "other",
+]
 
 
 class DiagramVLMOutput(VLMOutputBase):
@@ -70,7 +79,14 @@ class DiagramVLMOutput(VLMOutputBase):
     flow_summary: str = ""
 
 
-TextType = Literal["lecture_slide", "handwritten_notes", "textbook_page", "article", "whiteboard", "other"]
+TextType = Literal[
+    "lecture_slide",
+    "handwritten_notes",
+    "textbook_page",
+    "article",
+    "whiteboard",
+    "other",
+]
 
 
 class TextVLMOutput(VLMOutputBase):
@@ -81,4 +97,3 @@ class TextVLMOutput(VLMOutputBase):
     content: str = ""
     key_points: list[str] = Field(default_factory=list)
     has_math: bool
-

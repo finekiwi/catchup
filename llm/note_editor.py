@@ -187,7 +187,9 @@ def _find_section_by_query(sections: list[tuple[str, str]], query: str) -> int |
     for i, (heading, _) in enumerate(sections):
         # Strip "## " prefix before comparing
         heading_text = heading.lstrip("#").strip().lower()
-        if heading_text and (heading_text in lower_query or lower_query in heading_text):
+        if heading_text and (
+            heading_text in lower_query or lower_query in heading_text
+        ):
             matches.append(i)
 
     if not matches:
@@ -393,7 +395,10 @@ def edit_section(
     context_section = ""
     if document_id:
         try:
-            from rag.qa_chain import retrieve_context  # lazy import to avoid circular dependency
+            from rag.qa_chain import (
+                retrieve_context,
+            )  # lazy import to avoid circular dependency
+
             chunks = retrieve_context(instruction, document_id, top_k=top_k)
             if chunks:
                 joined = "\n---\n".join(chunks)
@@ -405,7 +410,10 @@ def edit_section(
                     "### END DOCUMENT CONTEXT ###\n\n"
                 )
         except Exception:
-            LOGGER.warning("RAG context retrieval failed for document_id=%s — proceeding without context", document_id)
+            LOGGER.warning(
+                "RAG context retrieval failed for document_id=%s — proceeding without context",
+                document_id,
+            )
 
     # Build system prompt by filling in context
     system = PROMPT.format(

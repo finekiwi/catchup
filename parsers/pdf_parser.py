@@ -34,7 +34,9 @@ LOGGER = logging.getLogger(__name__)
 _LABEL_TO_BLOCK_TYPE: dict[str, BlockType] = {
     DocItemLabel.TEXT.value if DocItemLabel else "text": BlockType.TEXT,
     DocItemLabel.TITLE.value if DocItemLabel else "title": BlockType.TEXT,
-    DocItemLabel.SECTION_HEADER.value if DocItemLabel else "section_header": BlockType.TEXT,
+    DocItemLabel.SECTION_HEADER.value
+    if DocItemLabel
+    else "section_header": BlockType.TEXT,
     DocItemLabel.LIST_ITEM.value if DocItemLabel else "list_item": BlockType.TEXT,
     DocItemLabel.CAPTION.value if DocItemLabel else "caption": BlockType.TEXT,
     DocItemLabel.FOOTNOTE.value if DocItemLabel else "footnote": BlockType.TEXT,
@@ -77,7 +79,9 @@ def parse_pdf(file_path: str) -> Document:
 
     try:
         if DocumentConverter is None:
-            LOGGER.error("docling is unavailable; returning fallback document for %s", file_path)
+            LOGGER.error(
+                "docling is unavailable; returning fallback document for %s", file_path
+            )
             _mark_parse_failed(document=document)
             return document
 
@@ -98,7 +102,9 @@ def parse_pdf(file_path: str) -> Document:
         return document
 
     except Exception:
-        LOGGER.exception("Failed to parse PDF %s; returning fallback document", file_path)
+        LOGGER.exception(
+            "Failed to parse PDF %s; returning fallback document", file_path
+        )
         _mark_parse_failed(document=document)
         return document
     finally:
@@ -110,12 +116,18 @@ def _to_blocks(doc: object) -> list[Block]:
     blocks: list[Block] = []
 
     for item, _level in doc.iterate_items():
-        label_str = item.label.value if hasattr(item.label, "value") else str(item.label)
+        label_str = (
+            item.label.value if hasattr(item.label, "value") else str(item.label)
+        )
         block_type = _LABEL_TO_BLOCK_TYPE.get(label_str, BlockType.TEXT)
         page = _extract_page(item)
 
         if isinstance(item, TableItem):
-            content = item.export_to_markdown() if hasattr(item, "export_to_markdown") else "[table]"
+            content = (
+                item.export_to_markdown()
+                if hasattr(item, "export_to_markdown")
+                else "[table]"
+            )
             if not content:
                 content = "[table]"
         elif isinstance(item, PictureItem):
@@ -130,7 +142,11 @@ def _to_blocks(doc: object) -> list[Block]:
 
         caption = _extract_caption(item)
         metadata = BlockMetadata(page=page, caption=caption)
-        blocks.append(Block(type=block_type, content=content, order=len(blocks), metadata=metadata))
+        blocks.append(
+            Block(
+                type=block_type, content=content, order=len(blocks), metadata=metadata
+            )
+        )
 
     return blocks
 
@@ -165,7 +181,9 @@ def _safe_document_id(file_path: str) -> str:
     try:
         return generate_document_id(file_path=file_path)
     except Exception:
-        LOGGER.exception("Failed to hash source file %s; using path hash fallback", file_path)
+        LOGGER.exception(
+            "Failed to hash source file %s; using path hash fallback", file_path
+        )
         return hashlib.sha256(file_path.encode("utf-8")).hexdigest()[:16]
 
 

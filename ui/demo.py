@@ -6,11 +6,12 @@ import base64
 import hashlib
 import html
 import json
+import logging
 import os
 import re
 import sys
 import tempfile
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -26,6 +27,8 @@ load_dotenv()
 import markdown as md_lib  # noqa: E402
 import streamlit as st  # noqa: E402
 import pyperclip  # noqa: E402
+
+LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from models.document import Document
@@ -45,12 +48,12 @@ from db.sqlite import (  # noqa: E402
     save_document,
     save_note,
 )
-from rag import (
+from rag import (  # noqa: E402
     delete_document_index,
     has_document_vectors,
     index_document,
     query as rag_query,
-)  # noqa: E402
+)
 from vlm.client import SUPPORTED_MODELS  # noqa: E402
 
 # Keys injected by the LLM schema but not rendered as note content
@@ -893,6 +896,51 @@ def _render_note_html(note_md: str) -> str:
     return f'<div class="note-wrapper"><div class="note-content">\n{html_body}\n</div></div>'
 
 
+def _render_note_with_figures(raw_md: str, fig_blocks: list) -> None:
+    """Render note markdown section-by-section, injecting figure images between sections.
+
+    Each figure is placed after the section whose page position best matches
+    the figure's page number. Same-page figures are spread across adjacent sections
+    to avoid stacking.
+
+    Args:
+        raw_md: Note markdown text (without title prefix).
+        fig_blocks: List of Block objects with type==FIGURE and image_path set.
+    """
+    sections = _split_note_sections(raw_md)  # list of (heading, body) tuples
+    n = len(sections)
+    if n == 0:
+        st.markdown(_render_note_html(raw_md), unsafe_allow_html=True)
+        return
+
+    pages = [b.metadata.page for b in fig_blocks]
+    valid_pages = [p for p in pages if p is not None]
+    page_min = min(valid_pages) if valid_pages else 1
+    page_max = max(valid_pages) if valid_pages else 1
+    page_range = max(page_max - page_min, 1)
+
+    section_figs: dict[int, list] = defaultdict(list)
+    page_counters: dict = defaultdict(int)
+    for b in fig_blocks:
+        p = b.metadata.page if b.metadata.page is not None else page_max
+        ratio = (p - page_min) / page_range
+        base_idx = min(int(ratio * n), n - 1)
+        count = page_counters[b.metadata.page]
+        page_counters[b.metadata.page] += 1
+        idx = min(base_idx + count, n - 1)
+        section_figs[idx].append(b)
+
+    for i, (heading, body) in enumerate(sections):
+        section_md = f"{heading}\n\n{body}".strip() if heading else body
+        if section_md:
+            st.markdown(_render_note_section_html(section_md), unsafe_allow_html=True)
+        for b in section_figs.get(i, []):
+            img_path = b.image_path
+            if img_path and Path(img_path).exists():
+                caption = b.metadata.caption or ""
+                st.image(img_path, caption=caption, use_container_width=True)
+
+
 def _render_note_section_html(note_md: str) -> str:
     """Render a single section without card border (used in edit mode)."""
     clean_md = _downshift_headings(_normalize_note_markdown(note_md))
@@ -1272,6 +1320,10 @@ def _render_source_block_expanders(source_blocks: list[dict]) -> None:
         with st.expander(exp_label, expanded=False):
             st.caption(f"block_order: {src.get('block_order', 0)}")
             st.text(str(src.get("content_preview", "")))
+            if src.get("image_path"):
+                img_path = src["image_path"]
+                if Path(img_path).exists():
+                    st.image(img_path, use_container_width=True)
 
 
 def _parse_followup_suggestions(answer: str) -> tuple[str, list[str]]:
@@ -1969,6 +2021,12 @@ if not _lib_mode:
 
                 if suffix.lower() == ".pdf":
                     doc = parse_pdf(tmp_path)
+                    try:
+                        from parsers.figure_enricher import enrich_pdf_figures
+
+                        doc = enrich_pdf_figures(doc, vlm_model=vlm_model, file_path=tmp_path)
+                    except Exception as _enrich_exc:
+                        LOGGER.warning("Figure enrichment skipped: %s", _enrich_exc)
                 elif suffix.lower() == ".ipynb":
                     doc = parse_ipynb(tmp_path)
                 else:
@@ -2020,28 +2078,26 @@ if not _lib_mode:
         # Persist to SQLite
         save_document(doc)
         save_note(doc.id, file_hash, result, vlm_model, llm_model, is_image)
-        st.rerun()  # Refresh sidebar to show newly saved document
 
-# ===================================================================
-# RAG INDEXING — run once per document (session-cached)
-# ===================================================================
-_indexed_key = f"indexed_{doc.id}"
-if not st.session_state.get(_indexed_key):
-    if doc.blocks:  # Library mode has blocks=[] — skip indexing
-        try:
-            index_document(doc)
-            st.session_state[_indexed_key] = True
-        except Exception as _idx_exc:
-            st.warning(f"RAG 인덱싱 실패: {_idx_exc}")
-    else:
-        # Library mode: blocks are not available locally. Mark as indexed only when
-        # ChromaDB actually holds vectors — avoids silently grounding Q&A on an empty index.
-        if has_document_vectors(doc.id):
-            st.session_state[_indexed_key] = True
+        # RAG indexing: run once here so the note renders immediately on rerun
+        # (indexing before results would block the note from appearing).
+        _indexed_key_new = f"indexed_{doc.id}"
+        if not st.session_state.get(_indexed_key_new) and doc.blocks:
+            try:
+                index_document(doc)
+                st.session_state[_indexed_key_new] = True
+            except Exception as _idx_exc:
+                st.warning(f"RAG 인덱싱 실패: {_idx_exc}")
+        st.rerun()
 
 # ===================================================================
 # RESULTS — Study note (default view) + Chat panel
 # ===================================================================
+_indexed_key = f"indexed_{doc.id}"
+# Library mode: check if vectors exist when blocks are unavailable locally
+if not st.session_state.get(_indexed_key) and not doc.blocks:
+    if has_document_vectors(doc.id):
+        st.session_state[_indexed_key] = True
 col_content, col_chat = st.columns([1.12, 1], gap="large")
 
 with col_content:
@@ -2201,8 +2257,14 @@ with col_content:
                         _named_sec_idx += 1
                     first_rendered = False
             else:
-                # Pure read view
-                st.markdown(_render_note_html(raw_md), unsafe_allow_html=True)
+                # Pure read view — inject figure images inline when available
+                # Filter by image_path (not block type) because enrich_pdf_figures
+                # may retype FIGURE blocks to CODE/TEXT after VLM classification.
+                fig_blocks = [b for b in doc.blocks if b.image_path]
+                if fig_blocks:
+                    _render_note_with_figures(raw_md, fig_blocks)
+                else:
+                    st.markdown(_render_note_html(raw_md), unsafe_allow_html=True)
     else:
         st.info("노트 내용이 없습니다.")
 

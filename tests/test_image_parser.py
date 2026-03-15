@@ -17,7 +17,9 @@ def _fake_image(path: Path) -> None:
     path.write_bytes(b"\x89PNG\r\n\x1a\nfake")
 
 
-def _vlm_result(content: str, success: bool = True, error: str | None = None) -> VLMResult:
+def _vlm_result(
+    content: str, success: bool = True, error: str | None = None
+) -> VLMResult:
     return VLMResult(content=content, model="gpt-4o-mini", success=success, error=error)
 
 
@@ -26,45 +28,60 @@ def _classify(image_type: str) -> VLMResult:
 
 
 def _code_analysis() -> VLMResult:
-    return _vlm_result(json.dumps({
-        "schema_version": "v1.1.0",
-        "language": "python",
-        "code": "print('hello')",
-        "code_markdown": "```python\nprint('hello')\n```",
-        "description": "출력 예시",
-        "has_truncation": False,
-        "confidence": 0.91,
-        "errors": [],
-    }))
+    return _vlm_result(
+        json.dumps(
+            {
+                "schema_version": "v1.1.0",
+                "language": "python",
+                "code": "print('hello')",
+                "code_markdown": "```python\nprint('hello')\n```",
+                "description": "출력 예시",
+                "has_truncation": False,
+                "confidence": 0.91,
+                "errors": [],
+            }
+        )
+    )
 
 
 def _diagram_analysis() -> VLMResult:
-    return _vlm_result(json.dumps({
-        "schema_version": "v1.1.0",
-        "diagram_type": "flowchart",
-        "title": "파이프라인",
-        "description": "전체 흐름도",
-        "components": [{"name": "A", "role": "입력"}, {"name": "B", "role": "출력"}],
-        "relationships": [{"from": "A", "to": "B", "label": "next"}],
-        "flow_summary": "A에서 B로 이동",
-        "has_truncation": False,
-        "confidence": 0.88,
-        "errors": [],
-    }))
+    return _vlm_result(
+        json.dumps(
+            {
+                "schema_version": "v1.1.0",
+                "diagram_type": "flowchart",
+                "title": "파이프라인",
+                "description": "전체 흐름도",
+                "components": [
+                    {"name": "A", "role": "입력"},
+                    {"name": "B", "role": "출력"},
+                ],
+                "relationships": [{"from": "A", "to": "B", "label": "next"}],
+                "flow_summary": "A에서 B로 이동",
+                "has_truncation": False,
+                "confidence": 0.88,
+                "errors": [],
+            }
+        )
+    )
 
 
 def _text_analysis() -> VLMResult:
-    return _vlm_result(json.dumps({
-        "schema_version": "v1.1.0",
-        "text_type": "lecture_slide",
-        "title": "강의 슬라이드",
-        "content": "## 제목\n내용",
-        "key_points": ["포인트 1"],
-        "has_math": False,
-        "has_truncation": False,
-        "confidence": 0.85,
-        "errors": [],
-    }))
+    return _vlm_result(
+        json.dumps(
+            {
+                "schema_version": "v1.1.0",
+                "text_type": "lecture_slide",
+                "title": "강의 슬라이드",
+                "content": "## 제목\n내용",
+                "key_points": ["포인트 1"],
+                "has_math": False,
+                "has_truncation": False,
+                "confidence": 0.85,
+                "errors": [],
+            }
+        )
+    )
 
 
 def test_parse_image_code_screenshot_maps_to_code_block(tmp_path: Path) -> None:
@@ -72,7 +89,10 @@ def test_parse_image_code_screenshot_maps_to_code_block(tmp_path: Path) -> None:
     image_path = tmp_path / "code.png"
     _fake_image(image_path)
 
-    with patch("parsers.image_parser.call_vlm", side_effect=[_classify("code_screenshot"), _code_analysis()]):
+    with patch(
+        "parsers.image_parser.call_vlm",
+        side_effect=[_classify("code_screenshot"), _code_analysis()],
+    ):
         doc = parse_image(str(image_path))
 
     assert doc.format == DocumentFormat.IMAGE
@@ -91,7 +111,10 @@ def test_parse_image_diagram_maps_to_figure_block(tmp_path: Path) -> None:
     image_path = tmp_path / "diagram.png"
     _fake_image(image_path)
 
-    with patch("parsers.image_parser.call_vlm", side_effect=[_classify("diagram"), _diagram_analysis()]):
+    with patch(
+        "parsers.image_parser.call_vlm",
+        side_effect=[_classify("diagram"), _diagram_analysis()],
+    ):
         doc = parse_image(str(image_path))
 
     assert len(doc.blocks) == 1
@@ -106,7 +129,10 @@ def test_parse_image_text_capture_maps_to_text_block(tmp_path: Path) -> None:
     image_path = tmp_path / "text.png"
     _fake_image(image_path)
 
-    with patch("parsers.image_parser.call_vlm", side_effect=[_classify("text_capture"), _text_analysis()]):
+    with patch(
+        "parsers.image_parser.call_vlm",
+        side_effect=[_classify("text_capture"), _text_analysis()],
+    ):
         doc = parse_image(str(image_path))
 
     assert len(doc.blocks) == 1
@@ -121,7 +147,10 @@ def test_parse_image_classification_failure_defaults_to_other(tmp_path: Path) ->
     image_path = tmp_path / "unknown.png"
     _fake_image(image_path)
 
-    with patch("parsers.image_parser.call_vlm", side_effect=[_vlm_result("not json"), _text_analysis()]):
+    with patch(
+        "parsers.image_parser.call_vlm",
+        side_effect=[_vlm_result("not json"), _text_analysis()],
+    ):
         doc = parse_image(str(image_path))
 
     assert len(doc.blocks) == 1
@@ -137,7 +166,10 @@ def test_parse_image_analysis_json_failure_uses_raw_fallback(tmp_path: Path) -> 
 
     with patch(
         "parsers.image_parser.call_vlm",
-        side_effect=[_classify("code_screenshot"), _vlm_result("This image shows some code.")],
+        side_effect=[
+            _classify("code_screenshot"),
+            _vlm_result("This image shows some code."),
+        ],
     ):
         doc = parse_image(str(image_path))
 
@@ -155,7 +187,10 @@ def test_parse_image_vlm_analysis_failure_returns_empty_blocks(tmp_path: Path) -
 
     with patch(
         "parsers.image_parser.call_vlm",
-        side_effect=[_classify("code_screenshot"), _vlm_result("", success=False, error="API timeout")],
+        side_effect=[
+            _classify("code_screenshot"),
+            _vlm_result("", success=False, error="API timeout"),
+        ],
     ):
         doc = parse_image(str(image_path))
 
@@ -186,7 +221,10 @@ def test_parse_image_document_fields(tmp_path: Path) -> None:
     image_path = tmp_path / "fields.png"
     _fake_image(image_path)
 
-    with patch("parsers.image_parser.call_vlm", side_effect=[_classify("text_capture"), _text_analysis()]):
+    with patch(
+        "parsers.image_parser.call_vlm",
+        side_effect=[_classify("text_capture"), _text_analysis()],
+    ):
         doc = parse_image(str(image_path), model="gpt-4o-mini")
 
     assert doc.id  # non-empty hash
@@ -197,18 +235,23 @@ def test_parse_image_document_fields(tmp_path: Path) -> None:
 
 def test_map_vlm_output_to_block_for_diagram() -> None:
     """Diagram payload maps to FIGURE block with structured component/relationship text."""
-    payload = DiagramVLMOutput.model_validate({
-        "schema_version": "v1.1.0",
-        "diagram_type": "flowchart",
-        "title": "파이프라인",
-        "description": "전체 흐름도",
-        "components": [{"name": "A", "role": "입력"}, {"name": "B", "role": "출력"}],
-        "relationships": [{"from": "A", "to": "B", "label": "next"}],
-        "flow_summary": "A에서 B로 이동",
-        "has_truncation": False,
-        "confidence": 0.88,
-        "errors": [],
-    })
+    payload = DiagramVLMOutput.model_validate(
+        {
+            "schema_version": "v1.1.0",
+            "diagram_type": "flowchart",
+            "title": "파이프라인",
+            "description": "전체 흐름도",
+            "components": [
+                {"name": "A", "role": "입력"},
+                {"name": "B", "role": "출력"},
+            ],
+            "relationships": [{"from": "A", "to": "B", "label": "next"}],
+            "flow_summary": "A에서 B로 이동",
+            "has_truncation": False,
+            "confidence": 0.88,
+            "errors": [],
+        }
+    )
 
     block = map_vlm_output_to_block(
         image_type=ImageType.DIAGRAM,

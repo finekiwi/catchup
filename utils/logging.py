@@ -124,7 +124,11 @@ def _send_to_langfuse(client, payload: dict, session_id: Optional[str] = None) -
             as_type="span",
             name=payload["stage"],
         ) as root_span:
-            ctx = propagate_attributes(session_id=effective_sid) if effective_sid else nullcontext()
+            ctx = (
+                propagate_attributes(session_id=effective_sid)
+                if effective_sid
+                else nullcontext()
+            )
             with ctx:
                 with root_span.start_as_current_observation(
                     as_type="generation",

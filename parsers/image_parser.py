@@ -19,7 +19,12 @@ from models.document import (
     ProcessingStatus,
     generate_document_id,
 )
-from parsers.schemas.vlm_outputs import CodeVLMOutput, DiagramVLMOutput, TextVLMOutput, VLMOutputBase
+from parsers.schemas.vlm_outputs import (
+    CodeVLMOutput,
+    DiagramVLMOutput,
+    TextVLMOutput,
+    VLMOutputBase,
+)
 from prompts.vlm_classify import PROMPT as CLASSIFY_PROMPT
 from prompts.vlm_code import PROMPT as VLM_CODE_PROMPT
 from prompts.vlm_diagram import PROMPT as VLM_DIAGRAM_PROMPT
@@ -67,7 +72,7 @@ def parse_image(file_path: str, model: str = "gpt-4o-mini") -> Document:
     document_id = _safe_document_id(file_path)
 
     # Step 1: classify
-    image_type = _classify_image(file_path, model)
+    image_type = classify_image(file_path, model)
 
     # Step 2: analyze
     analysis_prompt = _PROMPT_BY_IMAGE_TYPE[image_type]
@@ -76,10 +81,16 @@ def parse_image(file_path: str, model: str = "gpt-4o-mini") -> Document:
     blocks: list[Block] = []
     if result.success:
         try:
-            parsed = _parse_vlm_output(result.content, image_type)
-            blocks.append(map_vlm_output_to_block(image_type=image_type, payload=parsed, order=0, image_path=file_path))
+            parsed = parse_vlm_output(result.content, image_type)
+            blocks.append(
+                map_vlm_output_to_block(
+                    image_type=image_type, payload=parsed, order=0, image_path=file_path
+                )
+            )
         except Exception as exc:  # noqa: BLE001
-            LOGGER.warning("VLM JSON parse failed for %s, using raw fallback: %s", file_path, exc)
+            LOGGER.warning(
+                "VLM JSON parse failed for %s, using raw fallback: %s", file_path, exc
+            )
             blocks.append(
                 Block(
                     type=BlockType.TEXT,
@@ -111,19 +122,29 @@ def parse_image(file_path: str, model: str = "gpt-4o-mini") -> Document:
     )
 
 
-def _classify_image(file_path: str, model: str) -> ImageType:
+def classify_image(file_path: str, model: str) -> ImageType:
     """Call VLM to classify image type. Falls back to OTHER on any failure."""
     result = call_vlm(model, file_path, CLASSIFY_PROMPT, stage="image_classify")
     if not result.success:
-        LOGGER.warning("Classification VLM call failed for %s, defaulting to OTHER", file_path)
+        LOGGER.warning(
+            "Classification VLM call failed for %s, defaulting to OTHER", file_path
+        )
         return ImageType.OTHER
     try:
         payload = json.loads(_strip_markdown_fence(result.content).strip())
         type_str = payload.get("image_type", "other")
         return _IMAGE_TYPE_MAP.get(type_str, ImageType.OTHER)
     except Exception as exc:  # noqa: BLE001
-        LOGGER.warning("Classification JSON parse failed for %s: %s, defaulting to OTHER", file_path, exc)
+        LOGGER.warning(
+            "Classification JSON parse failed for %s: %s, defaulting to OTHER",
+            file_path,
+            exc,
+        )
         return ImageType.OTHER
+
+
+# Internal alias for backward compat
+_classify_image = classify_image
 
 
 def map_vlm_output_to_block(
@@ -174,7 +195,7 @@ def map_vlm_output_to_block(
     )
 
 
-def _parse_vlm_output(raw_response: str, image_type: ImageType) -> VLMParsedOutput:
+def parse_vlm_output(raw_response: str, image_type: ImageType) -> VLMParsedOutput:
     """Parse and validate VLM JSON response by image type."""
     payload_dict = _parse_json_dict(raw_response)
 
@@ -183,6 +204,10 @@ def _parse_vlm_output(raw_response: str, image_type: ImageType) -> VLMParsedOutp
     if image_type == ImageType.DIAGRAM:
         return DiagramVLMOutput.model_validate(payload_dict)
     return TextVLMOutput.model_validate(payload_dict)
+
+
+# Internal alias for backward compat
+_parse_vlm_output = parse_vlm_output
 
 
 def _parse_json_dict(raw_response: str) -> dict[str, Any]:
@@ -238,7 +263,9 @@ def _diagram_to_text(payload: DiagramVLMOutput) -> str:
         lines.append("Relationships:")
         for relation in payload.relationships:
             label = f" ({relation.label})" if relation.label else ""
-            lines.append(f"- {relation.from_component} -> {relation.to_component}{label}")
+            lines.append(
+                f"- {relation.from_component} -> {relation.to_component}{label}"
+            )
 
     if payload.flow_summary:
         lines.append("Flow:")
@@ -309,4 +336,4 @@ def _safe_document_id(file_path: str) -> str:
         return hashlib.sha256(file_path.encode("utf-8")).hexdigest()[:16]
 
 
-__all__ = ["map_vlm_output_to_block", "parse_image"]
+__all__ = ["classify_image", "map_vlm_output_to_block", "parse_image", "parse_vlm_output"]

@@ -35,7 +35,9 @@ def _build_client() -> Any:
     except AttributeError:
         from chromadb.config import Settings
 
-        return chromadb.Client(Settings(is_persistent=True, persist_directory=str(path)))
+        return chromadb.Client(
+            Settings(is_persistent=True, persist_directory=str(path))
+        )
 
 
 def _get_collection() -> Optional[Any]:
@@ -44,7 +46,9 @@ def _get_collection() -> Optional[Any]:
         client = _build_client()
         return client.get_or_create_collection(name=COLLECTION_NAME)
     except Exception:
-        LOGGER.exception("Failed to initialize Chroma collection at path=%s", _chroma_path())
+        LOGGER.exception(
+            "Failed to initialize Chroma collection at path=%s", _chroma_path()
+        )
         return None
 
 
@@ -99,14 +103,21 @@ def store_embeddings(doc_id: str, blocks: list[Block]) -> None:
     try:
         collection.delete(where={"doc_id": doc_id})
     except Exception:
-        LOGGER.warning("Could not delete existing vectors for document id=%s — proceeding with upsert", doc_id)
+        LOGGER.warning(
+            "Could not delete existing vectors for document id=%s — proceeding with upsert",
+            doc_id,
+        )
 
     try:
         if hasattr(collection, "upsert"):
-            collection.upsert(ids=ids, documents=documents, metadatas=metadatas, embeddings=embeddings)
+            collection.upsert(
+                ids=ids, documents=documents, metadatas=metadatas, embeddings=embeddings
+            )
         else:
             # TODO: collection.add() raises on duplicate IDs; remove this fallback once chromadb>=1.5.2 is the minimum
-            collection.add(ids=ids, documents=documents, metadatas=metadatas, embeddings=embeddings)
+            collection.add(
+                ids=ids, documents=documents, metadatas=metadatas, embeddings=embeddings
+            )
     except Exception:
         LOGGER.exception("Failed to store Chroma embeddings for document id=%s", doc_id)
 
@@ -148,4 +159,3 @@ def search(query: str, n_results: int = 5) -> list[dict[str, Any]]:
             }
         )
     return formatted_results
-

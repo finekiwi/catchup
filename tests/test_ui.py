@@ -83,6 +83,7 @@ class DemoAppHarness:
     has_document_vectors: MagicMock
     rag_query: MagicMock
     rewrite_query: MagicMock
+    enrich_pdf_figures: MagicMock
     pyperclip_copy: MagicMock
     documents_db: dict[str, Document]
     notes_db: dict[tuple[str, str, str], dict[str, Any]]
@@ -680,6 +681,12 @@ def make_app() -> Iterator[Any]:
                     new=MagicMock(side_effect=_rag_query),
                 )
             )
+            enrich_pdf_figures = stack.enter_context(
+                patch(
+                    "parsers.figure_enricher.enrich_pdf_figures",
+                    new=MagicMock(side_effect=lambda doc, **kwargs: doc),
+                )
+            )
             pyperclip_copy = stack.enter_context(
                 patch("pyperclip.copy", new=MagicMock())
             )
@@ -703,6 +710,7 @@ def make_app() -> Iterator[Any]:
                 has_document_vectors=has_document_vectors,
                 rag_query=rag_query,
                 rewrite_query=rewrite_query,
+                enrich_pdf_figures=enrich_pdf_figures,
                 pyperclip_copy=pyperclip_copy,
                 documents_db=documents_db,
                 notes_db=notes_db,
@@ -1345,7 +1353,7 @@ class TestLibraryPersistence:
     """Coverage for saved-document restoration and session persistence."""
 
     def test_analysis_saves_and_sidebar_lists_document(self, make_app: Any) -> None:
-        """Completed analyses should persist and show up in the sidebar library."""
+        """Completed analyses should persist and show up in the sidebar library on next rerun."""
         pdf_upload = _pdf_upload(name="library.pdf", file_id="upload-library")
         parsed_doc = _sample_document(doc_id="doc-library", source="library.pdf")
 
@@ -1360,8 +1368,14 @@ class TestLibraryPersistence:
             assert harness.save_note.call_count == 1, (
                 "Finished analyses should call save_note once"
             )
+
+            # The sidebar re-renders with the new document on the next user interaction.
+            # (The old code called st.rerun() here which caused the note to not show immediately;
+            # sidebar library updates on the following rerun instead.)
+            harness.run(upload=pdf_upload)
+            _assert_no_exception(harness.app)
             assert harness.app.button(key="lib_doc-library").label.startswith("📄"), (
-                "Saved documents should render in the sidebar library"
+                "Saved documents should render in the sidebar library after next rerun"
             )
 
     def test_library_load_restores_without_reanalysis_and_survives_stale_uploader(
@@ -1558,3 +1572,118 @@ class TestLibraryPersistence:
                 ]["result"]["note_markdown"]
                 == updated_markdown
             ), "Dirty library edits should update the persisted note body"
+
+
+class TestFigureEnrichment:
+    """PDF upload flow should trigger figure enrichment and degrade gracefully on failure."""
+
+    def test_pdf_upload_triggers_figure_enrichment(self, make_app: Any) -> None:
+        """Figure enrichment must be called once per PDF analysis."""
+        pdf_upload = _pdf_upload()
+
+        with make_app() as harness:
+            _analyze_upload(harness, pdf_upload)
+
+            _assert_no_exception(harness.app)
+            assert harness.enrich_pdf_figures.call_count == 1, (
+                "enrich_pdf_figures should be called once per PDF upload"
+            )
+
+    def test_pdf_enrichment_failure_does_not_crash_pipeline(self, make_app: Any) -> None:
+        """If enrichment raises, the pipeline should still complete successfully."""
+        pdf_upload = _pdf_upload()
+
+        with make_app() as harness:
+            harness.enrich_pdf_figures.side_effect = RuntimeError("VLM quota exceeded")
+            app = _analyze_upload(harness, pdf_upload)
+
+            _assert_no_exception(app)
+            assert harness.generate_note.call_count == 1, (
+                "Note generation should proceed even if enrichment fails"
+            )
+            assert harness.save_document.call_count == 1, (
+                "Document should be persisted even if enrichment fails"
+            )
+
+    def test_note_renders_figures_inline(self, make_app: Any, tmp_path: Path) -> None:
+        """Note read view should not crash when enriched FIGURE blocks have image_path set."""
+        from PIL import Image as _PILImage
+        import io as _io
+
+        buf = _io.BytesIO()
+        _PILImage.new("RGB", (4, 4), color=(128, 128, 128)).save(buf, "PNG")
+        img_file = tmp_path / "fig.png"
+        img_file.write_bytes(buf.getvalue())
+        img_path = str(img_file)
+
+        pdf_upload = _pdf_upload()
+        fh = pdf_upload.file_hash
+        doc_cache_key = f"doc_{fh}_{DEFAULT_VLM_MODEL}"
+
+        with make_app() as harness:
+
+            def _enrich_inject_figure(doc: Document, **kwargs: Any) -> Document:
+                doc.blocks.append(
+                    Block(
+                        type=BlockType.FIGURE,
+                        content="extracted figure",
+                        order=99,
+                        image_path=img_path,
+                        metadata=BlockMetadata(page=1, confidence=0.9),
+                    )
+                )
+                return doc
+
+            harness.enrich_pdf_figures.side_effect = _enrich_inject_figure
+            _analyze_upload(harness, pdf_upload)
+
+            _assert_no_exception(harness.app)
+            cached_doc = harness.session_value(doc_cache_key)
+            assert cached_doc is not None, "Document should be cached in session state"
+            fig_blocks = [b for b in cached_doc.blocks if b.type == BlockType.FIGURE]
+            assert fig_blocks, "Cached doc should contain the injected FIGURE block"
+            assert fig_blocks[0].image_path == img_path, (
+                "FIGURE block image_path should be set by the enrichment mock"
+            )
+
+    def test_qa_source_block_shows_figure_image(self, make_app: Any, tmp_path: Path) -> None:
+        """Q&A chat should not crash and should preserve image_path in source blocks."""
+        from PIL import Image as _PILImage
+        import io as _io
+
+        buf = _io.BytesIO()
+        _PILImage.new("RGB", (4, 4), color=(64, 64, 64)).save(buf, "PNG")
+        img_file = tmp_path / "src_fig.png"
+        img_file.write_bytes(buf.getvalue())
+        img_path = str(img_file)
+
+        pdf_upload = _pdf_upload()
+
+        with make_app() as harness:
+            harness.rag_query.side_effect = lambda question, **kwargs: _qa_result(
+                "다이어그램은 데이터 흐름을 보여줍니다.",
+                source_blocks=[
+                    {
+                        "document_id": "doc-pdf",
+                        "source": "sample.pdf",
+                        "block_order": 0,
+                        "block_type": "figure",
+                        "content_preview": "Fig. 1",
+                        "page": 1,
+                        "cell_index": None,
+                        "image_path": img_path,
+                    }
+                ],
+            )
+
+            _analyze_upload(harness, pdf_upload)
+            harness.set_chat_input("이 다이어그램이 뭘 보여주나?", upload=pdf_upload)
+
+            _assert_no_exception(harness.app)
+            messages = _session_messages(harness, "doc-pdf")
+            assistant_msgs = [m for m in messages if m.get("role") == "assistant"]
+            assert assistant_msgs, "Assistant message expected after Q&A"
+            last_srcs = assistant_msgs[-1].get("source_blocks", [])
+            assert any(
+                s.get("image_path") == img_path for s in last_srcs
+            ), "image_path should be propagated into chat message source_blocks"

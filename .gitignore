@@ -217,6 +217,7 @@ data/logs/
 data/chroma/
 data/golden/
 data/parsed/
+data/figures/
 refs/
 
 # Internal tooling
