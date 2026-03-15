@@ -49,12 +49,10 @@ def enrich_pdf_figures(
         The same Document with enriched FIGURE blocks (mutated in-place).
     """
     dl_doc = load_docling_doc(Path(file_path))
-    LOGGER.warning("DEBUG enrich: load_docling_doc result: %s", dl_doc)
     if dl_doc is None:
         # Cache miss or stale (e.g. built without generate_picture_images=True).
         # Re-run DocumentConverter with picture image generation and rebuild the cache.
         dl_doc = _reconvert_with_images(file_path)
-        LOGGER.warning("DEBUG enrich: reconvert result: %s", dl_doc)
         if dl_doc is None:
             LOGGER.warning(
                 "DoclingDocument unavailable for %s — skipping figure enrichment", file_path
@@ -69,7 +67,6 @@ def enrich_pdf_figures(
         if _is_picture_item(item)
     ]
 
-    LOGGER.warning("DEBUG enrich: figure_blocks=%d, picture_items=%d", len(figure_blocks), len(picture_items))
     if not figure_blocks or not picture_items:
         return doc
 
