@@ -1719,6 +1719,20 @@ with st.sidebar:
         llm_model = st.selectbox(
             "LLM 모델 (노트/Q&A)", options=SUPPORTED_LLM_MODELS, index=0
         )
+        _LLM_HINTS = {
+            "gpt-4.1-nano": "빠르고 저렴 — 대용량 문서 권장",
+            "gpt-4o-mini": "균형 (기본값)",
+            "gpt-4.1-mini": "고품질 · 중간 비용",
+            "gpt-4o": "최고 품질 · 고비용",
+            "gpt-5-nano": "빠르고 저렴",
+            "claude-haiku-4-5-20251001": "빠르고 저렴 (Anthropic)",
+            "claude-sonnet-4-6": "고품질 (Anthropic)",
+            "gemini-3-flash-preview": "빠르고 저렴 (Google)",
+            "gemini-3.1-flash-lite-preview": "최저 비용 (Google)",
+            "gemini-3.1-pro-preview": "고품질 (Google)",
+        }
+        if hint := _LLM_HINTS.get(llm_model):
+            st.caption(hint)
 
 # ===================================================================
 # FILE UPLOAD
