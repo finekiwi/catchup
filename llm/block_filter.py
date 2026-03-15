@@ -70,6 +70,4 @@ def is_noise_block(block: Block) -> bool:
 
 __all__ = [
     "is_noise_block",
-    "_HEADING_PATTERN",
-    "_SECTION_NUM_PATTERN",
 ]

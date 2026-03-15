@@ -374,17 +374,19 @@ def index_document(document: Document) -> None:
         return
 
     # Auto-reindex if the stored indexing version differs from the current one.
+    # stored_version is None when the document was indexed before versioning was introduced
+    # (no indexing_version field in metadata) — treat as stale and re-index.
     stored_version = _get_stored_indexing_version(collection, document.id)
-    if stored_version is not None and stored_version != INDEXING_VERSION:
-        LOGGER.info(
-            "Indexing version mismatch for document id=%s (stored=%r, current=%r) — re-indexing",
-            document.id,
-            stored_version,
-            INDEXING_VERSION,
-        )
+    if stored_version != INDEXING_VERSION:
         try:
             existing_ids = collection.get(where={"document_id": document.id}).get("ids", [])
             if existing_ids:
+                LOGGER.info(
+                    "Indexing version mismatch for document id=%s (stored=%r, current=%r) — re-indexing",
+                    document.id,
+                    stored_version,
+                    INDEXING_VERSION,
+                )
                 collection.delete(ids=existing_ids)
         except Exception:
             LOGGER.warning("Failed to delete stale vectors for document id=%s", document.id)
@@ -476,19 +478,20 @@ def index_document_chunked(document: Document) -> None:
         LOGGER.warning("No chunks produced for document id=%s", document.id)
         return
 
-    # Auto-reindex if stored indexing version differs, then skip if already up-to-date.
+    # Auto-reindex if stored indexing version differs (including None = pre-versioning), then
+    # skip if already up-to-date.
     try:
         existing = collection.get(where={"document_id": document.id}, include=["metadatas"])
         existing_ids = existing.get("ids", [])
         stored_version = (existing.get("metadatas") or [{}])[0].get("indexing_version") if existing_ids else None
-        if stored_version is not None and stored_version != INDEXING_VERSION:
-            LOGGER.info(
-                "Chunked indexing version mismatch for document id=%s (stored=%r, current=%r) — re-indexing",
-                document.id,
-                stored_version,
-                INDEXING_VERSION,
-            )
+        if stored_version != INDEXING_VERSION:
             if existing_ids:
+                LOGGER.info(
+                    "Chunked indexing version mismatch for document id=%s (stored=%r, current=%r) — re-indexing",
+                    document.id,
+                    stored_version,
+                    INDEXING_VERSION,
+                )
                 collection.delete(ids=existing_ids)
             existing_ids = []
         if len(existing_ids) >= len(chunks):

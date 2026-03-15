@@ -330,3 +330,40 @@ def test_extract_sections_image_format() -> None:
     sections = extract_sections(doc)
 
     assert sections == []
+
+
+def test_group_preserves_pre_toc_content() -> None:
+    """Blocks in from_toc=False sections before the first structural TOC section must not be discarded."""
+    blocks = [
+        _text_block(0, "Document title text " * 10),  # belongs to the TITLE section
+        _text_block(1, "Introduction paragraph " * 10),  # also pre-toc
+        _text_block(2, "Chapter body content " * 10),
+        _text_block(3, "Chapter body more " * 10),
+        _text_block(4, "Chapter body final " * 10),
+    ]
+    doc = _doc_with_blocks(blocks)
+
+    # A TITLE section (from_toc=False) appears before the first structural section
+    sections = [
+        SectionInfo(
+            heading="My Document Title",
+            level=1,
+            start_block_order=0,
+            end_block_order=2,
+            from_toc=False,
+        ),
+        SectionInfo(
+            heading="CHAPTER 1 Introduction",
+            level=1,
+            start_block_order=2,
+            end_block_order=None,
+            from_toc=True,
+        ),
+    ]
+
+    result = group_blocks_by_section(doc, sections, min_blocks_per_section=1)
+
+    # Pre-toc blocks (blocks 0 and 1) must be present somewhere in the output
+    all_block_orders = {b.order for s in result for b in s.blocks}
+    assert 0 in all_block_orders, "Pre-TOC block 0 must not be discarded"
+    assert 1 in all_block_orders, "Pre-TOC block 1 must not be discarded"

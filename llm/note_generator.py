@@ -40,6 +40,9 @@ _MAX_CODE_LINES = 15  # code blocks: only first N lines passed to LLM
 
 # ---------------------------------------------------------------------------
 # Model registry: model_id → {provider, input_cost_per_1m, output_cost_per_1m}
+# Mirrors utils/models.MODEL_REGISTRY — keep in sync when adding or removing models.
+# NOTE: This duplicate exists because note_generator uses force_json / per-provider
+#       timeout extensions that are not yet supported by utils.models.call_llm.
 # ---------------------------------------------------------------------------
 _MODEL_REGISTRY: dict[str, dict] = {
     "gpt-4o-mini": {"provider": "openai", "input": 0.15, "output": 0.60},
@@ -538,7 +541,9 @@ def _assemble_sections(
         """Remove a leading heading line the LLM may have added despite instructions.
 
         Handles:
-        - ``## Heading`` (markdown heading, any level)
+        - ``## Heading`` (markdown heading, any level) where the heading text
+          matches the section heading (normalized comparison). Legitimate
+          sub-headings like ``### Example`` or ``### 핵심 포인트`` are preserved.
         - Plain-text restatements: normalized first line *starts with* the
           normalized heading AND the remainder is ≤ 3 chars (punctuation only).
           This prevents stripping real body sentences that happen to open with
@@ -548,19 +553,24 @@ def _assemble_sections(
         if not lines:
             return md
         first = lines[0].lstrip()
-        is_md_heading = first.startswith("#")
-        if not is_md_heading:
-            norm_h = _normalize_heading(heading)
+        norm_h = _normalize_heading(heading)
+        if first.startswith("#"):
+            # Only strip if the markdown heading text matches the section heading
+            # Strip leading '#' characters and surrounding whitespace to get heading text
+            heading_text = first.lstrip("#").strip()
+            norm_f = _normalize_heading(heading_text)
+            is_md_heading = bool(norm_h) and norm_f.startswith(norm_h) and len(norm_f) - len(norm_h) <= 3
+        else:
             norm_f = _normalize_heading(first)
             # Restatement: first line starts with heading AND has ≤ 3 extra chars
             # (allows trailing period, colon, or minor decoration but not body content)
-            is_plain_restatement = (
-                bool(norm_h)
-                and norm_f.startswith(norm_h)
-                and len(norm_f) - len(norm_h) <= 3
-            )
-        else:
-            is_plain_restatement = False
+            is_md_heading = False
+        is_plain_restatement = (
+            not first.startswith("#")
+            and bool(norm_h)
+            and norm_f.startswith(norm_h)
+            and len(norm_f) - len(norm_h) <= 3
+        )
         if is_md_heading or is_plain_restatement:
             md = "\n".join(lines[1:]).lstrip("\n")
         return md

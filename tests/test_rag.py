@@ -277,6 +277,34 @@ def test_index_document_reindexes_on_version_mismatch(monkeypatch):
     assert len(stored["ids"]) == len(doc.blocks)
 
 
+def test_index_document_reindexes_when_version_missing(monkeypatch):
+    """Chunks indexed before versioning (no indexing_version field) must be re-indexed."""
+    collection = _make_ephemeral_collection()
+    monkeypatch.setattr(qa_module, "_get_rag_collection", lambda: collection)
+    _patch_embedding(monkeypatch)
+    _patch_log(monkeypatch)
+
+    doc = _sample_document()
+
+    # Pre-populate without any indexing_version field (pre-versioning data)
+    old_meta = {"document_id": doc.id, "block_order": 0}
+    collection.upsert(
+        ids=["legacy-id"],
+        documents=["legacy content"],
+        metadatas=[old_meta],
+        embeddings=[FAKE_VECTOR],
+    )
+    assert collection.count() == 1
+
+    # index_document should detect missing version, delete legacy chunk, then re-index
+    index_document(doc)
+
+    stored = collection.get(where={"document_id": doc.id}, include=["metadatas"])
+    assert "legacy-id" not in stored["ids"], "Legacy chunk must be replaced"
+    stored_versions = {m.get("indexing_version") for m in stored["metadatas"]}
+    assert stored_versions == {qa_module.INDEXING_VERSION}
+
+
 def test_index_document_skips_when_version_matches(monkeypatch):
     """Document already indexed at the current version must not be re-indexed."""
     collection = _make_ephemeral_collection()

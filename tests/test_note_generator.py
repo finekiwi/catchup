@@ -605,3 +605,30 @@ def test_assemble_preserves_normal_body_first_line(monkeypatch) -> None:
     assert "이 절에서는 Git의 기본 명령어를 살펴봅니다." in markdown, (
         "Normal body opening sentence must be preserved"
     )
+
+
+def test_assemble_preserves_legitimate_subheading(monkeypatch) -> None:
+    """A legitimate sub-heading like '### Example' must NOT be stripped even though it starts with '#'."""
+    doc = _large_document(250)
+    monkeypatch.setattr("llm.note_generator.log_api_call", lambda **kw: None)
+
+    # Section body opens with a sub-heading unrelated to the section heading
+    section_bodies = ["### Example\n\n예시 코드 설명입니다."]
+    sections = [
+        SectionInfo(
+            heading="3.1 기본 명령어",
+            level=1,
+            start_block_order=0,
+            end_block_order=None,
+            blocks=doc.blocks,
+        )
+    ]
+    monkeypatch.setitem(note_gen_module._PROVIDER_DISPATCH, "openai", _make_sectioned_call(section_bodies))
+
+    with patch("llm.section_splitter.extract_sections", return_value=sections):
+        with patch("llm.section_splitter.group_blocks_by_section", return_value=sections):
+            result = generate_note_sectioned(doc)
+
+    markdown = result["note_markdown"]
+    assert "### Example" in markdown, "Legitimate sub-heading must be preserved"
+    assert "예시 코드 설명입니다." in markdown

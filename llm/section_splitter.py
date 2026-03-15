@@ -370,13 +370,30 @@ def group_blocks_by_section(
     if has_toc:
         # Absorb from_toc=False into preceding from_toc=True.
         # Preamble (heading="서론", from_toc=False) is always kept standalone.
+        # from_toc=False sections appearing before any toc section (e.g. document
+        # title page, introduction blurb) are collected into the preamble so their
+        # content is preserved rather than silently dropped.
         toc_sections: list[SectionInfo] = []
+        pre_toc_blocks: list[Block] = []  # content from non-structural sections before first TOC
         for section in result:
             if section.from_toc:
                 toc_sections.append(section)
             elif section.heading == "서론":
+                # Add any accumulated pre-toc blocks into the preamble
+                if pre_toc_blocks:
+                    section.blocks = pre_toc_blocks + section.blocks
+                    pre_toc_blocks = []
                 toc_sections.insert(0, section)  # preamble always first
-            elif toc_sections:
+            elif not toc_sections:
+                # Before the first structural TOC section: accumulate as preamble content
+                if section.blocks:
+                    heading_block = Block(
+                        type=BlockType.TEXT,
+                        content=f"### {section.heading}",
+                        order=section.start_block_order,
+                    )
+                    pre_toc_blocks.extend([heading_block] + section.blocks)
+            else:
                 parent = toc_sections[-1]
                 if section.blocks:
                     heading_block = Block(
@@ -385,7 +402,22 @@ def group_blocks_by_section(
                         order=section.start_block_order,
                     )
                     parent.blocks.extend([heading_block] + section.blocks)
-            # from_toc=False before any toc section (e.g. book-cover text): discard
+
+        # If pre-toc blocks were accumulated but no "서론" preamble was created,
+        # prepend them to the first TOC section so they are not lost.
+        if pre_toc_blocks and toc_sections:
+            toc_sections[0].blocks = pre_toc_blocks + toc_sections[0].blocks
+        elif pre_toc_blocks:
+            # No toc sections at all (shouldn't happen given has_toc=True, but guard anyway)
+            preamble = SectionInfo(
+                heading="서론",
+                level=1,
+                start_block_order=0,
+                end_block_order=None,
+                blocks=pre_toc_blocks,
+                from_toc=False,
+            )
+            toc_sections.insert(0, preamble)
 
         work = toc_sections
     else:
