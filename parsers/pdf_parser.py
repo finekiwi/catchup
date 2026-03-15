@@ -8,8 +8,9 @@ import time
 from pathlib import Path
 
 try:
-    from docling.datamodel.base_models import ConversionStatus
-    from docling.document_converter import DocumentConverter
+    from docling.datamodel.base_models import ConversionStatus, InputFormat
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.document_converter import DocumentConverter, PdfFormatOption
     from docling_core.types.doc import DocItemLabel, PictureItem, TableItem, TextItem
 except ImportError:  # pragma: no cover
     DocumentConverter = None  # type: ignore[assignment,misc]
@@ -18,6 +19,9 @@ except ImportError:  # pragma: no cover
     TextItem = None  # type: ignore[assignment]
     TableItem = None  # type: ignore[assignment]
     PictureItem = None  # type: ignore[assignment]
+    InputFormat = None  # type: ignore[assignment]
+    PdfPipelineOptions = None  # type: ignore[assignment]
+    PdfFormatOption = None  # type: ignore[assignment]
 
 from models.document import (
     Block,
@@ -85,7 +89,13 @@ def parse_pdf(file_path: str) -> Document:
             _mark_parse_failed(document=document)
             return document
 
-        converter = DocumentConverter()
+        pipeline_options = PdfPipelineOptions()
+        pipeline_options.generate_picture_images = True
+        converter = DocumentConverter(
+            format_options={
+                InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+            }
+        )
         result = converter.convert(file_path, raises_on_error=False)
 
         if ConversionStatus is not None and result.status == ConversionStatus.FAILURE:

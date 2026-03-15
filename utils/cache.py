@@ -149,6 +149,15 @@ def load_docling_doc(file_path: Path) -> Optional[Any]:
             )
             return None
 
+        # Invalidate caches that were saved without generate_picture_images=True.
+        # Version "v2" indicates the cache was built with picture image generation enabled.
+        if raw.get("_cache_version") != "v2":
+            LOGGER.debug(
+                "Docling cache version mismatch for %s — invalidating (no picture images)",
+                file_path.name,
+            )
+            return None
+
         doc = DoclingDocument.model_validate(raw["docling_document"])
         LOGGER.info("Docling cache hit: %s (%s)", file_path.name, path.name)
         return doc
@@ -172,6 +181,7 @@ def save_docling_doc(file_path: Path, dl_doc: Any) -> None:
         path = _docling_cache_path(file_path)
         payload = {
             "_cache_hash": _file_sha256(file_path),
+            "_cache_version": "v2",  # v2 = built with generate_picture_images=True
             "_source": str(file_path),
             "docling_document": dl_doc.model_dump(mode="json"),
         }
