@@ -966,7 +966,7 @@ def _render_note_with_figures(raw_md: str, fig_blocks: list) -> None:
             img_path = b.image_path
             if img_path and Path(img_path).exists():
                 caption = b.metadata.caption or ""
-                st.image(img_path, caption=caption, width="stretch")
+                st.image(img_path, caption=caption, width=400)
 
 
 def _render_note_section_html(note_md: str) -> str:
@@ -1351,7 +1351,7 @@ def _render_source_block_expanders(source_blocks: list[dict]) -> None:
             if src.get("image_path"):
                 img_path = src["image_path"]
                 if Path(img_path).exists():
-                    st.image(img_path, width="stretch")
+                    st.image(img_path, width=400)
 
 
 def _parse_followup_suggestions(answer: str) -> tuple[str, list[str]]:
