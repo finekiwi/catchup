@@ -659,7 +659,6 @@ def _assemble_sections(
 def generate_note_sectioned(
     doc: Document,
     model: str = "gpt-4o-mini",
-    section_model: str | None = None,
     max_blocks_per_section: int = 40,
 ) -> dict[str, Any]:
     """Generate a structured study note using section-based splitting.
@@ -673,29 +672,19 @@ def generate_note_sectioned(
 
     Args:
         doc: Source document with populated blocks.
-        model: Model used for both per-section and assembly (metadata) calls.
+        model: Model used for all LLM calls (per-section and assembly).
             Defaults to ``"gpt-4o-mini"``.
-        section_model: Model used for per-section note generation. When ``None``
-            (the default), uses the same model as ``model``. Pass explicitly
-            (e.g. ``"gpt-4.1-nano"``) to use a cheaper/faster model for sections
-            while keeping a higher-quality model for the assembly call.
         max_blocks_per_section: Maximum blocks sent per section call.
 
     Returns:
         dict matching NoteGenerationOutput schema.
 
     Raises:
-        ValueError: If ``model`` or ``section_model`` is not in SUPPORTED_LLM_MODELS.
+        ValueError: If ``model`` is not in SUPPORTED_LLM_MODELS.
     """
-    if section_model is None:
-        section_model = model
     if model not in _MODEL_REGISTRY:
         raise ValueError(
             f"Unsupported model: {model!r}. Choose from: {SUPPORTED_LLM_MODELS}"
-        )
-    if section_model not in _MODEL_REGISTRY:
-        raise ValueError(
-            f"Unsupported section_model: {section_model!r}. Choose from: {SUPPORTED_LLM_MODELS}"
         )
 
     from llm.section_splitter import extract_sections, group_blocks_by_section
@@ -744,7 +733,7 @@ def generate_note_sectioned(
             doc_title=doc_title,
             section_idx=idx,
             total_sections=total,
-            model=section_model,
+            model=model,
             max_blocks=max_blocks_per_section,
         )
         return idx, md
@@ -769,7 +758,7 @@ def generate_note_sectioned(
                     doc_title=doc_title,
                     section_idx=idx,
                     total_sections=total,
-                    model=section_model,
+                    model=model,
                     max_blocks=max_blocks_per_section,
                 )
             except Exception as exc:
