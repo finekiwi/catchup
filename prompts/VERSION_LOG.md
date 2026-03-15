@@ -18,6 +18,7 @@
 ## vlm_classify.py
 | Version | Date | Change | Quality Impact |
 |---------|------|--------|----------------|
+| v1.1.0 | 2026-03-16 | Rewrote definitions to explicitly exclude non-educational content. Added CRITICAL rule: book cover, title page, publisher logo, author photo, decorative illustration → "other" even if text is present. Expanded "diagram" to include graphs/charts with axes, neural network structures. "text_capture" now limited to instructional content only. | Book covers / logos / decorative images that leaked as text_capture or diagram now correctly classified as other |
 | v1.0.0 | 2026-03-05 | Initial prompt: 5-class image type classification (code_screenshot/diagram/text_capture/equation/other) with confidence score. | Enables auto-classification for 2-call VLM pipeline |
 
 ## note_generation.py
