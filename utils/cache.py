@@ -106,7 +106,9 @@ def save_cached_parse(file_path: Path, document: Document) -> None:
             "_source": str(file_path),
             "document": document.model_dump(mode="json"),
         }
-        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
         LOGGER.info("Cache saved: %s → %s", file_path.name, path.name)
 
     except Exception as exc:
@@ -142,7 +144,9 @@ def load_docling_doc(file_path: Path) -> Optional[Any]:
         stored_hash = raw.get("_cache_hash")
         current_hash = _file_sha256(file_path)
         if stored_hash != current_hash:
-            LOGGER.debug("Docling cache hash mismatch for %s — invalidating", file_path.name)
+            LOGGER.debug(
+                "Docling cache hash mismatch for %s — invalidating", file_path.name
+            )
             return None
 
         doc = DoclingDocument.model_validate(raw["docling_document"])
@@ -171,7 +175,9 @@ def save_docling_doc(file_path: Path, dl_doc: Any) -> None:
             "_source": str(file_path),
             "docling_document": dl_doc.model_dump(mode="json"),
         }
-        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
         LOGGER.info("Docling cache saved: %s → %s", file_path.name, path.name)
 
     except Exception as exc:
@@ -206,7 +212,9 @@ def load_cached_chunks(file_path: Path) -> Optional[list[tuple[str, dict]]]:
         stored_hash = raw.get("_cache_hash")
         current_hash = _file_sha256(file_path)
         if stored_hash != current_hash:
-            LOGGER.debug("Chunks cache hash mismatch for %s — invalidating", file_path.name)
+            LOGGER.debug(
+                "Chunks cache hash mismatch for %s — invalidating", file_path.name
+            )
             return None
 
         chunks = [(item[0], item[1]) for item in raw["chunks"]]
@@ -235,17 +243,51 @@ def save_cached_chunks(file_path: Path, chunks: list[tuple[str, dict]]) -> None:
             "_source": str(file_path),
             "chunks": [[text, meta] for text, meta in chunks],
         }
-        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
         LOGGER.info("Chunks cache saved: %s → %s", file_path.name, path.name)
 
     except Exception as exc:
         LOGGER.warning("Chunks cache save failed for %s: %s", file_path, exc)
 
 
+def load_docling_doc_by_id(doc_id: str) -> Optional[Any]:
+    """Load cached DoclingDocument by document ID (SHA-256 prefix).
+
+    Cache files are named ``{doc_id}_docling.json`` where *doc_id* is the
+    SHA-256 prefix computed at parse time.  Since the ID **is** the hash
+    prefix, no hash re-verification is needed — we just look up the file
+    directly.
+
+    Args:
+        doc_id: Document ID (SHA-256 hex prefix, typically 16 chars).
+
+    Returns:
+        DoclingDocument instance, or None if no cache entry or decode error.
+    """
+    try:
+        from docling_core.types.doc import DoclingDocument
+
+        path = _cache_dir() / f"{doc_id}_docling.json"
+        if not path.exists():
+            return None
+
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        doc = DoclingDocument.model_validate(raw["docling_document"])
+        LOGGER.info("Docling cache hit by id: %s (%s)", doc_id, path.name)
+        return doc
+
+    except Exception as exc:
+        LOGGER.debug("Docling cache load by id failed for %s: %s", doc_id, exc)
+        return None
+
+
 __all__ = [
     "load_cached_parse",
     "save_cached_parse",
     "load_docling_doc",
+    "load_docling_doc_by_id",
     "save_docling_doc",
     "load_cached_chunks",
     "save_cached_chunks",

@@ -36,6 +36,12 @@
 | v1.5.1 | 2026-03-15 | No-merge rule 강화: "one heading = one ## section, no exceptions. Do NOT merge adjacent or similar-sounding sections (e.g. 'git commit' and 'git commit -a' are separate sections)." | 유사 섹션 병합으로 인한 TOC 커버리지 누락 방지 (3.5/3.7/3.8 섹션 누락 케이스) |
 | v1.5.2 | 2026-03-15 | EXCLUDE auxiliary content rule 추가: 부록(Appendix), 참고문헌, 색인, 챕터 개요 blurb는 노트에 포함 금지. 코드 레벨: `_HEADING_PATTERN`에 `부록/Appendix` 추가 + `_CHAPTER_INTRO_MAX_LEN=450` — 첫 줄이 CHAPTER/부록 패턴인 짧은 multi-line 블록도 노이즈 필터 적용. | "CHAPTER 5 소개합니다…" 블록과 "부록 B GitLab" 섹션이 노트에 포함되는 문제 수정 |
 
+## note_generation_section.py
+| Version | Date | Change | Quality Impact |
+|---------|------|--------|----------------|
+| v1.0.0 | 2026-03-15 | Initial section-based note generation prompts. SECTION_PROMPT: per-section body generation (raw markdown, no heading). ASSEMBLY_PROMPT: metadata-only JSON extraction from concatenated sectioned notes (title, summary, key_concepts, difficulty, read_time, confidence). | Enables full TOC coverage for large documents via per-section LLM calls |
+| v1.1.0 | 2026-03-15 | ASSEMBLY_PROMPT: replaced full `note_markdown` with per-section snippets (`## heading` + first 2-3 sentences of body). `estimated_read_time_min` pre-computed from word count (200 wpm). ~80% token reduction vs full note while preserving summary quality. | Faster assembly call; summary quality maintained via opening sentences per section |
+
 ## eval_judge.py
 | Version | Date | Change | Quality Impact |
 |---------|------|--------|----------------|

@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 from llm.note_editor import NoteEditResult, edit_section  # noqa: E402
 from llm.note_editor import _split_sections as _split_note_sections  # noqa: E402
-from llm.note_generator import SUPPORTED_LLM_MODELS, generate_note  # noqa: E402
+from llm.note_generator import SUPPORTED_LLM_MODELS, generate_note_sectioned  # noqa: E402
 from parsers.image_parser import parse_image  # noqa: E402
 from parsers.ipynb_parser import parse_ipynb  # noqa: E402
 from parsers.pdf_parser import parse_pdf  # noqa: E402
@@ -45,7 +45,12 @@ from db.sqlite import (  # noqa: E402
     save_document,
     save_note,
 )
-from rag import delete_document_index, has_document_vectors, index_document, query as rag_query  # noqa: E402
+from rag import (
+    delete_document_index,
+    has_document_vectors,
+    index_document,
+    query as rag_query,
+)  # noqa: E402
 from vlm.client import SUPPORTED_MODELS  # noqa: E402
 
 # Keys injected by the LLM schema but not rendered as note content
@@ -871,7 +876,9 @@ def _downshift_headings(md_text: str) -> str:
         if line.strip().startswith("```"):
             in_code_fence = not in_code_fence
         if not in_code_fence:
-            line = _HEADING_RE.sub(lambda m: "#" * min(len(m.group(1)) + 2, 6) + " " + m.group(2), line)
+            line = _HEADING_RE.sub(
+                lambda m: "#" * min(len(m.group(1)) + 2, 6) + " " + m.group(2), line
+            )
         result_lines.append(line)
     return "\n".join(result_lines)
 
@@ -1277,10 +1284,11 @@ def _parse_followup_suggestions(answer: str) -> tuple[str, list[str]]:
     if not match:
         return answer, []
     clean = answer[: match.start()].rstrip()
-    raw_lines = [line.strip() for line in match.group(1).strip().splitlines() if line.strip()]
+    raw_lines = [
+        line.strip() for line in match.group(1).strip().splitlines() if line.strip()
+    ]
     suggestions = [re.sub(r"^\d+[.)]\s*", "", line) for line in raw_lines]
     return clean, [s for s in suggestions if s][:3]
-
 
 
 def _replace_section_body(full_md: str, heading_idx: int, new_body: str) -> str:
@@ -1304,9 +1312,9 @@ def _replace_section_body(full_md: str, heading_idx: int, new_body: str) -> str:
     return "\n\n".join(parts)
 
 
-
-
-def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, doc_key: str = "") -> None:
+def _render_note_editor_panel(
+    result: dict, llm_model: str, chat_height: int, doc_key: str = ""
+) -> None:
     """Render the note editor panel (✏️ 노트 수정 tab).
 
     Supports two editing modes selectable via a toggle:
@@ -1336,7 +1344,9 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
     edit_mode_options = ["💬 챗봇", "⌨️ 직접 편집"]
     edit_method_key = f"{_sk}note_editor_method"
     edit_method_pref_key = f"{_sk}note_editor_method_pref"
-    edit_method_default = st.session_state.get(edit_method_pref_key, edit_mode_options[0])
+    edit_method_default = st.session_state.get(
+        edit_method_pref_key, edit_mode_options[0]
+    )
     edit_method_index = (
         edit_mode_options.index(edit_method_default)
         if edit_method_default in edit_mode_options
@@ -1367,7 +1377,12 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
             key=f"{_sk}direct_edit_textarea",
             label_visibility="collapsed",
         )
-        if st.button("✅ 저장", use_container_width=True, type="primary", key=f"{_sk}direct_edit_save"):
+        if st.button(
+            "✅ 저장",
+            use_container_width=True,
+            type="primary",
+            key=f"{_sk}direct_edit_save",
+        ):
             if edited != raw_md:
                 # Store full note under special key for direct edits
                 undo_stack = st.session_state[undo_key].setdefault("__direct__", [])
@@ -1400,7 +1415,9 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
         st.session_state[editor_model_pref_key] = editor_model
 
     # Use index-based selectbox so duplicate headings (e.g. two "## 개요") are distinguished.
-    selected_section_default = st.session_state.get(f"{_sk}selected_edit_section_idx", 0)
+    selected_section_default = st.session_state.get(
+        f"{_sk}selected_edit_section_idx", 0
+    )
     selected_section_default = min(selected_section_default, len(section_headings) - 1)
     selected_section_idx: int = st.selectbox(  # type: ignore[assignment]
         "수정할 섹션",
@@ -1467,9 +1484,21 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
                 st.session_state[pending_sec_key] = section_heading
                 st.session_state[pending_idx_key] = section_idx
                 preview_content = f"**{section_heading}** 섹션 수정 결과:\n\n{edit_result.edited_section_body}"
-                cur_msgs.append({"role": "assistant", "content": preview_content, "is_preview": True})
+                cur_msgs.append(
+                    {
+                        "role": "assistant",
+                        "content": preview_content,
+                        "is_preview": True,
+                    }
+                )
             else:
-                cur_msgs.append({"role": "assistant", "content": f"수정 실패: {edit_result.error}", "is_preview": False})
+                cur_msgs.append(
+                    {
+                        "role": "assistant",
+                        "content": f"수정 실패: {edit_result.error}",
+                        "is_preview": False,
+                    }
+                )
             st.rerun()
 
         # Apply / Cancel buttons inside container (keeps height stable)
@@ -1479,8 +1508,14 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
                 if st.button("✅ 적용", use_container_width=True, type="primary"):
                     pending_idx = st.session_state.get(pending_idx_key, 0)
                     # Push current body of the pending section to undo stack (max 10)
-                    named_sections = [(h, b) for h, b in _split_note_sections(raw_md) if h]
-                    undo_body = named_sections[pending_idx][1] if pending_idx < len(named_sections) else ""
+                    named_sections = [
+                        (h, b) for h, b in _split_note_sections(raw_md) if h
+                    ]
+                    undo_body = (
+                        named_sections[pending_idx][1]
+                        if pending_idx < len(named_sections)
+                        else ""
+                    )
                     undo_stack = st.session_state[undo_key].setdefault(pending_idx, [])
                     undo_stack.append(undo_body)
                     if len(undo_stack) > 10:
@@ -1498,14 +1533,18 @@ def _render_note_editor_panel(result: dict, llm_model: str, chat_height: int, do
                     st.rerun()
 
     # Chat input OUTSIDE the gray box
-    if edit_instruction := st.chat_input("수정 지시를 입력하세요 (예: 코드 예제 추가해줘)"):
+    if edit_instruction := st.chat_input(
+        "수정 지시를 입력하세요 (예: 코드 예제 추가해줘)"
+    ):
         _cur_idx = st.session_state.get(f"{_sk}selected_edit_section_idx", 0)
         st.session_state[chat_key].setdefault(_cur_idx, []).append(
             {"role": "user", "content": edit_instruction}
         )
         st.session_state["_pending_edit"] = {
             "instruction": edit_instruction,
-            "section": st.session_state.get(f"{_sk}selected_edit_section", section_headings[0]),
+            "section": st.session_state.get(
+                f"{_sk}selected_edit_section", section_headings[0]
+            ),
             "section_idx": _cur_idx,
         }
         st.rerun()
@@ -1580,14 +1619,22 @@ def _render_qa_panel(
                 _render_source_block_expanders(msg.get("source_blocks", []))
 
         # Follow-up question buttons after the last assistant message
-        if msgs and msgs[-1]["role"] == "assistant" and not st.session_state.get("_pending_chat"):
+        if (
+            msgs
+            and msgs[-1]["role"] == "assistant"
+            and not st.session_state.get("_pending_chat")
+        ):
             followups = msgs[-1].get("followup_suggestions", [])
             if followups:
                 last_idx = len(msgs) - 1
                 st.markdown('<div class="followup-btns">', unsafe_allow_html=True)
                 for fq_idx, fq in enumerate(followups):
-                    if st.button(fq, key=f"fq_{last_idx}_{fq_idx}", use_container_width=True):
-                        st.session_state[_qa_chat_key].append({"role": "user", "content": fq})
+                    if st.button(
+                        fq, key=f"fq_{last_idx}_{fq_idx}", use_container_width=True
+                    ):
+                        st.session_state[_qa_chat_key].append(
+                            {"role": "user", "content": fq}
+                        )
                         st.session_state["_pending_chat"] = fq
                         st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
@@ -1599,10 +1646,10 @@ def _render_qa_panel(
                 '<div style="display:flex;align-items:center;gap:8px;color:#7A6555;'
                 'font-size:0.88rem;padding:6px 4px">'
                 '<div style="width:14px;height:14px;border:2px solid #E5D9CD;'
-                'border-top-color:#C4553A;border-radius:50%;'
+                "border-top-color:#C4553A;border-radius:50%;"
                 'animation:qa-spin 0.8s linear infinite;flex-shrink:0"></div>'
-                '생각 중...</div>'
-                '<style>@keyframes qa-spin{to{transform:rotate(360deg)}}</style>',
+                "생각 중...</div>"
+                "<style>@keyframes qa-spin{to{transform:rotate(360deg)}}</style>",
                 unsafe_allow_html=True,
             )
 
@@ -1743,7 +1790,9 @@ with st.sidebar:
                     for _nr in list_notes_for_document(_ld.id):
                         _evict_key = f"result_{_nr['file_hash']}_{_nr['vlm_model']}_{_nr['llm_model']}"
                         st.session_state.pop(_evict_key, None)
-                        st.session_state.pop(f"doc_{_nr['file_hash']}_{_nr['vlm_model']}", None)
+                        st.session_state.pop(
+                            f"doc_{_nr['file_hash']}_{_nr['vlm_model']}", None
+                        )
                         st.session_state.pop(f"is_image_{_evict_key}", None)
                         st.session_state.pop(f"_toast_shown_{_evict_key}", None)
                     st.session_state.pop(f"indexed_{_ld.id}", None)
@@ -1755,12 +1804,18 @@ with st.sidebar:
                         and st.session_state.get("_library_doc_id") == _ld.id
                     ):
                         for _k in (
-                            "_library_mode", "_library_doc_id", "_library_cache_key",
-                            "_library_doc_cache_key", "_library_used_vlm", "_library_used_llm",
+                            "_library_mode",
+                            "_library_doc_id",
+                            "_library_cache_key",
+                            "_library_doc_cache_key",
+                            "_library_used_vlm",
+                            "_library_used_llm",
                             "_library_file_hash",
                         ):
                             st.session_state.pop(_k, None)
-                    delete_document_index(_ld.id)  # Remove ChromaDB vectors so re-upload re-indexes
+                    delete_document_index(
+                        _ld.id
+                    )  # Remove ChromaDB vectors so re-upload re-indexes
                     delete_document(_ld.id)
                     st.rerun()
         st.markdown("---")
@@ -1836,7 +1891,7 @@ if _lib_mode:
         f'<div style="background:#F2DDD6;border:1px solid #EACFC5;border-radius:8px;'
         f'padding:0.5em 0.85em;color:#7A6555;font-size:0.82rem;margin-bottom:0.5em">'
         f'📚 라이브러리에서 로드됨 — <b style="color:#3D2E24">{html.escape(doc.source)}</b> '
-        f'(모델: {html.escape(_used_vlm)} / {html.escape(_used_llm)})</div>',
+        f"(모델: {html.escape(_used_vlm)} / {html.escape(_used_llm)})</div>",
         unsafe_allow_html=True,
     )
     if uploaded_file is not None:
@@ -1848,8 +1903,12 @@ if _lib_mode:
         _lib_file_hash = st.session_state.get("_library_file_hash", "")
         if _uploaded_hash != _lib_file_hash:
             for _k in (
-                "_library_mode", "_library_doc_id", "_library_cache_key",
-                "_library_doc_cache_key", "_library_used_vlm", "_library_used_llm",
+                "_library_mode",
+                "_library_doc_id",
+                "_library_cache_key",
+                "_library_doc_cache_key",
+                "_library_used_vlm",
+                "_library_used_llm",
                 "_library_file_hash",
             ):
                 st.session_state.pop(_k, None)
@@ -1929,7 +1988,7 @@ if not _lib_mode:
             if not is_image:
                 status.update(label="2/2 — 학습 노트 생성 중...", state="running")
                 try:
-                    result = generate_note(doc, model=llm_model)
+                    result = generate_note_sectioned(doc, model=llm_model)
                 except Exception as exc:
                     st.error(f"노트 생성 실패: {exc}")
                     st.stop()
@@ -1937,7 +1996,7 @@ if not _lib_mode:
                 st.session_state.setdefault("_pipeline_steps", {})["note"] = True
             else:
                 result = {}
-            status.update(label="분석 완료!", state="complete", expanded=False)
+            status.update(label="분석 완료!", state="complete", expanded=True)
 
         # Cache
         st.session_state[doc_cache_key] = doc
@@ -1986,7 +2045,9 @@ with col_content:
 
     if is_image:
         if _lib_mode:
-            st.info("이미지 미리보기는 원본 파일이 필요합니다. 파일을 다시 업로드하면 미리보기를 확인할 수 있습니다.")
+            st.info(
+                "이미지 미리보기는 원본 파일이 필요합니다. 파일을 다시 업로드하면 미리보기를 확인할 수 있습니다."
+            )
         else:
             preview_controls, preview_action = st.columns([3, 1])
             with preview_controls:
@@ -2023,9 +2084,7 @@ with col_content:
         # Toolbar row: edit toggle + export popover
         toolbar_col, export_col = st.columns([3, 1])
         with toolbar_col:
-            edit_mode = st.toggle(
-                "✏️ 편집 모드", value=False, key="note_edit_toggle"
-            )
+            edit_mode = st.toggle("✏️ 편집 모드", value=False, key="note_edit_toggle")
         with export_col:
             with st.popover("📤 내보내기 ▾", use_container_width=True):
                 st.download_button(
@@ -2035,7 +2094,9 @@ with col_content:
                     mime="text/markdown",
                     use_container_width=True,
                 )
-                if st.button("📋 클립보드 복사", use_container_width=True, key="copy_note_btn"):
+                if st.button(
+                    "📋 클립보드 복사", use_container_width=True, key="copy_note_btn"
+                ):
                     try:
                         pyperclip.copy(full_md)
                         st.toast("📋 클립보드에 복사됐어요!")
@@ -2052,7 +2113,9 @@ with col_content:
         if meta_html:
             st.markdown(meta_html, unsafe_allow_html=True)
         if summary:
-            st.markdown(f'<div class="summary-card">{summary}</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="summary-card">{summary}</div>', unsafe_allow_html=True
+            )
         if key_concepts:
             st.markdown("**핵심 개념**")
             st.markdown(_render_concept_tags(key_concepts), unsafe_allow_html=True)
@@ -2067,7 +2130,9 @@ with col_content:
                 _named_sec_idx = 0  # tracks position among sections that have headings
                 for _sec_heading, _sec_body in sections:
                     content_md = (
-                        f"{_sec_heading}\n\n{_sec_body}".strip() if _sec_heading else _sec_body
+                        f"{_sec_heading}\n\n{_sec_body}".strip()
+                        if _sec_heading
+                        else _sec_body
                     )
                     if not content_md:
                         if _sec_heading:
@@ -2075,25 +2140,37 @@ with col_content:
                         continue
                     if not first_rendered:
                         st.markdown('<hr class="note-sep">', unsafe_allow_html=True)
-                    st.markdown(_render_note_section_html(content_md), unsafe_allow_html=True)
+                    st.markdown(
+                        _render_note_section_html(content_md), unsafe_allow_html=True
+                    )
                     if _sec_heading:
                         _cur_named_idx = _named_sec_idx  # capture for closure
                         _, _action_col = st.columns([6, 1])
                         with _action_col:
-                            st.markdown('<div class="sec-action-btns">', unsafe_allow_html=True)
+                            st.markdown(
+                                '<div class="sec-action-btns">', unsafe_allow_html=True
+                            )
                             if st.button(
                                 "✏️",
                                 key=f"edit_sec_{_cur_named_idx}",
                                 help=f"'{_sec_heading}' 섹션 수정",
                             ):
                                 _editor_sk = f"editor_{doc.id}_"
-                                st.session_state[f"{_editor_sk}selected_edit_section"] = _sec_heading
-                                st.session_state[f"{_editor_sk}selected_edit_section_idx"] = _cur_named_idx
-                                st.session_state[f"{_editor_sk}edit_section_selectbox"] = _cur_named_idx
+                                st.session_state[
+                                    f"{_editor_sk}selected_edit_section"
+                                ] = _sec_heading
+                                st.session_state[
+                                    f"{_editor_sk}selected_edit_section_idx"
+                                ] = _cur_named_idx
+                                st.session_state[
+                                    f"{_editor_sk}edit_section_selectbox"
+                                ] = _cur_named_idx
                                 st.session_state["active_right_panel"] = "✏️ 노트 수정"
                                 st.rerun()
                             _undo_key = f"editor_{doc.id}_note_section_undo"
-                            _sec_stack = st.session_state.get(_undo_key, {}).get(_cur_named_idx, [])
+                            _sec_stack = st.session_state.get(_undo_key, {}).get(
+                                _cur_named_idx, []
+                            )
                             if st.button(
                                 "↩",
                                 key=f"undo_sec_{_cur_named_idx}",
@@ -2101,10 +2178,12 @@ with col_content:
                                 help=f"'{_sec_heading}' 섹션 되돌리기",
                             ):
                                 prev_body = _sec_stack.pop()
-                                result["note_markdown"] = _replace_section_body(raw_md, _cur_named_idx, prev_body)
+                                result["note_markdown"] = _replace_section_body(
+                                    raw_md, _cur_named_idx, prev_body
+                                )
                                 st.session_state["_note_dirty"] = True
                                 st.rerun()
-                            st.markdown('</div>', unsafe_allow_html=True)
+                            st.markdown("</div>", unsafe_allow_html=True)
                         _named_sec_idx += 1
                     first_rendered = False
             else:
@@ -2142,7 +2221,9 @@ with col_chat:
             else:
                 st.info(_qa_disabled_msg)
         else:
-            _render_note_editor_panel(result, llm_model, chat_height=837, doc_key=doc.id)
+            _render_note_editor_panel(
+                result, llm_model, chat_height=837, doc_key=doc.id
+            )
 
 # ─── Persist dirty note edits to SQLite ──────────────────────────────
 if st.session_state.pop("_note_dirty", False):
@@ -2165,7 +2246,8 @@ if doc.blocks:
         mc1, mc2, mc3 = st.columns(3)
         with mc1:
             st.markdown(
-                _render_metric_card(doc.block_count, "총 블록 수"), unsafe_allow_html=True
+                _render_metric_card(doc.block_count, "총 블록 수"),
+                unsafe_allow_html=True,
             )
         with mc2:
             st.markdown(
@@ -2174,7 +2256,8 @@ if doc.blocks:
             )
         with mc3:
             st.markdown(
-                _render_metric_card(doc.status.value, "처리 상태"), unsafe_allow_html=True
+                _render_metric_card(doc.status.value, "처리 상태"),
+                unsafe_allow_html=True,
             )
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("**블록 구성**")
