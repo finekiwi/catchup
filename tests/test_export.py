@@ -1,4 +1,4 @@
-"""Tests for utils/export.py — interleave_figures_into_sections, export_markdown/pdf/docx."""
+"""Tests for utils/export.py — interleave_figures_into_sections, export_markdown_zip/pdf/docx."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from utils.export import (
     _build_section_page_ranges,
     _place_figures_page_based,
     export_docx,
-    export_markdown,
+    export_markdown_zip,
     export_pdf,
     interleave_figures_into_sections,
 )
@@ -241,16 +241,20 @@ def test_interleave_with_doc_none_uses_interpolation_fallback(tmp_path: Path) ->
 # ---------------------------------------------------------------------------
 
 
-def test_export_markdown_with_doc_does_not_raise(tmp_path: Path) -> None:
-    """export_markdown(doc=...) should succeed without raising."""
+def test_export_markdown_zip_with_doc_does_not_raise(tmp_path: Path) -> None:
+    """export_markdown_zip(doc=...) should return valid ZIP bytes without raising."""
     img = tmp_path / "fig.png"
     img.write_bytes(_png_bytes())
     block = _make_block(page=1, image_path=str(img))
     doc = _make_doc([(1, 1, "body")])
 
-    result = export_markdown(_SAMPLE_MD, "title", [block], doc=doc)
-    assert result.startswith("# title")
-    assert "data:image/png;base64," in result
+    result = export_markdown_zip(_SAMPLE_MD, "title", [block], doc=doc)
+    assert result[:2] == b"PK", "ZIP must start with PK header"
+    with zipfile.ZipFile(io.BytesIO(result)) as zf:
+        assert "note.md" in zf.namelist()
+        md_content = zf.read("note.md").decode()
+    assert md_content.startswith("# title")
+    assert "data:image" not in md_content, "ZIP markdown should use relative paths, not base64"
 
 
 def test_export_docx_with_doc_does_not_raise(tmp_path: Path) -> None:
@@ -317,37 +321,46 @@ def test_interleave_missing_image_excluded(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# export_markdown
+# export_markdown_zip
 # ---------------------------------------------------------------------------
 
 
-def test_export_markdown_no_figures() -> None:
-    """With no figures, output should be vanilla markdown starting with # title."""
-    result = export_markdown(_SAMPLE_MD, "테스트 노트", [])
-    assert result.startswith("# 테스트 노트")
-    assert "## 서론" in result
-    assert "data:image" not in result
+def test_export_markdown_zip_no_figures() -> None:
+    """ZIP with no figures should contain only note.md with section text."""
+    result = export_markdown_zip(_SAMPLE_MD, "테스트 노트", [])
+    with zipfile.ZipFile(io.BytesIO(result)) as zf:
+        names = zf.namelist()
+        md = zf.read("note.md").decode()
+    assert "note.md" in names
+    assert len([n for n in names if n.startswith("figures/")]) == 0
+    assert md.startswith("# 테스트 노트")
+    assert "## 서론" in md
+    assert "data:image" not in md
 
 
-def test_export_markdown_base64_inline_at_correct_position(tmp_path: Path) -> None:
-    """Figure image should appear as base64 data URI after the matching section."""
+def test_export_markdown_zip_figure_uses_relative_path(tmp_path: Path) -> None:
+    """Figure should be stored in figures/ and referenced via relative path."""
     img = tmp_path / "fig.png"
     img.write_bytes(_png_bytes())
     block = _make_block(page=1, image_path=str(img))
 
-    result = export_markdown(_SAMPLE_MD, "노트 제목", [block])
+    result = export_markdown_zip(_SAMPLE_MD, "노트 제목", [block])
 
-    assert "data:image/png;base64," in result, "Base64 image must be present in output"
-    # Section heading should appear before the image
-    img_pos = result.index("data:image")
-    section_pos = result.index("## 서론")
-    assert section_pos < img_pos, "Section heading must precede its inline image"
+    with zipfile.ZipFile(io.BytesIO(result)) as zf:
+        names = zf.namelist()
+        md = zf.read("note.md").decode()
+
+    assert any(n.startswith("figures/") for n in names), "figures/ entry must exist in ZIP"
+    assert "figures/" in md, "note.md must reference image via relative figures/ path"
+    assert "data:image" not in md, "note.md must NOT contain base64 inline images"
 
 
-def test_export_markdown_title_prefix(tmp_path: Path) -> None:
-    """Output must begin with '# <title>'."""
-    result = export_markdown(_SAMPLE_MD, "My Title", [])
-    assert result.startswith("# My Title\n\n")
+def test_export_markdown_zip_title_prefix() -> None:
+    """note.md must begin with '# <title>'."""
+    result = export_markdown_zip(_SAMPLE_MD, "My Title", [])
+    with zipfile.ZipFile(io.BytesIO(result)) as zf:
+        md = zf.read("note.md").decode()
+    assert md.startswith("# My Title\n\n")
 
 
 # ---------------------------------------------------------------------------

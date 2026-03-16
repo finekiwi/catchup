@@ -2288,49 +2288,73 @@ with col_content:
         with toolbar_col:
             edit_mode = st.toggle("✏️ 편집 모드", value=False, key="note_edit_toggle")
         with export_col:
-            from utils.export import export_docx, export_markdown, export_pdf
+            from utils.export import export_docx, export_markdown_zip, export_pdf
 
             _export_fig_blocks = [b for b in doc.blocks if b.image_path and Path(b.image_path).exists()]
+            _export_cache_key = f"export_{cache_key}"
             with st.popover("📤 내보내기 ▾", use_container_width=True):
-                # Markdown with inline base64 images
-                _md_data = export_markdown(raw_md, title, _export_fig_blocks, doc)
-                st.download_button(
-                    "📥 마크다운 (.md)",
-                    data=_md_data,
-                    file_name=f"{file_stem}_note.md",
-                    mime="text/markdown",
-                    use_container_width=True,
-                )
-                # PDF
-                try:
-                    _pdf_data = export_pdf(raw_md, title, _export_fig_blocks, doc)
+                # --- ZIP ---
+                # Export data is generated lazily on first button click and cached in
+                # session_state to avoid re-running expensive export functions on every rerun.
+                _zip_key = f"{_export_cache_key}_zip"
+                if _zip_key not in st.session_state:
+                    if st.button("📥 마크다운+이미지 (.zip)", use_container_width=True, key="gen_zip_btn"):
+                        st.session_state[_zip_key] = export_markdown_zip(raw_md, title, _export_fig_blocks, doc)
+                        st.rerun()
+                else:
+                    st.download_button(
+                        "📥 마크다운+이미지 (.zip)",
+                        data=st.session_state[_zip_key],
+                        file_name=f"{file_stem}_note.zip",
+                        mime="application/zip",
+                        use_container_width=True,
+                    )
+                # --- PDF ---
+                _pdf_key = f"{_export_cache_key}_pdf"
+                if _pdf_key not in st.session_state:
+                    if st.button("📄 PDF (.pdf)", use_container_width=True, key="gen_pdf_btn"):
+                        try:
+                            st.session_state[_pdf_key] = export_pdf(raw_md, title, _export_fig_blocks, doc)
+                        except Exception as _pdf_exc:
+                            st.session_state[_pdf_key] = None
+                            st.session_state[f"{_pdf_key}_err"] = str(_pdf_exc)
+                        st.rerun()
+                elif st.session_state.get(f"{_pdf_key}_err"):
+                    st.caption(f"PDF 생성 불가: {st.session_state[f'{_pdf_key}_err']}")
+                else:
                     st.download_button(
                         "📄 PDF (.pdf)",
-                        data=_pdf_data,
+                        data=st.session_state[_pdf_key],
                         file_name=f"{file_stem}_note.pdf",
                         mime="application/pdf",
                         use_container_width=True,
                     )
-                except Exception as _pdf_exc:
-                    st.caption(f"PDF 생성 불가: {_pdf_exc}")
-                # DOCX
-                try:
-                    _docx_data = export_docx(raw_md, title, _export_fig_blocks, doc)
+                # --- DOCX ---
+                _docx_key = f"{_export_cache_key}_docx"
+                if _docx_key not in st.session_state:
+                    if st.button("📝 Word (.docx)", use_container_width=True, key="gen_docx_btn"):
+                        try:
+                            st.session_state[_docx_key] = export_docx(raw_md, title, _export_fig_blocks, doc)
+                        except Exception as _docx_exc:
+                            st.session_state[_docx_key] = None
+                            st.session_state[f"{_docx_key}_err"] = str(_docx_exc)
+                        st.rerun()
+                elif st.session_state.get(f"{_docx_key}_err"):
+                    st.caption(f"DOCX 생성 불가: {st.session_state[f'{_docx_key}_err']}")
+                else:
                     st.download_button(
                         "📝 Word (.docx)",
-                        data=_docx_data,
+                        data=st.session_state[_docx_key],
                         file_name=f"{file_stem}_note.docx",
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         use_container_width=True,
                     )
-                except Exception as _docx_exc:
-                    st.caption(f"DOCX 생성 불가: {_docx_exc}")
-                # Clipboard (existing)
+                # --- Clipboard — plain markdown without images (no base64 bloat) ---
                 if st.button(
                     "📋 클립보드 복사", use_container_width=True, key="copy_note_btn"
                 ):
                     try:
-                        pyperclip.copy(_md_data)
+                        pyperclip.copy(full_md)
                         st.toast("📋 클립보드에 복사됐어요!")
                     except Exception:
                         st.toast("복사 실패")

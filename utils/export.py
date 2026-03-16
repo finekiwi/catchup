@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import logging
 import re
+import zipfile
 from collections import defaultdict
 from io import BytesIO
 from pathlib import Path
@@ -229,13 +230,17 @@ def interleave_figures_into_sections(
     return items
 
 
-def export_markdown(
+def export_markdown_zip(
     note_markdown: str,
     title: str,
     fig_blocks: list["Block"],
     doc: Optional["Document"] = None,
-) -> str:
-    """Return note as markdown with base64 inline images at UI-matching positions.
+) -> bytes:
+    """Return note as a ZIP archive containing note.md + figures/ directory.
+
+    Images are referenced via relative paths (``figures/{order}.png``) so the
+    markdown renders correctly when the ZIP is extracted.  This avoids the
+    bloated base64 inline approach and keeps the markdown file human-readable.
 
     Args:
         note_markdown: Raw note markdown (without title prefix).
@@ -245,21 +250,63 @@ def export_markdown(
             Falls back to page interpolation when None.
 
     Returns:
-        Full markdown string starting with ``# {title}``.
+        ZIP file bytes containing ``note.md`` and ``figures/*.png``.
     """
     items = interleave_figures_into_sections(note_markdown, fig_blocks, doc=doc)
-    parts: list[str] = [f"# {title}\n\n"]
+    md_parts: list[str] = [f"# {title}\n\n"]
+    image_files: list[tuple[str, bytes]] = []  # (path_in_zip, raw_bytes)
+
     for item in items:
         if item["type"] == "section":
-            parts.append(item["markdown"] + "\n\n")
+            md_parts.append(item["markdown"] + "\n\n")
         elif item["type"] == "figure":
             b = item["block"]
-            img_bytes = Path(b.image_path).read_bytes()
-            b64 = base64.b64encode(img_bytes).decode()
+            if not b.image_path or not Path(b.image_path).exists():
+                continue
+            fname = f"figures/{b.order}.png"
             caption = item["caption"]
-            parts.append(f"![{caption}](data:image/png;base64,{b64})\n\n")
-            parts.append(f"*{caption}*\n\n")
-    return "".join(parts)
+            md_parts.append(f"![{caption}]({fname})\n\n")
+            md_parts.append(f"*{caption}*\n\n")
+            image_files.append((fname, Path(b.image_path).read_bytes()))
+
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("note.md", "".join(md_parts))
+        for path, data in image_files:
+            zf.writestr(path, data)
+    return buf.getvalue()
+
+
+# Bundled Noto Sans KR font files (Regular + Bold) for Korean PDF rendering.
+# Paths are relative to the project root; resolved at call time.
+_FONT_DIR = Path(__file__).parent.parent / "data" / "fonts"
+_FONT_REGULAR = _FONT_DIR / "NotoSansKR-Regular.ttf"
+_FONT_BOLD = _FONT_DIR / "NotoSansKR-Bold.ttf"
+
+
+def _korean_font_css() -> str:
+    """Return @font-face CSS block if Noto Sans KR TTF files are present.
+
+    Font files are expected at ``data/fonts/NotoSansKR-{Regular,Bold}.ttf``.
+    Uses file:// URIs so xhtml2pdf can load fonts directly without base64
+    encoding overhead.  Returns an empty string when files are not found so
+    the function degrades gracefully (Korean text will render as boxes).
+    """
+    if not (_FONT_REGULAR.exists() and _FONT_BOLD.exists()):
+        LOGGER.warning(
+            "Noto Sans KR font files not found at %s — Korean PDF text may not render correctly",
+            _FONT_DIR,
+        )
+        return ""
+
+    reg_uri = _FONT_REGULAR.as_uri()
+    bold_uri = _FONT_BOLD.as_uri()
+    return (
+        f"@font-face {{font-family:'NotoSansKR';font-weight:normal;"
+        f"src:url('{reg_uri}') format('truetype');}}"
+        f"@font-face {{font-family:'NotoSansKR';font-weight:bold;"
+        f"src:url('{bold_uri}') format('truetype');}}"
+    )
 
 
 def export_pdf(
@@ -271,8 +318,8 @@ def export_pdf(
     """Return note as PDF bytes with inline images at UI-matching positions.
 
     Requires ``xhtml2pdf`` (``pip install xhtml2pdf``).
-    Korean text rendering requires a CJK-capable system font (e.g. Noto Sans KR)
-    to be available; falls back to the default reportlab font otherwise.
+    Korean text is rendered using Noto Sans KR if the TTF files are present at
+    ``data/fonts/NotoSansKR-Regular.ttf`` and ``data/fonts/NotoSansKR-Bold.ttf``.
 
     Args:
         note_markdown: Raw note markdown (without title prefix).
@@ -287,6 +334,8 @@ def export_pdf(
     Raises:
         RuntimeError: If xhtml2pdf reports errors during PDF generation.
     """
+    import html as _html
+
     import markdown as md_lib
     from xhtml2pdf import pisa
 
@@ -306,17 +355,19 @@ def export_pdf(
             html_parts.append(
                 f'<div style="margin:20px 0;text-align:center;">'
                 f'<img src="data:image/png;base64,{b64}" style="max-width:100%;" />'
-                f'<p style="color:#666;font-size:0.9em;">{caption}</p>'
+                f'<p style="color:#666;font-size:0.9em;">{_html.escape(caption)}</p>'
                 f"</div>"
             )
 
-    import html as _html
+    font_css = _korean_font_css()
+    body_font = "'NotoSansKR',Helvetica,Arial,sans-serif" if font_css else "Helvetica,Arial,sans-serif"
 
     full_html = (
         "<!DOCTYPE html>"
-        "<html><head><meta charset=\"utf-8\">"
+        '<html><head><meta charset="utf-8">'
         "<style>"
-        "body{font-family:Helvetica,Arial,sans-serif;max-width:800px;"
+        f"{font_css}"
+        f"body{{font-family:{body_font};max-width:800px;"
         "margin:0 auto;padding:20px;line-height:1.8;}"
         "h1{color:#C4553A;}"
         "h2{color:#333;border-bottom:1px solid #ddd;padding-bottom:8px;}"
