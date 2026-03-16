@@ -981,39 +981,48 @@ def _filter_inline_figure_blocks(doc: "Document", fig_blocks: list) -> list:
     return filtered
 
 
-def _render_note_with_figures(raw_md: str, fig_blocks: list) -> None:
+def _render_note_with_figures(raw_md: str, fig_blocks: list, doc=None) -> None:
     """Render note markdown section-by-section, injecting figure images between sections.
 
-    Each figure is placed after the section whose page position best matches
-    the figure's page number. Same-page figures are spread across adjacent sections
-    to avoid stacking.
+    When ``doc`` is provided, uses page-to-section mapping: computes the actual
+    page range covered by each section from document body blocks and places each
+    figure in the section whose range contains the figure's page.
+    Falls back to legacy page interpolation when ``doc`` is None.
 
     Args:
         raw_md: Note markdown text (without title prefix).
-        fig_blocks: List of Block objects with type==FIGURE and image_path set.
+        fig_blocks: List of Block objects with image_path set.
+        doc: Parsed Document for page-based placement (preferred). None = fallback.
     """
+    from utils.export import _build_section_page_ranges, _place_figures_page_based
+
     sections = _split_note_sections(raw_md)  # list of (heading, body) tuples
     n = len(sections)
     if n == 0:
         st.markdown(_render_note_html(raw_md), unsafe_allow_html=True)
         return
 
-    pages = [b.metadata.page for b in fig_blocks]
-    valid_pages = [p for p in pages if p is not None]
-    page_min = min(valid_pages) if valid_pages else 1
-    page_max = max(valid_pages) if valid_pages else 1
-    page_range = max(page_max - page_min, 1)
+    if doc is not None:
+        ranges = _build_section_page_ranges(doc, n)
+        section_figs = _place_figures_page_based(fig_blocks, ranges)
+    else:
+        pages = [b.metadata.page for b in fig_blocks]
+        valid_pages = [p for p in pages if p is not None]
+        page_min = min(valid_pages) if valid_pages else 1
+        page_max = max(valid_pages) if valid_pages else 1
+        page_range = max(page_max - page_min, 1)
 
-    section_figs: dict[int, list] = defaultdict(list)
-    page_counters: dict = defaultdict(int)
-    for b in fig_blocks:
-        p = b.metadata.page if b.metadata.page is not None else page_max
-        ratio = (p - page_min) / page_range
-        base_idx = min(int(ratio * n), n - 1)
-        count = page_counters[b.metadata.page]
-        page_counters[b.metadata.page] += 1
-        idx = min(base_idx + count, n - 1)
-        section_figs[idx].append(b)
+        section_figs_dd: dict[int, list] = defaultdict(list)
+        page_counters: dict = defaultdict(int)
+        for b in fig_blocks:
+            p = b.metadata.page if b.metadata.page is not None else page_max
+            ratio = (p - page_min) / page_range
+            base_idx = min(int(ratio * n), n - 1)
+            count = page_counters[b.metadata.page]
+            page_counters[b.metadata.page] += 1
+            idx = min(base_idx + count, n - 1)
+            section_figs_dd[idx].append(b)
+        section_figs = dict(section_figs_dd)
 
     for i, (heading, body) in enumerate(sections):
         # Skip heading-only sections with no body and no figures — these are
@@ -2283,7 +2292,7 @@ with col_content:
             _export_fig_blocks = [b for b in doc.blocks if b.image_path and Path(b.image_path).exists()]
             with st.popover("📤 내보내기 ▾", use_container_width=True):
                 # Markdown with inline base64 images
-                _md_data = export_markdown(raw_md, title, _export_fig_blocks)
+                _md_data = export_markdown(raw_md, title, _export_fig_blocks, doc)
                 st.download_button(
                     "📥 마크다운 (.md)",
                     data=_md_data,
@@ -2293,7 +2302,7 @@ with col_content:
                 )
                 # PDF
                 try:
-                    _pdf_data = export_pdf(raw_md, title, _export_fig_blocks)
+                    _pdf_data = export_pdf(raw_md, title, _export_fig_blocks, doc)
                     st.download_button(
                         "📄 PDF (.pdf)",
                         data=_pdf_data,
@@ -2305,7 +2314,7 @@ with col_content:
                     st.caption(f"PDF 생성 불가: {_pdf_exc}")
                 # DOCX
                 try:
-                    _docx_data = export_docx(raw_md, title, _export_fig_blocks)
+                    _docx_data = export_docx(raw_md, title, _export_fig_blocks, doc)
                     st.download_button(
                         "📝 Word (.docx)",
                         data=_docx_data,
@@ -2415,7 +2424,7 @@ with col_content:
                 fig_blocks = [b for b in doc.blocks if b.image_path]
                 fig_blocks = _filter_inline_figure_blocks(doc, fig_blocks)
                 if fig_blocks:
-                    _render_note_with_figures(raw_md, fig_blocks)
+                    _render_note_with_figures(raw_md, fig_blocks, doc)
                 else:
                     st.markdown(_render_note_html(raw_md), unsafe_allow_html=True)
     else:

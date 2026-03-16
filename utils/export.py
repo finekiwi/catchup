@@ -7,23 +7,85 @@ import logging
 from collections import defaultdict
 from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
-    from models.document import Block
+    from models.document import Block, Document
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _build_section_page_ranges(doc: "Document", n_sections: int) -> list[tuple[int, int]]:
+    """Compute the page range covered by each note section using document blocks.
+
+    Divides body blocks (non-image, with page metadata) evenly across n_sections
+    and returns the min/max page of each chunk.
+
+    Returns:
+        List of (min_page, max_page) tuples, one per section.
+    """
+    body_blocks = sorted(
+        [b for b in doc.blocks if b.metadata.page is not None and not b.image_path],
+        key=lambda b: b.order,
+    )
+    m = len(body_blocks)
+    if m == 0:
+        return [(1, 9999)] * n_sections
+    ranges: list[tuple[int, int]] = []
+    for i in range(n_sections):
+        start = (i * m) // n_sections
+        end = ((i + 1) * m) // n_sections
+        chunk = body_blocks[start:end]
+        pages = [b.metadata.page for b in chunk if b.metadata.page is not None]
+        if pages:
+            ranges.append((min(pages), max(pages)))
+        else:
+            prev = ranges[-1][1] if ranges else 1
+            ranges.append((prev, prev))
+    return ranges
+
+
+def _place_figures_page_based(fig_blocks: list["Block"], section_page_ranges: list[tuple[int, int]]) -> dict[int, list]:
+    """Map each figure block to a section index based on its page number.
+
+    1st pass: exact range match (lo <= page <= hi).
+    2nd pass: nearest midpoint fallback.
+    Figures without a page are appended to the last section.
+
+    Returns:
+        dict[section_idx → list[Block]]
+    """
+    section_figs: dict[int, list] = defaultdict(list)
+    for b in fig_blocks:
+        p = b.metadata.page
+        if p is None:
+            section_figs[len(section_page_ranges) - 1].append(b)
+            continue
+        matched = next(
+            (i for i, (lo, hi) in enumerate(section_page_ranges) if lo <= p <= hi),
+            None,
+        )
+        if matched is None:
+            matched = min(
+                range(len(section_page_ranges)),
+                key=lambda i: abs((section_page_ranges[i][0] + section_page_ranges[i][1]) / 2 - p),
+            )
+        section_figs[matched].append(b)
+    return dict(section_figs)
 
 
 def interleave_figures_into_sections(
     note_markdown: str,
     fig_blocks: list["Block"],
+    doc: Optional["Document"] = None,
 ) -> list[dict]:
     """Split note into sections and interleave figures at UI-matching positions.
 
-    Uses the same page interpolation + round-robin logic as
-    ``_render_note_with_figures`` in ui/demo.py so export output mirrors the
-    on-screen layout exactly.
+    When ``doc`` is provided, uses page-to-section mapping (preferred) which
+    computes the actual page range of each section from document body blocks and
+    places each figure in the section whose page range contains the figure's page.
+    When ``doc`` is None, falls back to the legacy page interpolation logic for
+    backward compatibility.
 
     Returns a list of items in render order::
 
@@ -47,23 +109,29 @@ def interleave_figures_into_sections(
             return f"{heading}\n\n{body}".strip()
         return body
 
-    # Page interpolation — identical to _render_note_with_figures
-    pages = [b.metadata.page for b in fig_blocks]
-    valid_pages = [p for p in pages if p is not None]
-    page_min = min(valid_pages) if valid_pages else 1
-    page_max = max(valid_pages) if valid_pages else 1
-    page_range = max(page_max - page_min, 1)
+    if doc is not None:
+        # Page-based mapping: use actual section page ranges from document blocks
+        ranges = _build_section_page_ranges(doc, n)
+        section_figs = _place_figures_page_based(fig_blocks, ranges)
+    else:
+        # Legacy page interpolation fallback
+        pages = [b.metadata.page for b in fig_blocks]
+        valid_pages = [p for p in pages if p is not None]
+        page_min = min(valid_pages) if valid_pages else 1
+        page_max = max(valid_pages) if valid_pages else 1
+        page_range = max(page_max - page_min, 1)
 
-    section_figs: dict[int, list] = defaultdict(list)
-    page_counters: dict = defaultdict(int)
-    for b in fig_blocks:
-        p = b.metadata.page if b.metadata.page is not None else page_max
-        ratio = (p - page_min) / page_range
-        base_idx = min(int(ratio * n), n - 1)
-        count = page_counters[b.metadata.page]
-        page_counters[b.metadata.page] += 1
-        idx = min(base_idx + count, n - 1)
-        section_figs[idx].append(b)
+        section_figs_dd: dict[int, list] = defaultdict(list)
+        page_counters: dict = defaultdict(int)
+        for b in fig_blocks:
+            p = b.metadata.page if b.metadata.page is not None else page_max
+            ratio = (p - page_min) / page_range
+            base_idx = min(int(ratio * n), n - 1)
+            count = page_counters[b.metadata.page]
+            page_counters[b.metadata.page] += 1
+            idx = min(base_idx + count, n - 1)
+            section_figs_dd[idx].append(b)
+        section_figs = dict(section_figs_dd)
 
     items: list[dict] = []
     for i, (heading, body) in enumerate(sections):
@@ -81,18 +149,25 @@ def interleave_figures_into_sections(
     return items
 
 
-def export_markdown(note_markdown: str, title: str, fig_blocks: list["Block"]) -> str:
+def export_markdown(
+    note_markdown: str,
+    title: str,
+    fig_blocks: list["Block"],
+    doc: Optional["Document"] = None,
+) -> str:
     """Return note as markdown with base64 inline images at UI-matching positions.
 
     Args:
         note_markdown: Raw note markdown (without title prefix).
         title: Document / note title.
         fig_blocks: Blocks with ``image_path`` set (pre-filtered by caller).
+        doc: Parsed Document used for page-to-section mapping (preferred).
+            Falls back to page interpolation when None.
 
     Returns:
         Full markdown string starting with ``# {title}``.
     """
-    items = interleave_figures_into_sections(note_markdown, fig_blocks)
+    items = interleave_figures_into_sections(note_markdown, fig_blocks, doc=doc)
     parts: list[str] = [f"# {title}\n\n"]
     for item in items:
         if item["type"] == "section":
@@ -107,7 +182,12 @@ def export_markdown(note_markdown: str, title: str, fig_blocks: list["Block"]) -
     return "".join(parts)
 
 
-def export_pdf(note_markdown: str, title: str, fig_blocks: list["Block"]) -> bytes:
+def export_pdf(
+    note_markdown: str,
+    title: str,
+    fig_blocks: list["Block"],
+    doc: Optional["Document"] = None,
+) -> bytes:
     """Return note as PDF bytes with inline images at UI-matching positions.
 
     Requires ``xhtml2pdf`` (``pip install xhtml2pdf``).
@@ -118,6 +198,8 @@ def export_pdf(note_markdown: str, title: str, fig_blocks: list["Block"]) -> byt
         note_markdown: Raw note markdown (without title prefix).
         title: Document / note title shown as the PDF ``<h1>``.
         fig_blocks: Blocks with ``image_path`` set.
+        doc: Parsed Document used for page-to-section mapping (preferred).
+            Falls back to page interpolation when None.
 
     Returns:
         PDF file contents as bytes.
@@ -128,7 +210,7 @@ def export_pdf(note_markdown: str, title: str, fig_blocks: list["Block"]) -> byt
     import markdown as md_lib
     from xhtml2pdf import pisa
 
-    items = interleave_figures_into_sections(note_markdown, fig_blocks)
+    items = interleave_figures_into_sections(note_markdown, fig_blocks, doc=doc)
 
     html_parts: list[str] = []
     for item in items:
@@ -174,7 +256,12 @@ def export_pdf(note_markdown: str, title: str, fig_blocks: list["Block"]) -> byt
     return buffer.getvalue()
 
 
-def export_docx(note_markdown: str, title: str, fig_blocks: list["Block"]) -> bytes:
+def export_docx(
+    note_markdown: str,
+    title: str,
+    fig_blocks: list["Block"],
+    doc: Optional["Document"] = None,
+) -> bytes:
     """Return note as DOCX bytes with inline images at UI-matching positions.
 
     Requires ``python-docx`` (``pip install python-docx``).
@@ -183,6 +270,8 @@ def export_docx(note_markdown: str, title: str, fig_blocks: list["Block"]) -> by
         note_markdown: Raw note markdown (without title prefix).
         title: Document / note title shown as the DOCX ``Heading 0``.
         fig_blocks: Blocks with ``image_path`` set.
+        doc: Parsed Document used for page-to-section mapping (preferred).
+            Falls back to page interpolation when None.
 
     Returns:
         DOCX file contents as bytes.
@@ -191,10 +280,10 @@ def export_docx(note_markdown: str, title: str, fig_blocks: list["Block"]) -> by
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Inches, Pt
 
-    doc = DocxDocument()
-    doc.add_heading(title, level=0)
+    docx_doc = DocxDocument()
+    docx_doc.add_heading(title, level=0)
 
-    items = interleave_figures_into_sections(note_markdown, fig_blocks)
+    items = interleave_figures_into_sections(note_markdown, fig_blocks, doc=doc)
 
     for item in items:
         if item["type"] == "section":
@@ -203,22 +292,22 @@ def export_docx(note_markdown: str, title: str, fig_blocks: list["Block"]) -> by
                 if not stripped:
                     continue
                 if stripped.startswith("## "):
-                    doc.add_heading(stripped[3:], level=2)
+                    docx_doc.add_heading(stripped[3:], level=2)
                 elif stripped.startswith("### "):
-                    doc.add_heading(stripped[4:], level=3)
+                    docx_doc.add_heading(stripped[4:], level=3)
                 elif stripped.startswith(("- ", "* ")):
-                    doc.add_paragraph(stripped[2:], style="List Bullet")
+                    docx_doc.add_paragraph(stripped[2:], style="List Bullet")
                 else:
-                    doc.add_paragraph(stripped)
+                    docx_doc.add_paragraph(stripped)
 
         elif item["type"] == "figure":
             b = item["block"]
-            doc.add_picture(b.image_path, width=Inches(5.5))
-            caption_para = doc.add_paragraph(item["caption"])
+            docx_doc.add_picture(b.image_path, width=Inches(5.5))
+            caption_para = docx_doc.add_paragraph(item["caption"])
             caption_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
             if caption_para.runs:
                 caption_para.runs[0].font.size = Pt(9)
 
     buffer = BytesIO()
-    doc.save(buffer)
+    docx_doc.save(buffer)
     return buffer.getvalue()
