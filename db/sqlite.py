@@ -164,7 +164,6 @@ def save_document(doc: Document) -> None:
                 source = excluded.source,
                 format = excluded.format,
                 status = excluded.status,
-                created_at = excluded.created_at,
                 metadata = excluded.metadata,
                 document_json = excluded.document_json
             """,
@@ -173,7 +172,7 @@ def save_document(doc: Document) -> None:
                 doc.source,
                 doc.format.value,
                 doc.status.value,
-                datetime.now(timezone.utc).isoformat(),
+                doc.created_at.isoformat() if doc.created_at else datetime.now(timezone.utc).isoformat(),
                 metadata_json,
                 document_json,
             ),

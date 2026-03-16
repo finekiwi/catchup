@@ -125,7 +125,10 @@ def _build_section_page_ranges(
     return ranges
 
 
-def _place_figures_page_based(fig_blocks: list["Block"], section_page_ranges: list[tuple[int, int]]) -> dict[int, list]:
+def _place_figures_page_based(
+    fig_blocks: list["Block"],
+    section_page_ranges: list[tuple[int, int]],
+) -> dict[int, list]:
     """Map each figure block to a section index based on its page number.
 
     1st pass: exact range match (lo <= page <= hi).
@@ -349,6 +352,8 @@ def export_pdf(
             )
         elif item["type"] == "figure":
             b = item["block"]
+            if not b.image_path:
+                continue
             img_bytes = Path(b.image_path).read_bytes()
             b64 = base64.b64encode(img_bytes).decode()
             caption = item["caption"]

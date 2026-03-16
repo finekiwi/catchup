@@ -241,12 +241,44 @@ def _presave_figure_images(dl_doc: object, document: Document) -> None:
         LOGGER.debug("Could not create figures dir %s: %s", output_dir, exc)
         return
 
-    for fb, pi in zip(figure_blocks, picture_items):
+    # Build (PictureItem, page_no | None) pairs for page-based matching
+    def _get_page(item: object) -> int | None:
+        prov = getattr(item, "prov", None)
+        if not prov:
+            return None
+        first = prov[0] if isinstance(prov, list) else prov
+        try:
+            return int(getattr(first, "page_no", None))
+        except (TypeError, ValueError):
+            return None
+
+    pi_with_pages = [(pi, _get_page(pi)) for pi in picture_items]
+
+    # Greedy page-based matching: same logic as figure_enricher._match_figures_by_page
+    used: set[int] = set()
+    for fb in figure_blocks:
+        fb_page = fb.metadata.page
+        matched_pi = None
+        for idx, (pi, pi_page) in enumerate(pi_with_pages):
+            if idx in used:
+                continue
+            # Require same page; only fall back to order if both pages are absent
+            if fb_page is not None and pi_page is not None:
+                if fb_page == pi_page:
+                    matched_pi = pi
+                    used.add(idx)
+                    break
+            elif fb_page is None and pi_page is None:
+                matched_pi = pi
+                used.add(idx)
+                break
+        if matched_pi is None:
+            continue
         img_path = output_dir / f"{fb.order}.png"
         if img_path.exists():
             continue
         try:
-            pil_image = pi.get_image(dl_doc)
+            pil_image = matched_pi.get_image(dl_doc)
             if pil_image is None:
                 continue
             pil_image.save(img_path, format="PNG")

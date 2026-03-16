@@ -2290,7 +2290,8 @@ with col_content:
         with export_col:
             from utils.export import export_docx, export_markdown_zip, export_pdf
 
-            _export_fig_blocks = [b for b in doc.blocks if b.image_path and Path(b.image_path).exists()]
+            _all_fig_blocks = [b for b in doc.blocks if b.image_path and Path(b.image_path).exists()]
+            _export_fig_blocks = _filter_inline_figure_blocks(doc, _all_fig_blocks)
             _export_cache_key = f"export_{cache_key}"
             with st.popover("📤 내보내기 ▾", use_container_width=True):
                 # --- ZIP ---
@@ -2457,7 +2458,7 @@ with col_content:
 
 with col_chat:
     _qa_ready = bool(st.session_state.get(_indexed_key))
-    _indexing_in_progress = not _qa_ready and bool(doc.blocks) and not is_image and not _lib_mode
+    _indexing_in_progress = not _qa_ready and bool(doc.blocks) and not _lib_mode
     _qa_disabled_msg = (
         "Q&A 인덱싱 중입니다. 잠시 기다려 주세요..."
         if _indexing_in_progress else
@@ -2494,14 +2495,15 @@ with col_chat:
 # ─── Lazy RAG indexing (runs after note + Q&A columns are rendered) ──
 # Indexing is deferred here so the note appears immediately. The Q&A panel
 # shows "인덱싱 중..." above until indexing completes and st.rerun() fires.
-if not st.session_state.get(_indexed_key) and doc.blocks and not is_image and not _lib_mode:
+# Both image and non-image modes require indexing for Q&A to become available.
+if not st.session_state.get(_indexed_key) and doc.blocks and not _lib_mode:
     try:
         index_document(doc)
         st.session_state[_indexed_key] = True
+        st.rerun()
     except Exception as _idx_exc:
         LOGGER.warning("RAG indexing failed: %s", _idx_exc)
         st.warning(f"RAG 인덱싱 실패: {_idx_exc}")
-    st.rerun()
 
 # ─── Persist dirty note edits to SQLite ──────────────────────────────
 if st.session_state.pop("_note_dirty", False):

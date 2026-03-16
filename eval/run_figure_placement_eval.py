@@ -7,8 +7,8 @@ deterministic, no LLM chat cost).  An optional ``--llm-judge`` flag enables
 an LLM-as-judge cross-check.
 
 Placement logic mirrors ui/demo.py `_render_note_with_figures`:
-  - figures are mapped to sections by linear page interpolation
-  - same-page figures are spread across consecutive sections
+  - figures are mapped to sections by section-header page boundary matching (v3)
+  - falls back to even body-block split when no section-number match is found
 
 Usage:
     # Evaluate by original PDF path (embedding similarity only):

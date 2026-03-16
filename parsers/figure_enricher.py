@@ -422,8 +422,14 @@ def _match_figures_by_page(
         for idx, (pi, pi_page) in enumerate(picture_items):
             if idx in used:
                 continue
-            # Match: same page, or either side has no page info (fallback)
-            if fb_page is None or pi_page is None or fb_page == pi_page:
+            # Require same page when both have page info to avoid wrong-item consumption.
+            # Fall back to order-based (first unused) only when BOTH sides lack page info.
+            if fb_page is not None and pi_page is not None:
+                if fb_page == pi_page:
+                    matched.append((fb, pi))
+                    used.add(idx)
+                    break
+            elif fb_page is None and pi_page is None:
                 matched.append((fb, pi))
                 used.add(idx)
                 break
