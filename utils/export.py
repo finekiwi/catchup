@@ -144,11 +144,13 @@ def _place_figures_page_based(
         if p is None:
             section_figs[len(section_page_ranges) - 1].append(b)
             continue
-        matched = next(
-            (i for i, (lo, hi) in enumerate(section_page_ranges) if lo <= p <= hi),
-            None,
-        )
-        if matched is None:
+        # Use the *last* matching section (deepest / most specific) so that when a
+        # parent heading and its first subsection share the same start page their
+        # ranges overlap and we correctly assign the figure to the subsection.
+        all_matches = [i for i, (lo, hi) in enumerate(section_page_ranges) if lo <= p <= hi]
+        if all_matches:
+            matched = all_matches[-1]
+        else:
             matched = min(
                 range(len(section_page_ranges)),
                 key=lambda i: abs((section_page_ranges[i][0] + section_page_ranges[i][1]) / 2 - p),

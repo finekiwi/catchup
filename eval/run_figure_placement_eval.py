@@ -470,16 +470,14 @@ def build_cases(doc, note_markdown: str) -> list[FigurePlacementCase]:
 
     Returns a list of FigurePlacementCase — one per placed figure.
     Figures without image_path (not enriched) are excluded.
-    """
-    from models.document import BlockType
 
-    fig_blocks = [
-        b for b in doc.blocks
-        if b.type == BlockType.FIGURE and b.image_path
-    ]
+    Uses ``b.image_path`` as the sole discriminator (same as the UI rendering
+    filter) so enriched CODE / TEXT_CAPTURE / FIGURE blocks are all included.
+    """
+    fig_blocks = [b for b in doc.blocks if b.image_path]
 
     if not fig_blocks:
-        LOGGER.info("No enriched FIGURE blocks found in document %s", doc.id)
+        LOGGER.info("No blocks with image_path found in document %s", doc.id)
         return []
 
     sections = _split_sections(note_markdown)
@@ -537,12 +535,8 @@ def run_placement_eval(
     Returns:
         FigurePlacementReport with per-figure scores.
     """
-    from models.document import BlockType
-
-    total_figures = sum(
-        1 for b in doc.blocks
-        if b.type == BlockType.FIGURE and b.image_path
-    )
+    # Count all blocks with image_path — same discriminator as UI rendering and build_cases.
+    total_figures = sum(1 for b in doc.blocks if b.image_path)
 
     cases = build_cases(doc, note_markdown)
     sections = _split_sections(note_markdown)

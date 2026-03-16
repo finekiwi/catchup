@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import base64
 import io
 import zipfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 from PIL import Image as PILImage
 
 from models.document import Block, BlockMetadata, BlockType
@@ -188,6 +186,28 @@ def test_place_figures_none_page_goes_to_last_section(tmp_path: Path) -> None:
     result = _place_figures_page_based([block], ranges)
 
     assert 2 in result, "No-page figure should go to last section (index 2)"
+
+
+def test_place_figures_same_page_overlap_picks_deepest_section(tmp_path: Path) -> None:
+    """When parent and child sections share a start page, figure goes to the deepest match.
+
+    Scenario: section 0 (parent) covers pages 3–9, section 1 (child) covers pages 3–4.
+    A figure on page 3 overlaps both ranges; the deepest (last) match — section 1 — wins.
+    """
+    img = tmp_path / "fig.png"
+    img.write_bytes(_png_bytes())
+    block = _make_block(page=3, image_path=str(img))
+
+    # Section 0: parent "4.1" starts page 3, ends before next top-level on page 10
+    # Section 1: subsection "4.1.1" also starts page 3, ends before page 5
+    ranges = [(3, 9), (3, 4), (5, 9)]
+    result = _place_figures_page_based([block], ranges)
+
+    assert 1 in result, (
+        "Figure on page 3 should be assigned to the deepest matching section (index 1), "
+        "not the parent section (index 0)"
+    )
+    assert result[1][0] is block
 
 
 # ---------------------------------------------------------------------------
