@@ -1829,8 +1829,8 @@ def test_render_qa_notice_loading_uses_info_palette() -> None:
 
     assert captured, "st.markdown should be called by _render_qa_notice"
     html = captured[0]
-    assert "#DDE8ED" in html, "Loading notice background should use Steel Blue info palette"
-    assert "#5A7B8C" in html, "Loading notice border should use Steel Blue info palette"
+    assert "#F5EDE4" in html, "Loading notice background should use warm accent palette"
+    assert "#C4553A" in html, "Loading notice border should use warm accent palette"
     assert "⏳" in html, "Loading notice should include a spinner icon"
 
 

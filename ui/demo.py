@@ -1397,11 +1397,11 @@ def _serialize_source_blocks(source_blocks: list) -> list[dict]:
 def _render_qa_notice(msg: str, *, is_loading: bool = False) -> None:
     """Render a palette-styled notice in the Q&A panel.
 
-    Uses info palette (#DDE8ED / #5A7B8C) for loading states and
+    Uses warm accent palette (#F5EDE4 / #C4553A) for loading states and
     warning palette (#F5EBDB / #C4883A) for disabled / missing-vector states.
     """
     if is_loading:
-        bg, border, color, icon = "#DDE8ED", "#5A7B8C", "#3A5260", "⏳"
+        bg, border, color, icon = "#F5EDE4", "#C4553A", "#7A2A14", "⏳"
     else:
         bg, border, color, icon = "#F5EBDB", "#C4883A", "#7A5020", "ℹ️"
     st.markdown(
