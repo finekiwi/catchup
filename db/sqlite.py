@@ -1,4 +1,4 @@
-"""SQLite persistence layer for document metadata."""
+"""SQLite persistence layer for documents and generated notes."""
 
 from __future__ import annotations
 
@@ -18,6 +18,9 @@ load_dotenv()
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_SQLITE_PATH = "data/catchup.db"
+_NOTE_RESULT_VERSION = "v2"
+_NOTE_RESULT_VERSION_KEY = "_note_result_version"
+_DOCUMENT_JSON_COLUMN = "document_json"
 
 
 def _sqlite_path() -> Path:
@@ -53,7 +56,30 @@ def _initialize_schema(connection: sqlite3.Connection) -> None:
         )
         """
     )
+    _ensure_column(
+        connection,
+        table="documents",
+        column=_DOCUMENT_JSON_COLUMN,
+        column_type="TEXT NOT NULL DEFAULT ''",
+    )
     connection.commit()
+
+
+def _ensure_column(
+    connection: sqlite3.Connection,
+    *,
+    table: str,
+    column: str,
+    column_type: str,
+) -> None:
+    """Add a missing SQLite column for lightweight schema migrations."""
+    existing = {
+        row["name"] if isinstance(row, sqlite3.Row) else row[1]
+        for row in connection.execute(f"PRAGMA table_info({table})")
+    }
+    if column in existing:
+        return
+    connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
 
 
 def _connect() -> Optional[sqlite3.Connection]:
@@ -79,6 +105,28 @@ def _row_to_document(row: sqlite3.Row) -> Optional[Document]:
         LOGGER.warning("Invalid metadata JSON for document id=%s", row["id"])
         metadata_dict = {}
 
+    document_raw = (
+        row[_DOCUMENT_JSON_COLUMN]
+        if _DOCUMENT_JSON_COLUMN in row.keys()
+        else ""
+    )
+    if document_raw:
+        try:
+            document_dict = json.loads(document_raw)
+            document_dict.update(
+                {
+                    "id": row["id"],
+                    "source": row["source"],
+                    "format": row["format"],
+                    "status": row["status"],
+                    "created_at": row["created_at"],
+                    "metadata": metadata_dict or document_dict.get("metadata", {}),
+                }
+            )
+            return Document.model_validate(document_dict)
+        except Exception:
+            LOGGER.exception("Failed to deserialize full document id=%s", row["id"])
+
     try:
         metadata = DocumentMetadata.model_validate(metadata_dict)
         return Document.model_validate(
@@ -98,31 +146,35 @@ def _row_to_document(row: sqlite3.Row) -> Optional[Document]:
 
 
 def save_document(doc: Document) -> None:
-    """Save document metadata into SQLite using upsert semantics."""
+    """Save a full document into SQLite using upsert semantics."""
     connection = _connect()
     if connection is None:
         return
 
     metadata_json = json.dumps(doc.metadata.model_dump(mode="json"), ensure_ascii=False)
+    document_json = json.dumps(doc.model_dump(mode="json"), ensure_ascii=False)
     try:
         connection.execute(
             """
-            INSERT INTO documents (id, source, format, status, created_at, metadata)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO documents (
+                id, source, format, status, created_at, metadata, document_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 source = excluded.source,
                 format = excluded.format,
                 status = excluded.status,
-                created_at = excluded.created_at,
-                metadata = excluded.metadata
+                metadata = excluded.metadata,
+                document_json = excluded.document_json
             """,
             (
                 doc.id,
                 doc.source,
                 doc.format.value,
                 doc.status.value,
-                doc.created_at.isoformat(),
+                doc.created_at.isoformat() if doc.created_at else datetime.now(timezone.utc).isoformat(),
                 metadata_json,
+                document_json,
             ),
         )
         connection.commit()
@@ -141,7 +193,7 @@ def get_document(doc_id: str) -> Optional[Document]:
     try:
         row = connection.execute(
             """
-            SELECT id, source, format, status, created_at, metadata
+            SELECT id, source, format, status, created_at, metadata, document_json
             FROM documents
             WHERE id = ?
             """,
@@ -210,7 +262,7 @@ def list_documents(limit: int = 20) -> list[Document]:
     try:
         rows = connection.execute(
             """
-            SELECT id, source, format, status, created_at, metadata
+            SELECT id, source, format, status, created_at, metadata, document_json
             FROM documents
             ORDER BY created_at DESC
             LIMIT ?
@@ -235,6 +287,7 @@ def list_documents(limit: int = 20) -> list[Document]:
 # Notes CRUD
 # ---------------------------------------------------------------------------
 
+
 def save_note(
     document_id: str,
     file_hash: str,
@@ -248,7 +301,9 @@ def save_note(
     if connection is None:
         return
 
-    result_json = json.dumps(result, ensure_ascii=False)
+    persisted_result = dict(result)
+    persisted_result[_NOTE_RESULT_VERSION_KEY] = _NOTE_RESULT_VERSION
+    result_json = json.dumps(persisted_result, ensure_ascii=False)
     now = datetime.now(timezone.utc).isoformat()
     try:
         connection.execute(
@@ -261,7 +316,15 @@ def save_note(
                 is_image = excluded.is_image,
                 updated_at = excluded.updated_at
             """,
-            (document_id, file_hash, vlm_model, llm_model, result_json, int(is_image), now),
+            (
+                document_id,
+                file_hash,
+                vlm_model,
+                llm_model,
+                result_json,
+                int(is_image),
+                now,
+            ),
         )
         connection.commit()
     except sqlite3.Error:
@@ -290,8 +353,12 @@ def get_note(document_id: str, vlm_model: str, llm_model: str) -> Optional[dict]
         ).fetchone()
         if row is None:
             return None
+        result = json.loads(row["result_json"])
+        if result.get(_NOTE_RESULT_VERSION_KEY) != _NOTE_RESULT_VERSION:
+            return None
+        result.pop(_NOTE_RESULT_VERSION_KEY, None)
         return {
-            "result": json.loads(row["result_json"]),
+            "result": result,
             "file_hash": row["file_hash"],
             "vlm_model": row["vlm_model"],
             "llm_model": row["llm_model"],
@@ -324,16 +391,24 @@ def list_notes_for_document(document_id: str) -> list[dict]:
         results = []
         for row in rows:
             try:
-                results.append({
-                    "result": json.loads(row["result_json"]),
-                    "file_hash": row["file_hash"],
-                    "vlm_model": row["vlm_model"],
-                    "llm_model": row["llm_model"],
-                    "is_image": bool(row["is_image"]),
-                    "updated_at": row["updated_at"],
-                })
+                result = json.loads(row["result_json"])
+                if result.get(_NOTE_RESULT_VERSION_KEY) != _NOTE_RESULT_VERSION:
+                    continue
+                result.pop(_NOTE_RESULT_VERSION_KEY, None)
+                results.append(
+                    {
+                        "result": result,
+                        "file_hash": row["file_hash"],
+                        "vlm_model": row["vlm_model"],
+                        "llm_model": row["llm_model"],
+                        "is_image": bool(row["is_image"]),
+                        "updated_at": row["updated_at"],
+                    }
+                )
             except json.JSONDecodeError:
-                LOGGER.warning("Skipping note with invalid JSON for document_id=%s", document_id)
+                LOGGER.warning(
+                    "Skipping note with invalid JSON for document_id=%s", document_id
+                )
         return results
     except sqlite3.Error:
         LOGGER.exception("Failed to list notes for document_id=%s", document_id)

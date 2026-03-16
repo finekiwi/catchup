@@ -25,13 +25,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+)
 LOGGER = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = "gpt-4.1-nano"
 _DEFAULT_OUTPUT = Path("eval/ko_en_pairs.json")
-_MAX_BLOCKS_PER_DOC = 60      # sample cap per document to stay within token budget
-_MAX_CONTENT_LEN = 300        # truncate each block content
+_MAX_BLOCKS_PER_DOC = 60  # sample cap per document to stay within token budget
+_MAX_CONTENT_LEN = 300  # truncate each block content
 
 _GOLDEN_DIR = Path("data/golden")
 _GOLDEN_FILES = [
@@ -85,10 +87,13 @@ def _load_doc_texts(file_path: Path) -> list[str]:
         return []
 
     from models.document import BlockType
+
     text_blocks = [
-        b for b in doc.blocks
+        b
+        for b in doc.blocks
         if b.type in (BlockType.TEXT, BlockType.CODE)
-        and b.content and len(b.content.strip()) > 20
+        and b.content
+        and len(b.content.strip()) > 20
     ]
 
     # Sample evenly across document to cover full scope
@@ -125,11 +130,13 @@ def _extract_pairs_for_doc(
         )
         latency = (time.perf_counter() - t0) * 1000
         raw = (response.choices[0].message.content or "").strip()
-        LOGGER.info("  %s: %.0fms, %d tokens in / %d out",
-                    source,
-                    latency,
-                    response.usage.prompt_tokens if response.usage else 0,
-                    response.usage.completion_tokens if response.usage else 0)
+        LOGGER.info(
+            "  %s: %.0fms, %d tokens in / %d out",
+            source,
+            latency,
+            response.usage.prompt_tokens if response.usage else 0,
+            response.usage.completion_tokens if response.usage else 0,
+        )
 
         # Strip markdown code fences if present
         if raw.startswith("```"):
@@ -190,7 +197,9 @@ def run(model: str, output: Path) -> list[dict]:
     LOGGER.info("Total pairs: %d (deduped from %d)", len(deduped), len(all_pairs))
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(deduped, indent=2, ensure_ascii=False), encoding="utf-8")
+    output.write_text(
+        json.dumps(deduped, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     LOGGER.info("Saved to %s", output)
 
     return deduped
@@ -201,8 +210,12 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser = argparse.ArgumentParser(
         description="Extract KO-EN vocabulary mismatch pairs from golden-set documents."
     )
-    parser.add_argument("--model", default=_DEFAULT_MODEL, help="OpenAI model for extraction")
-    parser.add_argument("--output", type=Path, default=_DEFAULT_OUTPUT, help="Output JSON path")
+    parser.add_argument(
+        "--model", default=_DEFAULT_MODEL, help="OpenAI model for extraction"
+    )
+    parser.add_argument(
+        "--output", type=Path, default=_DEFAULT_OUTPUT, help="Output JSON path"
+    )
     args = parser.parse_args(argv)
 
     pairs = run(args.model, args.output)

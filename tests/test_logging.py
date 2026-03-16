@@ -37,4 +37,3 @@ def test_log_api_call_writes_jsonl_record(tmp_path, monkeypatch) -> None:
     assert persisted["error"] is None
     assert "timestamp" in persisted
     assert persisted == record
-

@@ -8,8 +8,9 @@ import time
 from pathlib import Path
 
 try:
-    from docling.datamodel.base_models import ConversionStatus
-    from docling.document_converter import DocumentConverter
+    from docling.datamodel.base_models import ConversionStatus, InputFormat
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.document_converter import DocumentConverter, PdfFormatOption
     from docling_core.types.doc import DocItemLabel, PictureItem, TableItem, TextItem
 except ImportError:  # pragma: no cover
     DocumentConverter = None  # type: ignore[assignment,misc]
@@ -18,6 +19,9 @@ except ImportError:  # pragma: no cover
     TextItem = None  # type: ignore[assignment]
     TableItem = None  # type: ignore[assignment]
     PictureItem = None  # type: ignore[assignment]
+    InputFormat = None  # type: ignore[assignment]
+    PdfPipelineOptions = None  # type: ignore[assignment]
+    PdfFormatOption = None  # type: ignore[assignment]
 
 from models.document import (
     Block,
@@ -34,7 +38,9 @@ LOGGER = logging.getLogger(__name__)
 _LABEL_TO_BLOCK_TYPE: dict[str, BlockType] = {
     DocItemLabel.TEXT.value if DocItemLabel else "text": BlockType.TEXT,
     DocItemLabel.TITLE.value if DocItemLabel else "title": BlockType.TEXT,
-    DocItemLabel.SECTION_HEADER.value if DocItemLabel else "section_header": BlockType.TEXT,
+    DocItemLabel.SECTION_HEADER.value
+    if DocItemLabel
+    else "section_header": BlockType.TEXT,
     DocItemLabel.LIST_ITEM.value if DocItemLabel else "list_item": BlockType.TEXT,
     DocItemLabel.CAPTION.value if DocItemLabel else "caption": BlockType.TEXT,
     DocItemLabel.FOOTNOTE.value if DocItemLabel else "footnote": BlockType.TEXT,
@@ -77,11 +83,21 @@ def parse_pdf(file_path: str) -> Document:
 
     try:
         if DocumentConverter is None:
-            LOGGER.error("docling is unavailable; returning fallback document for %s", file_path)
+            LOGGER.error(
+                "docling is unavailable; returning fallback document for %s", file_path
+            )
             _mark_parse_failed(document=document)
             return document
 
-        converter = DocumentConverter()
+        pipeline_options = PdfPipelineOptions()
+        pipeline_options.generate_page_images = True
+        pipeline_options.generate_picture_images = True
+        pipeline_options.images_scale = 2.0
+        converter = DocumentConverter(
+            format_options={
+                InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+            }
+        )
         result = converter.convert(file_path, raises_on_error=False)
 
         if ConversionStatus is not None and result.status == ConversionStatus.FAILURE:
@@ -93,12 +109,19 @@ def parse_pdf(file_path: str) -> Document:
         if not document.blocks:
             _mark_parse_failed(document=document)
         else:
+            # Pre-save figure images while we have the live DoclingDocument.
+            # Docling's JSON cache does not preserve embedded image bytes, so
+            # enrich_pdf_figures cannot call PictureItem.get_image() on a cached
+            # doc.  Saving images here avoids a costly second conversion later.
+            _presave_figure_images(result.document, document)
             save_cached_parse(source_path, document)
             save_docling_doc(source_path, result.document)
         return document
 
     except Exception:
-        LOGGER.exception("Failed to parse PDF %s; returning fallback document", file_path)
+        LOGGER.exception(
+            "Failed to parse PDF %s; returning fallback document", file_path
+        )
         _mark_parse_failed(document=document)
         return document
     finally:
@@ -110,12 +133,18 @@ def _to_blocks(doc: object) -> list[Block]:
     blocks: list[Block] = []
 
     for item, _level in doc.iterate_items():
-        label_str = item.label.value if hasattr(item.label, "value") else str(item.label)
+        label_str = (
+            item.label.value if hasattr(item.label, "value") else str(item.label)
+        )
         block_type = _LABEL_TO_BLOCK_TYPE.get(label_str, BlockType.TEXT)
         page = _extract_page(item)
 
         if isinstance(item, TableItem):
-            content = item.export_to_markdown() if hasattr(item, "export_to_markdown") else "[table]"
+            content = (
+                item.export_to_markdown(doc)
+                if hasattr(item, "export_to_markdown")
+                else "[table]"
+            )
             if not content:
                 content = "[table]"
         elif isinstance(item, PictureItem):
@@ -130,7 +159,11 @@ def _to_blocks(doc: object) -> list[Block]:
 
         caption = _extract_caption(item)
         metadata = BlockMetadata(page=page, caption=caption)
-        blocks.append(Block(type=block_type, content=content, order=len(blocks), metadata=metadata))
+        blocks.append(
+            Block(
+                type=block_type, content=content, order=len(blocks), metadata=metadata
+            )
+        )
 
     return blocks
 
@@ -165,7 +198,9 @@ def _safe_document_id(file_path: str) -> str:
     try:
         return generate_document_id(file_path=file_path)
     except Exception:
-        LOGGER.exception("Failed to hash source file %s; using path hash fallback", file_path)
+        LOGGER.exception(
+            "Failed to hash source file %s; using path hash fallback", file_path
+        )
         return hashlib.sha256(file_path.encode("utf-8")).hexdigest()[:16]
 
 
@@ -173,3 +208,80 @@ def _mark_parse_failed(document: Document) -> None:
     """Mark parsing failure in document tags without duplicating entries."""
     if "parse_failed" not in document.metadata.tags:
         document.metadata.tags.append("parse_failed")
+
+
+def _presave_figure_images(dl_doc: object, document: Document) -> None:
+    """Save raw figure images to data/figures/{doc.id}/ while dl_doc is live in memory.
+
+    Docling's JSON cache does not preserve embedded picture image bytes, so
+    PictureItem.get_image() returns None when loaded from cache.  By saving the
+    images here (during parse, when the live DoclingDocument is available) we
+    allow enrich_pdf_figures to skip re-conversion on subsequent uploads.
+
+    Images are saved as {block.order}.png.  Existing files are skipped.
+    Errors are logged at DEBUG level and do not affect parse results.
+    """
+    figure_blocks = [b for b in document.blocks if b.type == BlockType.FIGURE]
+    if not figure_blocks:
+        return
+
+    picture_items = [
+        item
+        for item, _level in dl_doc.iterate_items()
+        if isinstance(item, PictureItem)
+    ] if PictureItem is not None else []
+
+    if not picture_items:
+        return
+
+    output_dir = Path("data/figures") / document.id
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        LOGGER.debug("Could not create figures dir %s: %s", output_dir, exc)
+        return
+
+    # Build (PictureItem, page_no | None) pairs for page-based matching
+    def _get_page(item: object) -> int | None:
+        prov = getattr(item, "prov", None)
+        if not prov:
+            return None
+        first = prov[0] if isinstance(prov, list) else prov
+        try:
+            return int(getattr(first, "page_no", None))
+        except (TypeError, ValueError):
+            return None
+
+    pi_with_pages = [(pi, _get_page(pi)) for pi in picture_items]
+
+    # Greedy page-based matching: same logic as figure_enricher._match_figures_by_page
+    used: set[int] = set()
+    for fb in figure_blocks:
+        fb_page = fb.metadata.page
+        matched_pi = None
+        for idx, (pi, pi_page) in enumerate(pi_with_pages):
+            if idx in used:
+                continue
+            # Require same page; only fall back to order if both pages are absent
+            if fb_page is not None and pi_page is not None:
+                if fb_page == pi_page:
+                    matched_pi = pi
+                    used.add(idx)
+                    break
+            elif fb_page is None and pi_page is None:
+                matched_pi = pi
+                used.add(idx)
+                break
+        if matched_pi is None:
+            continue
+        img_path = output_dir / f"{fb.order}.png"
+        if img_path.exists():
+            continue
+        try:
+            pil_image = matched_pi.get_image(dl_doc)
+            if pil_image is None:
+                continue
+            pil_image.save(img_path, format="PNG")
+            LOGGER.debug("Pre-saved figure image: %s", img_path)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.debug("Skipped pre-save for block order=%d: %s", fb.order, exc)

@@ -20,7 +20,7 @@ LOGGER = logging.getLogger(__name__)
 
 _REWRITE_MODEL = "gpt-4.1-nano"
 _MAX_TOKENS = 128
-_REWRITE_COST_INPUT_PER_1M = 0.10   # USD per 1M input tokens for gpt-4.1-nano
+_REWRITE_COST_INPUT_PER_1M = 0.10  # USD per 1M input tokens for gpt-4.1-nano
 _REWRITE_COST_OUTPUT_PER_1M = 0.40  # USD per 1M output tokens for gpt-4.1-nano
 
 

@@ -20,12 +20,15 @@ from typing import Optional
 from utils.logging import log_api_call
 
 try:
-    from deepeval.metrics import FaithfulnessMetric, ContextualPrecisionMetric, ContextualRecallMetric, GEval
+    from deepeval.metrics import (
+        FaithfulnessMetric,
+        ContextualPrecisionMetric,
+        ContextualRecallMetric,
+        GEval,
+    )
     from deepeval.test_case import LLMTestCase, LLMTestCaseParams
 except ImportError as _deepeval_err:
-    raise ImportError(
-        "deepeval not installed. Run: uv add deepeval"
-    ) from _deepeval_err
+    raise ImportError("deepeval not installed. Run: uv add deepeval") from _deepeval_err
 
 LOGGER = logging.getLogger(__name__)
 
@@ -141,7 +144,9 @@ class EvalReport:
     passed_cases: int
     model: str
     judge_model: str
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    timestamp: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +243,9 @@ def _evaluate_single_case(
         context_precision_metric.measure(test_case)
         context_precision_score = context_precision_metric.score or 0.0
     except Exception as exc:
-        LOGGER.warning("ContextPrecision metric failed for case %s: %s", case.case_id, exc)
+        LOGGER.warning(
+            "ContextPrecision metric failed for case %s: %s", case.case_id, exc
+        )
         error_msg = (error_msg or "") + f" context_precision: {exc}"
 
     try:
@@ -255,7 +262,12 @@ def _evaluate_single_case(
         LOGGER.warning("Citation metric failed for case %s: %s", case.case_id, exc)
         error_msg = (error_msg or "") + f" citation: {exc}"
 
-    overall = (faithfulness_score + context_precision_score + context_recall_score + citation_score) / 4.0
+    overall = (
+        faithfulness_score
+        + context_precision_score
+        + context_recall_score
+        + citation_score
+    ) / 4.0
 
     return CaseResult(
         case_id=case.case_id,
@@ -300,7 +312,9 @@ def run_evaluation(cases: list[EvalCase], model: str = "gpt-4o-mini") -> EvalRep
     judge_model = _resolve_judge_model(model)
     LOGGER.info(
         "Starting evaluation: %d cases, answer_model=%s, judge_model=%s",
-        len(cases), model, judge_model,
+        len(cases),
+        model,
+        judge_model,
     )
 
     faithfulness_metric = FaithfulnessMetric(
@@ -326,7 +340,11 @@ def run_evaluation(cases: list[EvalCase], model: str = "gpt-4o-mini") -> EvalRep
     for case in cases:
         LOGGER.debug("Evaluating case %s", case.case_id)
         result = _evaluate_single_case(
-            case, faithfulness_metric, context_precision_metric, context_recall_metric, citation_metric
+            case,
+            faithfulness_metric,
+            context_precision_metric,
+            context_recall_metric,
+            citation_metric,
         )
         per_case_results.append(result)
 
@@ -367,14 +385,20 @@ def run_evaluation(cases: list[EvalCase], model: str = "gpt-4o-mini") -> EvalRep
 
     LOGGER.info(
         "Evaluation complete: overall=%.4f, faithfulness=%.4f, precision=%.4f, recall=%.4f, citation=%.4f, passed=%d/%d",
-        report.overall_score, report.faithfulness_score,
-        report.context_precision_score, report.context_recall_score,
-        report.citation_score, passed, n,
+        report.overall_score,
+        report.faithfulness_score,
+        report.context_precision_score,
+        report.context_recall_score,
+        report.citation_score,
+        passed,
+        n,
     )
     return report
 
 
-def save_report(report: EvalReport, output_dir: Path = Path("data/eval_results")) -> Path:
+def save_report(
+    report: EvalReport, output_dir: Path = Path("data/eval_results")
+) -> Path:
     """Persist an EvalReport to a timestamped JSON file.
 
     Args:
@@ -389,7 +413,9 @@ def save_report(report: EvalReport, output_dir: Path = Path("data/eval_results")
     out_path = output_dir / f"eval_report_{ts}.json"
 
     report_dict = asdict(report)
-    out_path.write_text(json.dumps(report_dict, indent=2, ensure_ascii=False), encoding="utf-8")
+    out_path.write_text(
+        json.dumps(report_dict, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     LOGGER.info("EvalReport saved to %s", out_path)
     return out_path
 

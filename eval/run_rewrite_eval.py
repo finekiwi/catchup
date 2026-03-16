@@ -24,7 +24,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+)
 LOGGER = logging.getLogger(__name__)
 
 _GOLDEN_PDF_PATH = Path("eval/golden_set.json")
@@ -41,9 +43,9 @@ _REWRITE_MODEL = "gpt-4.1-nano"
 #   - Mixed KO/EN queries against Korean-language documents
 # ---------------------------------------------------------------------------
 REWRITE_NEEDED_CASES: set[str] = {
-    "gs_005",        # "MLP" abbreviation → "MLP (Multilayer Perceptron)" helps match EN+KO docs
-    "gs_008",        # EN query against KO git book; "inline commit" → "인라인 커밋 (inline commit, git commit -m)"
-    "gs_016",        # KO colloquial compound "커밋로그" → "커밋 로그 (commit log, git log, 기록보기)"; vanilla retrieves commit-intro chunks instead of git log section
+    "gs_005",  # "MLP" abbreviation → "MLP (Multilayer Perceptron)" helps match EN+KO docs
+    "gs_008",  # EN query against KO git book; "inline commit" → "인라인 커밋 (inline commit, git commit -m)"
+    "gs_016",  # KO colloquial compound "커밋로그" → "커밋 로그 (commit log, git log, 기록보기)"; vanilla retrieves commit-intro chunks instead of git log section
     "gs_ipynb_003",  # "RAG" acronym → "RAG (Retrieval-Augmented Generation, 검색 증강 생성)" in KO notebook
     "gs_ipynb_008",  # mixed KO query containing "노드 조회" — KO/EN expansion helpful
     "gs_ipynb_009",  # EN query about KO RAG pipeline; "search_db tool" + "RAG pipeline" expansion helpful
@@ -74,7 +76,9 @@ def _case_ckpt_path(output: Path, label: str, model: str) -> Path:
     answers from a different model.
     """
     safe_model = model.replace("/", "_").replace(":", "_")
-    return output.parent / f".ckpt_{output.stem}_{label.lower()}_{safe_model}_cases.jsonl"
+    return (
+        output.parent / f".ckpt_{output.stem}_{label.lower()}_{safe_model}_cases.jsonl"
+    )
 
 
 def _load_case_checkpoint(path: Path) -> dict[str, dict]:
@@ -175,9 +179,15 @@ def _run_pipeline_with_ckpt(
     judge_model = _resolve_judge_model(model)
 
     # Build metric instances once and reuse across cases
-    faithfulness_metric = FaithfulnessMetric(threshold=0.5, model=judge_model, include_reason=True)
-    context_precision_metric = ContextualPrecisionMetric(threshold=0.5, model=judge_model, include_reason=True)
-    context_recall_metric = ContextualRecallMetric(threshold=0.5, model=judge_model, include_reason=True)
+    faithfulness_metric = FaithfulnessMetric(
+        threshold=0.5, model=judge_model, include_reason=True
+    )
+    context_precision_metric = ContextualPrecisionMetric(
+        threshold=0.5, model=judge_model, include_reason=True
+    )
+    context_recall_metric = ContextualRecallMetric(
+        threshold=0.5, model=judge_model, include_reason=True
+    )
     citation_metric = _build_citation_metric(judge_model)
 
     all_case_data: list[dict] = []
@@ -207,7 +217,12 @@ def _run_pipeline_with_ckpt(
             sources = [sb.source for sb in result.source_blocks]
             rewritten_query: str | None = getattr(result, "rewritten_query", None)
         except Exception as exc:
-            LOGGER.warning("%s query failed for %s: %s — will retry on next run", label, case_id, exc)
+            LOGGER.warning(
+                "%s query failed for %s: %s — will retry on next run",
+                label,
+                case_id,
+                exc,
+            )
             query_error = str(exc)
             actual_answer = f"[ERROR] {exc}"
             retrieved_contexts = []
@@ -234,7 +249,12 @@ def _run_pipeline_with_ckpt(
                 citation_metric,
             )
         except Exception as exc:
-            LOGGER.warning("%s eval failed for %s: %s — will retry on next run", label, case_id, exc)
+            LOGGER.warning(
+                "%s eval failed for %s: %s — will retry on next run",
+                label,
+                case_id,
+                exc,
+            )
             # Do not checkpoint; allow the case to be retried on next run
             continue
 
@@ -259,13 +279,19 @@ def _run_pipeline_with_ckpt(
         if query_error is None:
             _append_case_checkpoint(ckpt_path, case_data)
         else:
-            LOGGER.warning("  [%s] %s — skipping checkpoint due to query error", label, case_id)
+            LOGGER.warning(
+                "  [%s] %s — skipping checkpoint due to query error", label, case_id
+            )
         all_case_data.append(case_data)
         LOGGER.info(
             "  [%s] %s — done: overall=%.4f (faith=%.4f, prec=%.4f, rec=%.4f, cit=%.4f)",
-            label, case_id, case_result.overall_score,
-            case_result.faithfulness_score, case_result.context_precision_score,
-            case_result.context_recall_score, case_result.citation_score,
+            label,
+            case_id,
+            case_result.overall_score,
+            case_result.faithfulness_score,
+            case_result.context_precision_score,
+            case_result.context_recall_score,
+            case_result.citation_score,
         )
 
     # Reconstruct aggregate report from all_case_data
@@ -300,7 +326,9 @@ def _run_pipeline_with_ckpt(
 
     per_case_scores = [d["overall_score"] for d in all_case_data]
     rewritten_queries: list[str | None] = [d["rewritten_query"] for d in all_case_data]
-    retrieved_contexts: list[list[str]] = [d["retrieved_contexts"] for d in all_case_data]
+    retrieved_contexts: list[list[str]] = [
+        d["retrieved_contexts"] for d in all_case_data
+    ]
 
     return report, per_case_scores, rewritten_queries, retrieved_contexts
 
@@ -323,18 +351,20 @@ def _binary_comparison(
     result = []
     for i, item in enumerate(items):
         case_id = item.get("id", f"case_{i}")
-        result.append({
-            "case_id": case_id,
-            "question": item["question"],
-            "rewritten_query": rewrite_queries[i],
-            "rewrite_needed": case_id in REWRITE_NEEDED_CASES,
-            "vanilla_overall": round(vanilla_scores[i], 4),
-            "rewrite_overall": round(rewrite_scores[i], 4),
-            "vanilla_correct": vanilla_scores[i] >= _PASS_THRESHOLD,
-            "rewrite_correct": rewrite_scores[i] >= _PASS_THRESHOLD,
-            "vanilla_retrieved": vanilla_contexts[i],
-            "rewrite_retrieved": rewrite_contexts[i],
-        })
+        result.append(
+            {
+                "case_id": case_id,
+                "question": item["question"],
+                "rewritten_query": rewrite_queries[i],
+                "rewrite_needed": case_id in REWRITE_NEEDED_CASES,
+                "vanilla_overall": round(vanilla_scores[i], 4),
+                "rewrite_overall": round(rewrite_scores[i], 4),
+                "vanilla_correct": vanilla_scores[i] >= _PASS_THRESHOLD,
+                "rewrite_correct": rewrite_scores[i] >= _PASS_THRESHOLD,
+                "vanilla_retrieved": vanilla_contexts[i],
+                "rewrite_retrieved": rewrite_contexts[i],
+            }
+        )
     return result
 
 
@@ -345,7 +375,12 @@ def _subgroup_analysis(per_case: list[dict]) -> dict:
 
     def _stats(subset: list[dict]) -> dict:
         if not subset:
-            return {"count": 0, "vanilla_overall": 0.0, "rewrite_overall": 0.0, "delta": 0.0}
+            return {
+                "count": 0,
+                "vanilla_overall": 0.0,
+                "rewrite_overall": 0.0,
+                "delta": 0.0,
+            }
         v_avg = sum(c["vanilla_overall"] for c in subset) / len(subset)
         r_avg = sum(c["rewrite_overall"] for c in subset) / len(subset)
         return {
@@ -369,8 +404,14 @@ def _wilcoxon_test(vanilla_scores: list[float], rewrite_scores: list[float]) -> 
         n = len(vanilla_scores)
         differences = [r - v for v, r in zip(vanilla_scores, rewrite_scores)]
         if all(d == 0 for d in differences):
-            return {"test": "wilcoxon", "n": n, "statistic": None, "p_value": None,
-                    "significant": False, "note": "all differences are zero"}
+            return {
+                "test": "wilcoxon",
+                "n": n,
+                "statistic": None,
+                "p_value": None,
+                "significant": False,
+                "note": "all differences are zero",
+            }
         stat, p_value = wilcoxon(rewrite_scores, vanilla_scores)
         return {
             "test": "wilcoxon",
@@ -389,7 +430,9 @@ def _wilcoxon_test(vanilla_scores: list[float], rewrite_scores: list[float]) -> 
 # ---------------------------------------------------------------------------
 
 
-def run_rewrite_eval(model: str, output: Path = Path("eval/results/rewrite_eval.json")) -> dict:
+def run_rewrite_eval(
+    model: str, output: Path = Path("eval/results/rewrite_eval.json")
+) -> dict:
     """Run vanilla vs rewrite evaluation on the combined 31Q golden set.
 
     Each case is checkpointed to JSONL immediately after query + eval, so a
@@ -419,16 +462,23 @@ def run_rewrite_eval(model: str, output: Path = Path("eval/results/rewrite_eval.
         ckpt_path=ckpt_vanilla,
     )
 
-    rewrite_report, rewrite_scores, rewrite_queries, rewrite_contexts = _run_pipeline_with_ckpt(
-        partial(query_chunked, rewrite=True),
-        label="Rewrite",
-        model=model,
-        items=items,
-        ckpt_path=ckpt_rewrite,
+    rewrite_report, rewrite_scores, rewrite_queries, rewrite_contexts = (
+        _run_pipeline_with_ckpt(
+            partial(query_chunked, rewrite=True),
+            label="Rewrite",
+            model=model,
+            items=items,
+            ckpt_path=ckpt_rewrite,
+        )
     )
 
     per_case = _binary_comparison(
-        items, vanilla_scores, rewrite_scores, rewrite_queries, vanilla_contexts, rewrite_contexts
+        items,
+        vanilla_scores,
+        rewrite_scores,
+        rewrite_queries,
+        vanilla_contexts,
+        rewrite_contexts,
     )
     subgroup = _subgroup_analysis(per_case)
 
@@ -440,7 +490,8 @@ def run_rewrite_eval(model: str, output: Path = Path("eval/results/rewrite_eval.
     stat_all = _wilcoxon_test(vanilla_scores, rewrite_scores)
     stat_needed = (
         _wilcoxon_test(vanilla_needed, rewrite_needed_scores)
-        if needed_indices else {"note": "no rewrite_needed cases"}
+        if needed_indices
+        else {"note": "no rewrite_needed cases"}
     )
 
     vanilla_correct = sum(1 for c in per_case if c["vanilla_correct"])
@@ -452,12 +503,16 @@ def run_rewrite_eval(model: str, output: Path = Path("eval/results/rewrite_eval.
     print(f"  Rewrite correct:  {rewrite_correct}/{len(per_case)}")
     print("\n=== Subgroup Analysis ===")
     for grp, stats in subgroup.items():
-        print(f"  {grp}: n={stats['count']}, vanilla={stats['vanilla_overall']:.4f}, "
-              f"rewrite={stats['rewrite_overall']:.4f}, delta={stats['delta']:+.4f}")
+        print(
+            f"  {grp}: n={stats['count']}, vanilla={stats['vanilla_overall']:.4f}, "
+            f"rewrite={stats['rewrite_overall']:.4f}, delta={stats['delta']:+.4f}"
+        )
     print("\n=== Statistical Test (all) ===")
     print(f"  p={stat_all.get('p_value')}, significant={stat_all.get('significant')}")
     print("=== Statistical Test (rewrite_needed) ===")
-    print(f"  p={stat_needed.get('p_value')}, significant={stat_needed.get('significant')}")
+    print(
+        f"  p={stat_needed.get('p_value')}, significant={stat_needed.get('significant')}"
+    )
 
     return {
         "golden_set": f"{_GOLDEN_PDF_PATH} + {_GOLDEN_IPYNB_PATH}",
@@ -487,9 +542,13 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser = argparse.ArgumentParser(
         description="Run Before/After RAG evaluation: vanilla vs query rewriting (CU-13)."
     )
-    parser.add_argument("--model", type=str, default=_DEFAULT_MODEL, help="Answer LLM model")
     parser.add_argument(
-        "--output", type=Path, default=_OUTPUT_PATH,
+        "--model", type=str, default=_DEFAULT_MODEL, help="Answer LLM model"
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=_OUTPUT_PATH,
         help=f"Output JSON path (default: {_OUTPUT_PATH})",
     )
     args = parser.parse_args(argv)
@@ -501,7 +560,9 @@ def main(argv: Optional[list[str]] = None) -> None:
     results = run_rewrite_eval(args.model, output=args.output)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
+    args.output.write_text(
+        json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     LOGGER.info("Results saved to %s", args.output)
     print(f"\nRewrite eval complete. Results saved to: {args.output}")
 

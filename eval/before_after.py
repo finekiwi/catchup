@@ -109,7 +109,9 @@ class ComparisonReport:
     overall_improvement: float
     results: list[ComparisonResult] = field(default_factory=list)
     model: str = _DEFAULT_MODEL
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    timestamp: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +136,8 @@ def _keyword_score(expected: str, actual: str) -> float:
     actual_lower = actual.lower()
 
     keywords = [
-        w for w in expected_lower.split()
+        w
+        for w in expected_lower.split()
         if len(w) >= _MIN_KEYWORD_LENGTH and w.isalpha()
     ]
     if not keywords:
@@ -185,7 +188,9 @@ def _llm_judge_score(
         verdict = raw.strip().upper()
         return 1.0 if verdict == "CORRECT" else 0.0
     except Exception as exc:
-        LOGGER.warning("LLM judge failed (%s), falling back to keyword score: %s", model, exc)
+        LOGGER.warning(
+            "LLM judge failed (%s), falling back to keyword score: %s", model, exc
+        )
         log_api_call(
             model=model,
             stage="ba_judge",
@@ -262,6 +267,7 @@ def run_comparison(
     # Fail fast here so run_comparison never produces a misleading report where
     # all before_answers are "[ERROR] ..." due to a caught ValueError in the loop.
     from eval.baseline import _SUPPORTED_BASELINE_MODELS
+
     if model not in _SUPPORTED_BASELINE_MODELS:
         raise ValueError(
             f"run_comparison only supports OpenAI models for the baseline pipeline. "
@@ -273,9 +279,7 @@ def run_comparison(
     if not items:
         raise ValueError(f"No items found in golden set at {golden_set_path}")
 
-    LOGGER.info(
-        "Before/After comparison: %d questions, model=%s", len(items), model
-    )
+    LOGGER.info("Before/After comparison: %d questions, model=%s", len(items), model)
 
     results: list[ComparisonResult] = []
 
@@ -311,18 +315,20 @@ def run_comparison(
         before_score = _score_answer(question, expected, before_answer)
         after_score = _score_answer(question, expected, after_answer)
 
-        results.append(ComparisonResult(
-            question=question,
-            tier=tier,
-            case_id=case_id,
-            before_answer=before_answer,
-            after_answer=after_answer,
-            before_sources=before_sources,
-            after_sources=after_sources,
-            before_score=before_score,
-            after_score=after_score,
-            expected_answer=expected,
-        ))
+        results.append(
+            ComparisonResult(
+                question=question,
+                tier=tier,
+                case_id=case_id,
+                before_answer=before_answer,
+                after_answer=after_answer,
+                before_sources=before_sources,
+                after_sources=after_sources,
+                before_score=before_score,
+                after_score=after_score,
+                expected_answer=expected,
+            )
+        )
 
     # Aggregate by tier
     tier_groups: dict[int, list[ComparisonResult]] = {}
@@ -337,7 +343,9 @@ def run_comparison(
         improvement = (
             ((after_avg - before_avg) / before_avg * 100.0)
             if before_avg > 0.0
-            else float("inf") if after_avg > 0.0 else 0.0
+            else float("inf")
+            if after_avg > 0.0
+            else 0.0
         )
         by_tier[t] = TierStats(
             total=n,
@@ -352,7 +360,9 @@ def run_comparison(
     overall_improvement = (
         ((overall_after - overall_before) / overall_before * 100.0)
         if overall_before > 0.0
-        else float("inf") if overall_after > 0.0 else 0.0
+        else float("inf")
+        if overall_after > 0.0
+        else 0.0
     )
 
     report = ComparisonReport(
@@ -367,7 +377,9 @@ def run_comparison(
 
     LOGGER.info(
         "Comparison complete: before=%.4f after=%.4f improvement=%.1f%%",
-        overall_before, overall_after, overall_improvement,
+        overall_before,
+        overall_after,
+        overall_improvement,
     )
     return report
 
@@ -397,7 +409,9 @@ def save_report(
     # Convert dataclasses to dict; handle nested TierStats dict keyed by int
     report_dict = asdict(report)
     # by_tier keys become strings in JSON — that's acceptable
-    out_path.write_text(json.dumps(report_dict, indent=2, ensure_ascii=False), encoding="utf-8")
+    out_path.write_text(
+        json.dumps(report_dict, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     LOGGER.info("ComparisonReport saved to %s", out_path)
     return out_path
 
@@ -437,7 +451,9 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
 
     report = run_comparison(golden_set_path=args.golden, model=args.model)
     out_path = save_report(report, output_dir=args.output_dir)

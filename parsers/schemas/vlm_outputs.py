@@ -42,8 +42,14 @@ class DiagramComponent(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(min_length=1)
+    name: str = ""
     role: str = ""
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _coerce_name(cls, v: object) -> str:
+        """Coerce None/non-string name to empty string."""
+        return str(v) if v is not None else ""
 
 
 class DiagramRelationship(BaseModel):
@@ -56,21 +62,53 @@ class DiagramRelationship(BaseModel):
     label: str | None = None
 
 
-DiagramType = Literal["flowchart", "architecture", "sequence", "er", "class", "mindmap", "network", "other"]
+_KNOWN_DIAGRAM_TYPES = {
+    "flowchart", "architecture", "sequence", "er", "class", "mindmap", "network", "other"
+}
+
+DiagramType = Literal[
+    "flowchart",
+    "architecture",
+    "sequence",
+    "er",
+    "class",
+    "mindmap",
+    "network",
+    "other",
+]
 
 
 class DiagramVLMOutput(VLMOutputBase):
     """Structured payload for diagram extraction."""
 
-    diagram_type: DiagramType
+    diagram_type: DiagramType = "other"
+
+    @field_validator("diagram_type", mode="before")
+    @classmethod
+    def _normalize_diagram_type(cls, v: object) -> str:
+        """Map unknown diagram_type values to 'other'."""
+        return v if v in _KNOWN_DIAGRAM_TYPES else "other"
     title: str | None = None
     description: str = ""
     components: list[DiagramComponent] = Field(default_factory=list)
     relationships: list[DiagramRelationship] = Field(default_factory=list)
     flow_summary: str = ""
 
+    @field_validator("description", "flow_summary", mode="before")
+    @classmethod
+    def _coerce_str(cls, v: object) -> str:
+        """Coerce None/non-string values to empty string."""
+        return str(v) if v is not None else ""
 
-TextType = Literal["lecture_slide", "handwritten_notes", "textbook_page", "article", "whiteboard", "other"]
+
+TextType = Literal[
+    "lecture_slide",
+    "handwritten_notes",
+    "textbook_page",
+    "article",
+    "whiteboard",
+    "other",
+]
 
 
 class TextVLMOutput(VLMOutputBase):
@@ -81,4 +119,3 @@ class TextVLMOutput(VLMOutputBase):
     content: str = ""
     key_points: list[str] = Field(default_factory=list)
     has_math: bool
-

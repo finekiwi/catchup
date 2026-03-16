@@ -6,11 +6,12 @@ import base64
 import hashlib
 import html
 import json
+import logging
 import os
 import re
 import sys
 import tempfile
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -26,6 +27,9 @@ load_dotenv()
 import markdown as md_lib  # noqa: E402
 import streamlit as st  # noqa: E402
 import pyperclip  # noqa: E402
+from PIL import Image as _PILImage  # noqa: E402
+
+LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from models.document import Document
@@ -33,6 +37,7 @@ if TYPE_CHECKING:
 from llm.note_editor import NoteEditResult, edit_section  # noqa: E402
 from llm.note_editor import _split_sections as _split_note_sections  # noqa: E402
 from llm.note_generator import SUPPORTED_LLM_MODELS, generate_note_sectioned  # noqa: E402
+from utils.logging import langfuse_session  # noqa: E402
 from parsers.image_parser import parse_image  # noqa: E402
 from parsers.ipynb_parser import parse_ipynb  # noqa: E402
 from parsers.pdf_parser import parse_pdf  # noqa: E402
@@ -45,21 +50,32 @@ from db.sqlite import (  # noqa: E402
     save_document,
     save_note,
 )
-from rag import (
+from rag import (  # noqa: E402
     delete_document_index,
     has_document_vectors,
     index_document,
     query as rag_query,
-)  # noqa: E402
+)
 from vlm.client import SUPPORTED_MODELS  # noqa: E402
 
 # Keys injected by the LLM schema but not rendered as note content
 _NOTE_INTERNAL_KEYS: frozenset[str] = frozenset(
-    {"schema_version", "confidence", "errors", "starter prompts"}
+    {"schema_version", "confidence", "errors", "starter prompts", "_note_result_version"}
 )
+_ANALYSIS_CACHE_VERSION = "v2"
 
 # Compiled regex for heading downshift — hoisted to avoid repeated compilation
 _HEADING_RE = re.compile(r"^(#{1,4})\s+(.+)")
+
+
+def _result_cache_key(file_hash: str, vlm_model: str, llm_model: str) -> str:
+    """Return the session cache key for saved note output."""
+    return f"result_{_ANALYSIS_CACHE_VERSION}_{file_hash}_{vlm_model}_{llm_model}"
+
+
+def _doc_cache_key(file_hash: str, vlm_model: str) -> str:
+    """Return the session cache key for parsed documents."""
+    return f"doc_{_ANALYSIS_CACHE_VERSION}_{file_hash}_{vlm_model}"
 
 # ---------------------------------------------------------------------------
 # Global CSS — light theme styles for all custom components
@@ -883,9 +899,33 @@ def _downshift_headings(md_text: str) -> str:
     return "\n".join(result_lines)
 
 
+def _deduplicate_headings(md: str) -> str:
+    """Remove duplicate consecutive ## headings with no body between them.
+
+    The LLM occasionally emits the same ## heading twice in a row (once with
+    no body, once with content). This pass keeps only the last occurrence of
+    each run of identical headings, preserving the one that has content after it.
+    """
+    lines = md.split("\n")
+    result: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("## ") and not line.startswith("### "):
+            # Collect consecutive identical headings with only blank lines between
+            j = i + 1
+            while j < len(lines) and (lines[j].strip() == "" or lines[j] == line):
+                if lines[j] == line:
+                    i = j  # advance to the last duplicate
+                j += 1
+        result.append(lines[i])
+        i += 1
+    return "\n".join(result)
+
+
 def _render_note_html(note_md: str) -> str:
     """Convert note markdown to scoped HTML for consistent rendering."""
-    clean_md = _downshift_headings(_normalize_note_markdown(note_md))
+    clean_md = _downshift_headings(_normalize_note_markdown(_deduplicate_headings(note_md)))
     # nl2br intentionally excluded: it injects <br> inside <pre><code> blocks which
     # causes Streamlit's react-markdown code renderer to receive an array of nodes
     # instead of a plain string, producing [object Object] for each line.
@@ -893,9 +933,132 @@ def _render_note_html(note_md: str) -> str:
     return f'<div class="note-wrapper"><div class="note-content">\n{html_body}\n</div></div>'
 
 
+def _inline_figure_body_start_page(doc: "Document") -> int | None:
+    """Return the first body page that should be eligible for inline note figures."""
+    if getattr(getattr(doc, "format", None), "value", None) != "pdf":
+        return None
+
+    try:
+        from llm.section_splitter import extract_sections, group_blocks_by_section
+
+        sections = extract_sections(doc)
+        if not sections:
+            return None
+        grouped_sections = group_blocks_by_section(doc, sections)
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.debug("Inline figure page filter skipped: %s", exc)
+        return None
+
+    for section in grouped_sections:
+        section_pages = [
+            block.metadata.page
+            for block in section.blocks
+            if block.metadata.page is not None
+        ]
+        if section_pages:
+            return min(section_pages)
+
+    return None
+
+
+def _filter_inline_figure_blocks(doc: "Document", fig_blocks: list) -> list:
+    """Drop front-matter image blocks so they do not render in the study note."""
+    first_body_page = _inline_figure_body_start_page(doc)
+    if first_body_page is None:
+        return fig_blocks
+
+    filtered = [
+        block
+        for block in fig_blocks
+        if block.metadata.page is None or block.metadata.page >= first_body_page
+    ]
+    skipped = len(fig_blocks) - len(filtered)
+    if skipped > 0:
+        LOGGER.info(
+            "Filtered %d inline figure blocks before first body page %d",
+            skipped,
+            first_body_page,
+        )
+    return filtered
+
+
+def _st_image_sized(img_path: str, caption: str) -> None:
+    """Render an image with width capped only for large images; small images use natural size."""
+    try:
+        w, _ = _PILImage.open(img_path).size
+    except Exception:  # noqa: BLE001
+        st.image(img_path, caption=caption, use_container_width=True)
+        return
+    if w < 400:
+        st.image(img_path, caption=caption, width=w)
+    else:
+        st.image(img_path, caption=caption, use_container_width=True)
+
+
+def _render_note_with_figures(raw_md: str, fig_blocks: list, doc=None) -> None:
+    """Render note markdown section-by-section, injecting figure images between sections.
+
+    When ``doc`` is provided, uses page-to-section mapping: computes the actual
+    page range covered by each section from document body blocks and places each
+    figure in the section whose range contains the figure's page.
+    Falls back to legacy page interpolation when ``doc`` is None.
+
+    Args:
+        raw_md: Note markdown text (without title prefix).
+        fig_blocks: List of Block objects with image_path set.
+        doc: Parsed Document for page-based placement (preferred). None = fallback.
+    """
+    from utils.export import _build_section_page_ranges, _place_figures_page_based
+
+    sections = _split_note_sections(raw_md)  # list of (heading, body) tuples
+    n = len(sections)
+    if n == 0:
+        st.markdown(_render_note_html(raw_md), unsafe_allow_html=True)
+        return
+
+    if doc is not None:
+        headings = [h for h, _ in sections]
+        ranges = _build_section_page_ranges(doc, n, section_headings=headings)
+        section_figs = _place_figures_page_based(fig_blocks, ranges)
+    else:
+        pages = [b.metadata.page for b in fig_blocks]
+        valid_pages = [p for p in pages if p is not None]
+        page_min = min(valid_pages) if valid_pages else 1
+        page_max = max(valid_pages) if valid_pages else 1
+        page_range = max(page_max - page_min, 1)
+
+        section_figs_dd: dict[int, list] = defaultdict(list)
+        page_counters: dict = defaultdict(int)
+        for b in fig_blocks:
+            p = b.metadata.page if b.metadata.page is not None else page_max
+            ratio = (p - page_min) / page_range
+            base_idx = min(int(ratio * n), n - 1)
+            count = page_counters[b.metadata.page]
+            page_counters[b.metadata.page] += 1
+            idx = min(base_idx + count, n - 1)
+            section_figs_dd[idx].append(b)
+        section_figs = dict(section_figs_dd)
+
+    for i, (heading, body) in enumerate(sections):
+        # Skip heading-only sections with no body and no figures — these are
+        # LLM duplicates where the same ## heading was emitted twice in a row.
+        if heading and not body and not section_figs.get(i):
+            continue
+        section_md = f"{heading}\n\n{body}".strip() if heading else body
+        if section_md:
+            st.markdown(_render_note_section_html(section_md), unsafe_allow_html=True)
+        for b in section_figs.get(i, []):
+            img_path = b.image_path
+            if img_path and Path(img_path).exists():
+                caption = b.metadata.caption or ""
+                _, _col_img, _ = st.columns([1, 4, 1])
+                with _col_img:
+                    _st_image_sized(img_path, caption)
+
+
 def _render_note_section_html(note_md: str) -> str:
     """Render a single section without card border (used in edit mode)."""
-    clean_md = _downshift_headings(_normalize_note_markdown(note_md))
+    clean_md = _downshift_headings(_normalize_note_markdown(_deduplicate_headings(note_md)))
     html_body = md_lib.markdown(clean_md, extensions=["fenced_code", "tables"])
     return f'<div class="note-section"><div class="note-content">\n{html_body}\n</div></div>'
 
@@ -1245,11 +1408,43 @@ def _serialize_source_blocks(source_blocks: list) -> list[dict]:
     return serialized
 
 
+def _render_qa_notice(msg: str, *, is_loading: bool = False) -> None:
+    """Render a palette-styled notice in the Q&A panel.
+
+    Uses warm accent palette (#F5EDE4 / #C4553A) for loading states and
+    warning palette (#F5EBDB / #C4883A) for disabled / missing-vector states.
+    """
+    if is_loading:
+        bg, border, color, icon = "#F5EDE4", "#C4553A", "#7A2A14", "⏳"
+    else:
+        bg, border, color, icon = "#F5EBDB", "#C4883A", "#7A5020", "ℹ️"
+    st.markdown(
+        f'<div style="background:{bg};border-left:3px solid {border};border-radius:8px;'
+        f'padding:12px 16px;font-size:0.85rem;color:{color};line-height:1.5;">'
+        f"{icon}&nbsp;{html.escape(msg)}</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def _render_source_block_expanders(source_blocks: list[dict]) -> None:
     """Render deduplicated source block expanders under one assistant answer."""
     if not source_blocks:
         return
 
+    # 1. figure sources with a valid image_path: render inline above expanders
+    seen_images: set[str] = set()
+    for src in source_blocks:
+        img_path = src.get("image_path")
+        if not img_path or not Path(img_path).exists():
+            continue
+        if img_path in seen_images:
+            continue
+        seen_images.add(img_path)
+        page = src.get("page")
+        caption = f"그림 (page {page})" if page is not None else "그림"
+        _st_image_sized(img_path, caption)
+
+    # 2. all source blocks: collapsed expanders (image already rendered above)
     st.caption("참조 블록")
     seen: set[str] = set()
     for src in source_blocks:
@@ -1280,7 +1475,7 @@ def _parse_followup_suggestions(answer: str) -> tuple[str, list[str]]:
     Returns (clean_answer, suggestions) where suggestions is a list of up to 3 strings.
     If no block is found, suggestions is empty and answer is returned unchanged.
     """
-    match = re.search(r"\n?---SUGGESTIONS---\n(.*?)\n---END---", answer, re.DOTALL)
+    match = re.search(r"---SUGGESTIONS---\s*(.*?)\s*---END---", answer, re.DOTALL)
     if not match:
         return answer, []
     clean = answer[: match.start()].rstrip()
@@ -1720,8 +1915,8 @@ with st.sidebar:
             "LLM 모델 (노트/Q&A)", options=SUPPORTED_LLM_MODELS, index=0
         )
         _LLM_HINTS = {
-            "gpt-4.1-nano": "빠르고 저렴 — 대용량 문서 권장",
-            "gpt-4o-mini": "균형 (기본값)",
+            "gpt-4.1-nano": "빠르고 저렴 (기본값)",
+            "gpt-4o-mini": "균형",
             "gpt-4.1-mini": "고품질 · 중간 비용",
             "gpt-4o": "최고 품질 · 고비용",
             "gpt-5-nano": "빠르고 저렴",
@@ -1733,6 +1928,13 @@ with st.sidebar:
         }
         if hint := _LLM_HINTS.get(llm_model):
             st.caption(hint)
+        output_language = st.selectbox(
+            "노트 언어",
+            options=["ko", "en"],
+            format_func=lambda x: "한국어" if x == "ko" else "English",
+            index=0,
+            key="output_language_select",
+        )
 
 # ===================================================================
 # FILE UPLOAD
@@ -1802,10 +2004,12 @@ with st.sidebar:
                 if st.button("🗑️", key=f"lib_del_{_ld.id}", help=f"{_ld.source} 삭제"):
                     # Evict session_state note caches for this document before DB delete
                     for _nr in list_notes_for_document(_ld.id):
-                        _evict_key = f"result_{_nr['file_hash']}_{_nr['vlm_model']}_{_nr['llm_model']}"
+                        _evict_key = _result_cache_key(
+                            _nr["file_hash"], _nr["vlm_model"], _nr["llm_model"]
+                        )
                         st.session_state.pop(_evict_key, None)
                         st.session_state.pop(
-                            f"doc_{_nr['file_hash']}_{_nr['vlm_model']}", None
+                            _doc_cache_key(_nr["file_hash"], _nr["vlm_model"]), None
                         )
                         st.session_state.pop(f"is_image_{_evict_key}", None)
                         st.session_state.pop(f"_toast_shown_{_evict_key}", None)
@@ -1860,8 +2064,8 @@ if "_library_load" in st.session_state:
         _fh = _note_row["file_hash"]
         _used_vlm = _note_row["vlm_model"]
         _used_llm = _note_row["llm_model"]
-        _ck = f"result_{_fh}_{_used_vlm}_{_used_llm}"
-        _dck = f"doc_{_fh}_{_used_vlm}"
+        _ck = _result_cache_key(_fh, _used_vlm, _used_llm)
+        _dck = _doc_cache_key(_fh, _used_vlm)
         st.session_state[_ck] = _note_row["result"]
         st.session_state[_dck] = _lib_doc
         st.session_state[f"is_image_{_ck}"] = _note_row["is_image"]
@@ -1938,8 +2142,8 @@ else:
 if not _lib_mode:
     file_bytes = uploaded_file.read()
     file_hash = hashlib.sha256(file_bytes).hexdigest()
-    cache_key = f"result_{file_hash}_{vlm_model}_{llm_model}"
-    doc_cache_key = f"doc_{file_hash}_{vlm_model}"
+    cache_key = _result_cache_key(file_hash, vlm_model, llm_model)
+    doc_cache_key = _doc_cache_key(file_hash, vlm_model)
 
     if not st.button("분석 시작", type="primary", use_container_width=False):
         if cache_key not in st.session_state:
@@ -1956,7 +2160,8 @@ if not _lib_mode:
         tmp_path: str | None = None
         doc = None
 
-        with st.status("분석 진행 중...", expanded=True) as status:
+        with st.status("분석 진행 중...", expanded=True) as status, \
+                langfuse_session(f"streamlit-{file_hash}"):
             # Step 1: Parse
             parse_status_label = (
                 "1/1 — 이미지 분석 중..." if is_image else "1/2 — 파일 파싱 중..."
@@ -1969,11 +2174,21 @@ if not _lib_mode:
 
                 if suffix.lower() == ".pdf":
                     doc = parse_pdf(tmp_path)
+                    try:
+                        from parsers.figure_enricher import enrich_pdf_figures
+                        from utils.cache import save_cached_parse
+
+                        doc = enrich_pdf_figures(
+                            doc, vlm_model=vlm_model, file_path=tmp_path, language=output_language,
+                        )
+                        save_cached_parse(Path(tmp_path), doc)
+                    except Exception as _enrich_exc:
+                        LOGGER.warning("Figure enrichment skipped: %s", _enrich_exc)
                 elif suffix.lower() == ".ipynb":
                     doc = parse_ipynb(tmp_path)
                 else:
                     try:
-                        doc = parse_image(tmp_path, model=vlm_model)
+                        doc = parse_image(tmp_path, model=vlm_model, language=output_language)
                     except Exception as exc:
                         if any(kw in str(exc).lower() for kw in ("api", "key", "auth")):
                             st.error("API 키를 .env에 설정해주세요")
@@ -2002,7 +2217,7 @@ if not _lib_mode:
             if not is_image:
                 status.update(label="2/2 — 학습 노트 생성 중...", state="running")
                 try:
-                    result = generate_note_sectioned(doc, model=llm_model)
+                    result = generate_note_sectioned(doc, model=llm_model, language=output_language)
                 except Exception as exc:
                     st.error(f"노트 생성 실패: {exc}")
                     st.stop()
@@ -2020,28 +2235,15 @@ if not _lib_mode:
         # Persist to SQLite
         save_document(doc)
         save_note(doc.id, file_hash, result, vlm_model, llm_model, is_image)
-        st.rerun()  # Refresh sidebar to show newly saved document
-
-# ===================================================================
-# RAG INDEXING — run once per document (session-cached)
-# ===================================================================
-_indexed_key = f"indexed_{doc.id}"
-if not st.session_state.get(_indexed_key):
-    if doc.blocks:  # Library mode has blocks=[] — skip indexing
-        try:
-            index_document(doc)
-            st.session_state[_indexed_key] = True
-        except Exception as _idx_exc:
-            st.warning(f"RAG 인덱싱 실패: {_idx_exc}")
-    else:
-        # Library mode: blocks are not available locally. Mark as indexed only when
-        # ChromaDB actually holds vectors — avoids silently grounding Q&A on an empty index.
-        if has_document_vectors(doc.id):
-            st.session_state[_indexed_key] = True
 
 # ===================================================================
 # RESULTS — Study note (default view) + Chat panel
 # ===================================================================
+_indexed_key = f"indexed_{doc.id}"
+# Library mode: check if vectors exist when blocks are unavailable locally
+if not st.session_state.get(_indexed_key) and not doc.blocks:
+    if has_document_vectors(doc.id):
+        st.session_state[_indexed_key] = True
 col_content, col_chat = st.columns([1.12, 1], gap="large")
 
 with col_content:
@@ -2100,14 +2302,69 @@ with col_content:
         with toolbar_col:
             edit_mode = st.toggle("✏️ 편집 모드", value=False, key="note_edit_toggle")
         with export_col:
+            from utils.export import export_docx, export_markdown_zip, export_pdf
+
+            _all_fig_blocks = [b for b in doc.blocks if b.image_path and Path(b.image_path).exists()]
+            _export_fig_blocks = _filter_inline_figure_blocks(doc, _all_fig_blocks)
+            _export_cache_key = f"export_{cache_key}"
             with st.popover("📤 내보내기 ▾", use_container_width=True):
-                st.download_button(
-                    "📥 마크다운 다운로드",
-                    data=full_md,
-                    file_name=f"{file_stem}_note.md",
-                    mime="text/markdown",
-                    use_container_width=True,
-                )
+                # --- ZIP ---
+                # Export data is generated lazily on first button click and cached in
+                # session_state to avoid re-running expensive export functions on every rerun.
+                _zip_key = f"{_export_cache_key}_zip"
+                if _zip_key not in st.session_state:
+                    if st.button("📥 마크다운+이미지 (.zip)", use_container_width=True, key="gen_zip_btn"):
+                        st.session_state[_zip_key] = export_markdown_zip(raw_md, title, _export_fig_blocks, doc)
+                        st.rerun()
+                else:
+                    st.download_button(
+                        "📥 마크다운+이미지 (.zip)",
+                        data=st.session_state[_zip_key],
+                        file_name=f"{file_stem}_note.zip",
+                        mime="application/zip",
+                        use_container_width=True,
+                    )
+                # --- PDF ---
+                _pdf_key = f"{_export_cache_key}_pdf"
+                if _pdf_key not in st.session_state:
+                    if st.button("📄 PDF (.pdf)", use_container_width=True, key="gen_pdf_btn"):
+                        try:
+                            st.session_state[_pdf_key] = export_pdf(raw_md, title, _export_fig_blocks, doc)
+                        except Exception as _pdf_exc:
+                            st.session_state[_pdf_key] = None
+                            st.session_state[f"{_pdf_key}_err"] = str(_pdf_exc)
+                        st.rerun()
+                elif st.session_state.get(f"{_pdf_key}_err"):
+                    st.caption(f"PDF 생성 불가: {st.session_state[f'{_pdf_key}_err']}")
+                else:
+                    st.download_button(
+                        "📄 PDF (.pdf)",
+                        data=st.session_state[_pdf_key],
+                        file_name=f"{file_stem}_note.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                    )
+                # --- DOCX ---
+                _docx_key = f"{_export_cache_key}_docx"
+                if _docx_key not in st.session_state:
+                    if st.button("📝 Word (.docx)", use_container_width=True, key="gen_docx_btn"):
+                        try:
+                            st.session_state[_docx_key] = export_docx(raw_md, title, _export_fig_blocks, doc)
+                        except Exception as _docx_exc:
+                            st.session_state[_docx_key] = None
+                            st.session_state[f"{_docx_key}_err"] = str(_docx_exc)
+                        st.rerun()
+                elif st.session_state.get(f"{_docx_key}_err"):
+                    st.caption(f"DOCX 생성 불가: {st.session_state[f'{_docx_key}_err']}")
+                else:
+                    st.download_button(
+                        "📝 Word (.docx)",
+                        data=st.session_state[_docx_key],
+                        file_name=f"{file_stem}_note.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True,
+                    )
+                # --- Clipboard — plain markdown without images (no base64 bloat) ---
                 if st.button(
                     "📋 클립보드 복사", use_container_width=True, key="copy_note_btn"
                 ):
@@ -2201,23 +2458,33 @@ with col_content:
                         _named_sec_idx += 1
                     first_rendered = False
             else:
-                # Pure read view
-                st.markdown(_render_note_html(raw_md), unsafe_allow_html=True)
+                # Pure read view — inject figure images inline when available
+                # Filter by image_path (not block type) because enrich_pdf_figures
+                # may retype FIGURE blocks to CODE/TEXT after VLM classification.
+                fig_blocks = [b for b in doc.blocks if b.image_path]
+                fig_blocks = _filter_inline_figure_blocks(doc, fig_blocks)
+                if fig_blocks:
+                    _render_note_with_figures(raw_md, fig_blocks, doc)
+                else:
+                    st.markdown(_render_note_html(raw_md), unsafe_allow_html=True)
     else:
         st.info("노트 내용이 없습니다.")
 
 with col_chat:
+    _qa_ready = bool(st.session_state.get(_indexed_key))
+    _indexing_in_progress = not _qa_ready and bool(doc.blocks) and not _lib_mode
     _qa_disabled_msg = (
+        "Q&A 인덱싱 중입니다. 잠시 기다려 주세요..."
+        if _indexing_in_progress else
         "Q&A를 사용하려면 문서 벡터가 필요합니다. "
         "문서를 다시 분석하거나 라이브러리 인덱스를 확인해주세요."
     )
-    _qa_ready = bool(st.session_state.get(_indexed_key))
     if is_image:
         # Image mode: Q&A only, no note editor
         if _qa_ready:
             _render_qa_panel(doc, result, llm_model, is_image=True, chat_height=960)
         else:
-            st.info(_qa_disabled_msg)
+            _render_qa_notice(_qa_disabled_msg, is_loading=_indexing_in_progress)
     else:
         # Non-image mode: Q&A tab + Note editor tab
         right_panel = st.radio(
@@ -2233,11 +2500,24 @@ with col_chat:
                     doc, result, llm_model, is_image=False, chat_height=960
                 )
             else:
-                st.info(_qa_disabled_msg)
+                _render_qa_notice(_qa_disabled_msg, is_loading=_indexing_in_progress)
         else:
             _render_note_editor_panel(
                 result, llm_model, chat_height=837, doc_key=doc.id
             )
+
+# ─── Lazy RAG indexing (runs after note + Q&A columns are rendered) ──
+# Indexing is deferred here so the note appears immediately. The Q&A panel
+# shows "인덱싱 중..." above until indexing completes and st.rerun() fires.
+# Both image and non-image modes require indexing for Q&A to become available.
+if not st.session_state.get(_indexed_key) and doc.blocks and not _lib_mode:
+    try:
+        index_document(doc)
+        st.session_state[_indexed_key] = True
+        st.rerun()
+    except Exception as _idx_exc:
+        LOGGER.warning("RAG indexing failed: %s", _idx_exc)
+        st.warning(f"RAG 인덱싱 실패: {_idx_exc}")
 
 # ─── Persist dirty note edits to SQLite ──────────────────────────────
 if st.session_state.pop("_note_dirty", False):

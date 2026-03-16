@@ -58,6 +58,7 @@ class SourceBlock(BaseModel):
     content_preview: str  # first 200 chars
     page: Optional[int] = None
     cell_index: Optional[int] = None
+    image_path: Optional[str] = None
 
 
 class QAResult(BaseModel):
@@ -441,6 +442,8 @@ def index_document(document: Document) -> None:
             metadata["page"] = block.metadata.page
         if block.metadata.cell_index is not None:
             metadata["cell_index"] = block.metadata.cell_index
+        if block.image_path is not None:
+            metadata["image_path"] = block.image_path
 
         try:
             collection.upsert(
@@ -658,6 +661,7 @@ def query_chunked(
                 content_preview=content[:200],
                 page=page,
                 cell_index=cell_index,
+                image_path=meta.get("image_path"),
             )
         )
         ref = f"[{meta.get('source', 'unknown')}]"
@@ -867,6 +871,7 @@ def query(
                     content_preview=content[:200],
                     page=page,
                     cell_index=cell_index,
+                    image_path=meta.get("image_path"),
                 )
             )
 

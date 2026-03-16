@@ -20,9 +20,15 @@ from llm.section_splitter import (
 # ---------------------------------------------------------------------------
 
 
-def _text_block(order: int, content: str, *, cell_type: str | None = None) -> Block:
-    """Build a TEXT block with optional cell_type metadata."""
-    meta = BlockMetadata(cell_type=cell_type) if cell_type else BlockMetadata()
+def _text_block(
+    order: int,
+    content: str,
+    *,
+    cell_type: str | None = None,
+    page: int | None = None,
+) -> Block:
+    """Build a TEXT block with optional cell_type and page metadata."""
+    meta = BlockMetadata(cell_type=cell_type, page=page)
     return Block(type=BlockType.TEXT, content=content, order=order, metadata=meta)
 
 
@@ -311,6 +317,176 @@ def test_group_blocks_toc_section_too_short_merges_into_next() -> None:
     # 3.1 has only 1 block — merges into 3.2
     assert len(result) == 1
     assert result[0].heading == "3.2 Big Section"
+
+
+def test_group_blocks_drops_structural_heading_without_body_like_blocks() -> None:
+    """Structural headings backed only by TOC fragments should be removed."""
+    blocks = [
+        _text_block(0, "CHAPTER 1 헬로 파이썬", page=2),
+        _text_block(1, "| 1.1 소개 ........ 25 |", page=2),
+        _text_block(2, "3.1 신경망 소개", page=3),
+        _text_block(3, "이 절에서는 신경망의 기본 흐름을 예제와 함께 설명합니다.", page=3),
+    ]
+    doc = _doc_with_blocks(blocks)
+    sections = [
+        SectionInfo(
+            heading="CHAPTER 1 헬로 파이썬",
+            level=1,
+            start_block_order=0,
+            end_block_order=2,
+            from_toc=True,
+        ),
+        SectionInfo(
+            heading="3.1 신경망 소개",
+            level=1,
+            start_block_order=2,
+            end_block_order=None,
+            from_toc=True,
+        ),
+    ]
+
+    result = group_blocks_by_section(doc, sections, min_blocks_per_section=1)
+
+    assert [section.heading for section in result] == ["3.1 신경망 소개"]
+
+
+def test_group_blocks_keeps_short_korean_body_paragraph() -> None:
+    """A real Korean paragraph around 45-50 chars must count as body content."""
+    short_body = "이 절에서는 배열 곱의 계산 흐름을 간단한 예제로 설명합니다. 핵심 단계만 먼저 살펴봅시다."
+    assert 45 <= len(short_body) < 55
+
+    blocks = [
+        _text_block(0, "3.3 행렬의 곱", page=10),
+        _text_block(1, short_body, page=10),
+        _text_block(2, "3.4 다음 절", page=11),
+        _text_block(3, "다음 절에서는 실제 코드 예제와 출력 결과를 함께 살펴봅니다.", page=11),
+    ]
+    doc = _doc_with_blocks(blocks)
+    sections = [
+        SectionInfo("3.3 행렬의 곱", 1, 0, 2, from_toc=True),
+        SectionInfo("3.4 다음 절", 1, 2, None, from_toc=True),
+    ]
+
+    result = group_blocks_by_section(doc, sections, min_blocks_per_section=1)
+
+    assert [section.heading for section in result] == ["3.3 행렬의 곱", "3.4 다음 절"]
+
+
+def test_group_blocks_keeps_sentence_like_mid_length_korean_text() -> None:
+    """Sentence-like Korean text in the 25-44 char range should survive."""
+    short_sentence = "이 절은 경사하강법의 핵심 직관만 짧게 설명합니다."
+    assert 25 <= len(short_sentence) < 45
+
+    blocks = [
+        _text_block(0, "4.1 경사하강법", page=20),
+        _text_block(1, short_sentence, page=20),
+        _text_block(2, "4.2 다음 주제", page=21),
+        _text_block(3, "다음 절에서는 실제 업데이트 식을 설명합니다.", page=21),
+    ]
+    doc = _doc_with_blocks(blocks)
+    sections = [
+        SectionInfo("4.1 경사하강법", 1, 0, 2, from_toc=True),
+        SectionInfo("4.2 다음 주제", 1, 2, None, from_toc=True),
+    ]
+
+    result = group_blocks_by_section(doc, sections, min_blocks_per_section=1)
+
+    assert [section.heading for section in result] == ["4.1 경사하강법", "4.2 다음 주제"]
+
+
+def test_group_blocks_rejects_short_numeric_toc_fragment() -> None:
+    """Numeric TOC fragments like 6.1 must not validate a structural heading."""
+    blocks = [
+        _text_block(0, "CHAPTER 6 학습 관련 기술들", page=5),
+        _text_block(1, "6.1", page=5),
+        _text_block(2, "3.2 활성화 함수", page=6),
+        _text_block(3, "활성화 함수는 입력 신호를 다음 층으로 전달하기 전에 변환합니다.", page=6),
+    ]
+    doc = _doc_with_blocks(blocks)
+    sections = [
+        SectionInfo("CHAPTER 6 학습 관련 기술들", 1, 0, 2, from_toc=True),
+        SectionInfo("3.2 활성화 함수", 1, 2, None, from_toc=True),
+    ]
+
+    result = group_blocks_by_section(doc, sections, min_blocks_per_section=1)
+
+    assert [section.heading for section in result] == ["3.2 활성화 함수"]
+
+
+def test_group_blocks_trims_front_matter_when_toc_precedes_first_body_section() -> None:
+    """Cover/TOC pages before the first real body page should not leak into the preamble."""
+    blocks = [
+        _text_block(0, "표지 설명이 길게 이어집니다. " * 6, page=1),
+        _text_block(1, "출판 정보가 자세히 이어집니다. " * 6, page=1),
+        _text_block(2, "CONTENTS", page=2),
+        _text_block(3, "CHAPTER 1 헬로 파이썬", page=2),
+        _text_block(4, "| 1.1 소개 ........ 25 |", page=2),
+        _text_block(5, "이 장에서는 신경망의 큰 흐름을 먼저 설명합니다.", page=3),
+        _text_block(6, "3.1 신경망 소개", page=3),
+        _text_block(7, "신경망은 앞 장의 퍼셉트론과 공통점이 많지만 활성화 함수에서 중요한 차이가 있습니다.", page=3),
+    ]
+    doc = _doc_with_blocks(blocks)
+    sections = [
+        SectionInfo("표지", 1, 0, 3, from_toc=False),
+        SectionInfo("CHAPTER 1 헬로 파이썬", 1, 3, 5, from_toc=True),
+        SectionInfo("Chapter opener", 1, 5, 6, from_toc=False),
+        SectionInfo("3.1 신경망 소개", 1, 6, None, from_toc=True),
+    ]
+
+    result = group_blocks_by_section(doc, sections, min_blocks_per_section=1)
+
+    assert [section.heading for section in result] == ["서론", "3.1 신경망 소개"]
+    preamble_orders = [block.order for block in result[0].blocks]
+    assert preamble_orders == [5]
+    all_orders = {block.order for section in result for block in section.blocks}
+    assert 0 not in all_orders
+    assert 1 not in all_orders
+    assert 2 not in all_orders
+    assert 3 not in all_orders
+    assert 4 not in all_orders
+
+
+def test_group_blocks_without_toc_like_pages_keeps_legacy_preamble_behavior() -> None:
+    """Ordinary intro pages without TOC signals should still form a preamble."""
+    blocks = [
+        _text_block(0, "문서 소개가 길게 이어집니다. " * 6, page=1),
+        _text_block(1, "학습 목표를 자세히 설명합니다. " * 6, page=1),
+        _text_block(2, "1. 시작하기", page=2),
+        _text_block(3, "이 절에서는 전체 학습 흐름과 이후 절의 연결 관계를 소개합니다.", page=2),
+    ]
+    doc = _doc_with_blocks(blocks)
+    sections = [
+        SectionInfo("1. 시작하기", 1, 2, None, from_toc=True),
+    ]
+
+    result = group_blocks_by_section(doc, sections, min_blocks_per_section=1)
+
+    assert [section.heading for section in result] == ["서론", "1. 시작하기"]
+    assert [block.order for block in result[0].blocks] == [0, 1]
+
+
+def test_group_blocks_preserves_first_real_section_on_same_page_as_chapter_opener() -> None:
+    """Trim should keep content on the first real body page even before the heading block."""
+    blocks = [
+        _text_block(0, "CONTENTS", page=2),
+        _text_block(1, "CHAPTER 1 헬로 파이썬", page=2),
+        _text_block(2, "| 1.1 소개 ........ 25 |", page=2),
+        _text_block(3, "이번 장에서는 핵심 개념을 짧게 미리 정리합니다.", page=3),
+        _text_block(4, "3.1 신경망 소개", page=3),
+        _text_block(5, "신경망은 입력과 출력을 연결하는 여러 층으로 구성됩니다.", page=3),
+    ]
+    doc = _doc_with_blocks(blocks)
+    sections = [
+        SectionInfo("CHAPTER 1 헬로 파이썬", 1, 1, 3, from_toc=True),
+        SectionInfo("Chapter opener", 1, 3, 4, from_toc=False),
+        SectionInfo("3.1 신경망 소개", 1, 4, None, from_toc=True),
+    ]
+
+    result = group_blocks_by_section(doc, sections, min_blocks_per_section=1)
+
+    assert result[0].heading == "서론"
+    assert [block.order for block in result[0].blocks] == [3]
+    assert result[1].heading == "3.1 신경망 소개"
 
 
 def test_extract_sections_empty_doc() -> None:

@@ -12,6 +12,7 @@ from typing import Any
 try:
     import nbformat
 except ModuleNotFoundError:
+
     class _NBFormatProxy:
         """Fallback proxy to keep parser import-safe without nbformat installed."""
 
@@ -36,7 +37,14 @@ from models.document import (
 logger = logging.getLogger(__name__)
 
 TEXT_MIME_PRIORITY = ("text/plain", "text/markdown")
-IMAGE_MIME_TYPES = ("image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp", "image/svg+xml")
+IMAGE_MIME_TYPES = (
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/gif",
+    "image/webp",
+    "image/svg+xml",
+)
 
 
 def _safe_document_id(file_path: str) -> str:
@@ -96,7 +104,9 @@ def _extract_notebook_language(notebook: Any) -> str:
         return language_name
 
     kernelspec = _get_nested_value(metadata, "kernelspec")
-    kernelspec_language = _normalize_text(_get_nested_value(kernelspec, "language")).strip()
+    kernelspec_language = _normalize_text(
+        _get_nested_value(kernelspec, "language")
+    ).strip()
     if kernelspec_language:
         return kernelspec_language
 
@@ -109,7 +119,9 @@ def _mark_parse_failed(document: Document) -> None:
         document.metadata.tags.append("parse_failed")
 
 
-def _extract_output_block(output: dict[str, Any], cell_index: int, order: int) -> Block | None:
+def _extract_output_block(
+    output: dict[str, Any], cell_index: int, order: int
+) -> Block | None:
     """Convert one code cell output into a single Block when supported."""
     output_type = str(output.get("output_type", ""))
     metadata = BlockMetadata(cell_index=cell_index, cell_type="output")
@@ -137,14 +149,21 @@ def _extract_output_block(output: dict[str, Any], cell_index: int, order: int) -
 
         text = _extract_text_from_data(data)
         if text:
-            return Block(type=BlockType.TEXT, content=text, order=order, metadata=metadata)
+            return Block(
+                type=BlockType.TEXT, content=text, order=order, metadata=metadata
+            )
         return None
 
     if output_type == "error":
         traceback_lines = output.get("traceback", [])
         traceback_text = _normalize_text(traceback_lines)
         if traceback_text:
-            return Block(type=BlockType.TEXT, content=traceback_text, order=order, metadata=metadata)
+            return Block(
+                type=BlockType.TEXT,
+                content=traceback_text,
+                order=order,
+                metadata=metadata,
+            )
         ename = _normalize_text(output.get("ename")).strip()
         evalue = _normalize_text(output.get("evalue")).strip()
         if ename and evalue:
@@ -155,7 +174,9 @@ def _extract_output_block(output: dict[str, Any], cell_index: int, order: int) -
             error_text = evalue
         else:
             error_text = "error output (details unavailable)"
-        return Block(type=BlockType.TEXT, content=error_text, order=order, metadata=metadata)
+        return Block(
+            type=BlockType.TEXT, content=error_text, order=order, metadata=metadata
+        )
 
     return None
 
@@ -211,7 +232,9 @@ def parse_ipynb(file_path: str) -> Document:
                         type=BlockType.TEXT,
                         content=markdown_content,
                         order=order,
-                        metadata=BlockMetadata(cell_index=cell_index, cell_type="markdown"),
+                        metadata=BlockMetadata(
+                            cell_index=cell_index, cell_type="markdown"
+                        ),
                     )
                 )
                 order += 1
@@ -224,7 +247,11 @@ def parse_ipynb(file_path: str) -> Document:
                         type=BlockType.CODE,
                         content=code_content,
                         order=order,
-                        metadata=BlockMetadata(cell_index=cell_index, cell_type="code", language=notebook_language),
+                        metadata=BlockMetadata(
+                            cell_index=cell_index,
+                            cell_type="code",
+                            language=notebook_language,
+                        ),
                     )
                 )
                 order += 1

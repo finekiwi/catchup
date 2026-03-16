@@ -23,7 +23,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from models.document import Block, BlockType, Document, ProcessingStatus
-from prompts.note_generation import PROMPT, PROMPT_VERSION
+from prompts.note_generation import PROMPT_VERSION, get_prompt as _get_note_prompt
 from utils.logging import log_api_call
 from llm.schemas import NoteGenerationOutput
 from llm.block_filter import is_noise_block
@@ -45,10 +45,10 @@ _MAX_CODE_LINES = 15  # code blocks: only first N lines passed to LLM
 #       timeout extensions that are not yet supported by utils.models.call_llm.
 # ---------------------------------------------------------------------------
 _MODEL_REGISTRY: dict[str, dict] = {
+    "gpt-4.1-nano": {"provider": "openai", "input": 0.10, "output": 0.40},
     "gpt-4o-mini": {"provider": "openai", "input": 0.15, "output": 0.60},
     "gpt-4o": {"provider": "openai", "input": 2.50, "output": 10.00},
     "gpt-4.1-mini": {"provider": "openai", "input": 0.40, "output": 1.60},
-    "gpt-4.1-nano": {"provider": "openai", "input": 0.10, "output": 0.40},
     "gpt-5-nano": {"provider": "openai", "input": 0.20, "output": 0.80},
     "claude-haiku-4-5-20251001": {
         "provider": "anthropic",
@@ -234,7 +234,7 @@ def _make_fallback(doc: Document, raw_response: str, error_msg: str) -> dict[str
     }
 
 
-def generate_note(doc: Document, model: str = "gpt-4o-mini") -> dict[str, Any]:
+def generate_note(doc: Document, model: str = "gpt-4o-mini", language: str = "ko") -> dict[str, Any]:
     """Generate a structured study note dict from a Document.
 
     Routes to the appropriate provider (OpenAI / Anthropic / Google) based on
@@ -286,10 +286,11 @@ def generate_note(doc: Document, model: str = "gpt-4o-mini") -> dict[str, Any]:
             doc.metadata.tags.append("note_generation_failed")
         return _make_fallback(doc, "", error_msg)
 
+    system_prompt = _get_note_prompt(language)
     t0 = time.perf_counter()
 
     try:
-        raw, input_tokens, output_tokens = call_fn(model, PROMPT, user_content)
+        raw, input_tokens, output_tokens = call_fn(model, system_prompt, user_content)
         latency_ms = (time.perf_counter() - t0) * 1000
         cost_usd = _compute_cost(model, input_tokens, output_tokens)
 
@@ -326,7 +327,7 @@ def generate_note(doc: Document, model: str = "gpt-4o-mini") -> dict[str, Any]:
             )
             t1 = time.perf_counter()
             try:
-                raw, input_tokens, output_tokens = call_fn(model, PROMPT, retry_user)
+                raw, input_tokens, output_tokens = call_fn(model, system_prompt, retry_user)
                 retry_latency_ms = (time.perf_counter() - t1) * 1000
                 retry_cost_usd = _compute_cost(model, input_tokens, output_tokens)
                 result = json.loads(_strip_markdown_fence(raw))
@@ -458,17 +459,18 @@ def _generate_section_note(
     total_sections: int,
     model: str,
     max_blocks: int,
+    language: str = "ko",
 ) -> str:
     """Generate markdown body for a single section.
 
     Returns raw markdown text on success, or a warning placeholder on failure.
     """
-    from prompts.note_generation_section import SECTION_PROMPT
+    from prompts.note_generation_section import get_section_prompt
 
     provider = _MODEL_REGISTRY[model]["provider"]
     call_fn = _PROVIDER_DISPATCH[provider]
 
-    system = SECTION_PROMPT.format(
+    system = get_section_prompt(language).format(
         doc_title=doc_title,
         section_heading=section.heading,
         section_idx=section_idx,
@@ -520,6 +522,7 @@ def _assemble_sections(
     section_markdowns: list[str],
     doc: Document,
     model: str,
+    language: str = "ko",
 ) -> dict[str, Any]:
     """Assemble per-section markdowns and extract metadata via LLM.
 
@@ -529,7 +532,7 @@ def _assemble_sections(
     Returns the final note dict matching NoteGenerationOutput schema.
     """
     from prompts.note_generation_section import (
-        ASSEMBLY_PROMPT,
+        get_assembly_prompt,
         PROMPT_VERSION as SECTION_PROMPT_VERSION,
     )
 
@@ -605,7 +608,7 @@ def _assemble_sections(
     provider = _MODEL_REGISTRY[model]["provider"]
     call_fn = _PROVIDER_DISPATCH[provider]
 
-    system = ASSEMBLY_PROMPT.format(
+    system = get_assembly_prompt(language).format(
         doc_title=doc_title,
         section_snippets=section_snippets,
         estimated_read_time_min=estimated_read_time_min,
@@ -670,6 +673,7 @@ def generate_note_sectioned(
     doc: Document,
     model: str = "gpt-4o-mini",
     max_blocks_per_section: int = 40,
+    language: str = "ko",
 ) -> dict[str, Any]:
     """Generate a structured study note using section-based splitting.
 
@@ -713,7 +717,7 @@ def generate_note_sectioned(
             non_noise_count,
             _MAX_BLOCKS,
         )
-        return generate_note(doc, model=model)
+        return generate_note(doc, model=model, language=language)
 
     sections = group_blocks_by_section(doc, sections)
 
@@ -721,7 +725,7 @@ def generate_note_sectioned(
     sections = [s for s in sections if s.blocks]
 
     if not sections:
-        return generate_note(doc, model=model)
+        return generate_note(doc, model=model, language=language)
 
     LOGGER.info(
         "generate_note_sectioned: %d sections for document '%s' (%d blocks)",
@@ -745,6 +749,7 @@ def generate_note_sectioned(
             total_sections=total,
             model=model,
             max_blocks=max_blocks_per_section,
+            language=language,
         )
         return idx, md
 
@@ -753,8 +758,17 @@ def generate_note_sectioned(
 
     # Detect Streamlit context: ThreadPoolExecutor deadlocks when Streamlit's
     # script runner holds a reentrant lock that worker threads cannot acquire.
-    # Simple check: if streamlit is imported we're in a streamlit process.
-    _in_streamlit = "streamlit" in sys.modules
+    # Use streamlit.runtime.exists() instead of "streamlit" in sys.modules —
+    # figure_enricher imports streamlit.runtime as a side effect of its own
+    # _is_streamlit_runtime() check, which would poison the sys.modules test.
+    def _is_streamlit_runtime() -> bool:
+        try:
+            import streamlit.runtime as _st_rt
+            return _st_rt.exists()
+        except Exception:  # noqa: BLE001
+            return False
+
+    _in_streamlit = _is_streamlit_runtime()
 
     results: dict[int, str] = {}
 
@@ -770,6 +784,7 @@ def generate_note_sectioned(
                     total_sections=total,
                     model=model,
                     max_blocks=max_blocks_per_section,
+                    language=language,
                 )
             except Exception as exc:
                 LOGGER.warning("Section %d/%d failed: %s", idx, total, exc)
@@ -797,7 +812,7 @@ def generate_note_sectioned(
     section_markdowns: list[str] = [results[i] for i in range(1, total + 1)]
 
     # Assemble and extract metadata
-    result = _assemble_sections(sections, section_markdowns, doc, model)
+    result = _assemble_sections(sections, section_markdowns, doc, model, language=language)
     doc.status = ProcessingStatus.NOTE_GENERATED
     return result
 

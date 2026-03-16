@@ -26,22 +26,26 @@ def test_image_to_note_pipeline_with_mock_models(tmp_path: Path, monkeypatch) ->
         success=True,
     )
     analysis_result = VLMResult(
-        content=json.dumps({
-            "schema_version": "v1.1.0",
-            "text_type": "lecture_slide",
-            "title": "미분 개요",
-            "content": "## 미분\n변화율을 다룬다.",
-            "key_points": ["변화율"],
-            "has_math": False,
-            "has_truncation": False,
-            "confidence": 0.9,
-            "errors": [],
-        }),
+        content=json.dumps(
+            {
+                "schema_version": "v1.1.0",
+                "text_type": "lecture_slide",
+                "title": "미분 개요",
+                "content": "## 미분\n변화율을 다룬다.",
+                "key_points": ["변화율"],
+                "has_math": False,
+                "has_truncation": False,
+                "confidence": 0.9,
+                "errors": [],
+            }
+        ),
         model="gpt-4o-mini",
         success=True,
     )
 
-    with patch("parsers.image_parser.call_vlm", side_effect=[classify_result, analysis_result]):
+    with patch(
+        "parsers.image_parser.call_vlm", side_effect=[classify_result, analysis_result]
+    ):
         parsed_doc = parse_image(file_path=str(image_path))
     assert len(parsed_doc.blocks) == 1
 
@@ -59,7 +63,11 @@ def test_image_to_note_pipeline_with_mock_models(tmp_path: Path, monkeypatch) ->
         }
     )
 
-    monkeypatch.setitem(note_gen_module._PROVIDER_DISPATCH, "openai", lambda model, system, user: (llm_note_response, 80, 120))
+    monkeypatch.setitem(
+        note_gen_module._PROVIDER_DISPATCH,
+        "openai",
+        lambda model, system, user: (llm_note_response, 80, 120),
+    )
     monkeypatch.setattr(note_gen_module, "log_api_call", lambda **kw: None)
 
     result = generate_note(parsed_doc)

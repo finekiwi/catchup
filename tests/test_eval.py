@@ -11,7 +11,13 @@ import pytest
 
 import eval.baseline as baseline_module
 import eval.before_after as ba_module
-from eval.baseline import BaselineChunk, chunk_text, extract_text_pypdf, index_baseline, query_baseline
+from eval.baseline import (
+    BaselineChunk,
+    chunk_text,
+    extract_text_pypdf,
+    index_baseline,
+    query_baseline,
+)
 from eval.before_after import (
     ComparisonReport,
     ComparisonResult,
@@ -177,7 +183,11 @@ def test_index_baseline_skips_if_already_indexed(monkeypatch, tmp_path):
     """index_baseline is a no-op when the source already has chunks in the collection."""
     # Prepare collection mock that reports existing ids for this source
     col = _mock_collection(count=5)
-    col.get.return_value = {"ids": ["doc.pdf:0", "doc.pdf:1"], "documents": [], "metadatas": []}
+    col.get.return_value = {
+        "ids": ["doc.pdf:0", "doc.pdf:1"],
+        "documents": [],
+        "metadatas": [],
+    }
 
     monkeypatch.setattr(baseline_module, "_get_baseline_collection", lambda: col)
 
@@ -221,8 +231,14 @@ def test_query_baseline_success(monkeypatch):
     }
     col = _mock_collection(count=3, query_result=query_result)
     monkeypatch.setattr(baseline_module, "_get_baseline_collection", lambda: col)
-    monkeypatch.setattr(baseline_module, "_get_openai_embedding", lambda text: (FAKE_VECTOR, 20))
-    monkeypatch.setattr(baseline_module, "_call_openai", lambda model, system, user: ("Baseline answer.", 80, 30))
+    monkeypatch.setattr(
+        baseline_module, "_get_openai_embedding", lambda text: (FAKE_VECTOR, 20)
+    )
+    monkeypatch.setattr(
+        baseline_module,
+        "_call_openai",
+        lambda model, system, user: ("Baseline answer.", 80, 30),
+    )
     _patch_log(monkeypatch)
 
     result = query_baseline("What is gradient descent?")
@@ -243,7 +259,9 @@ def test_query_baseline_success(monkeypatch):
 def test_keyword_score_high():
     """_keyword_score returns >= 0.7 when the actual answer contains most expected keywords."""
     expected = "gradient descent minimizes loss function"
-    actual = "gradient descent is used to minimize the loss function over many iterations"
+    actual = (
+        "gradient descent is used to minimize the loss function over many iterations"
+    )
     score = _keyword_score(expected, actual)
     assert score >= 0.7
 
@@ -278,7 +296,9 @@ def test_llm_judge_score_incorrect_not_pass(monkeypatch):
 
     # Mock _call_openai to return "INCORRECT" — old bug would have returned 1.0
     monkeypatch.setattr(
-        "eval.before_after._call_openai" if hasattr(ba_module, "_call_openai") else "rag.qa_chain._call_openai",
+        "eval.before_after._call_openai"
+        if hasattr(ba_module, "_call_openai")
+        else "rag.qa_chain._call_openai",
         lambda model, system, user: ("INCORRECT", 10, 5),
         raising=False,
     )
@@ -307,22 +327,30 @@ def test_score_answer_high_keyword_skips_llm(monkeypatch):
     """_score_answer returns 1.0 without calling the LLM when keyword score >= 0.7."""
     llm_called = []
 
-    monkeypatch.setattr(ba_module, "_llm_judge_score", lambda *a, **kw: llm_called.append(True) or 0.5)
+    monkeypatch.setattr(
+        ba_module, "_llm_judge_score", lambda *a, **kw: llm_called.append(True) or 0.5
+    )
 
-    expected = "gradient descent minimizes loss function iteratively updating parameters"
+    expected = (
+        "gradient descent minimizes loss function iteratively updating parameters"
+    )
     actual = "gradient descent minimizes the loss function by iteratively updating parameters"
 
     result = _score_answer("Q", expected, actual)
 
     assert result == 1.0
-    assert llm_called == [], "LLM judge must not be called for clearly high keyword scores"
+    assert llm_called == [], (
+        "LLM judge must not be called for clearly high keyword scores"
+    )
 
 
 def test_score_answer_low_keyword_skips_llm(monkeypatch):
     """_score_answer returns 0.0 without calling the LLM when keyword score <= 0.2."""
     llm_called = []
 
-    monkeypatch.setattr(ba_module, "_llm_judge_score", lambda *a, **kw: llm_called.append(True) or 0.5)
+    monkeypatch.setattr(
+        ba_module, "_llm_judge_score", lambda *a, **kw: llm_called.append(True) or 0.5
+    )
 
     expected = "photosynthesis converts sunlight into glucose within chloroplasts"
     actual = "neural networks learn features from data"
@@ -330,7 +358,9 @@ def test_score_answer_low_keyword_skips_llm(monkeypatch):
     result = _score_answer("Q", expected, actual)
 
     assert result == 0.0
-    assert llm_called == [], "LLM judge must not be called for clearly low keyword scores"
+    assert llm_called == [], (
+        "LLM judge must not be called for clearly low keyword scores"
+    )
 
 
 # ===========================================================================
@@ -341,10 +371,23 @@ def test_score_answer_low_keyword_skips_llm(monkeypatch):
 def test_run_comparison_unsupported_model(tmp_path):
     """run_comparison raises ValueError before any queries when model is not OpenAI."""
     gs = tmp_path / "golden_set.json"
-    gs.write_text(json.dumps({"items": [
-        {"id": "gs_001", "tier": 1, "question": "Q?",
-         "expected_answer": "A.", "expected_sources": ["doc.pdf"], "document_format": "pdf"}
-    ]}), encoding="utf-8")
+    gs.write_text(
+        json.dumps(
+            {
+                "items": [
+                    {
+                        "id": "gs_001",
+                        "tier": 1,
+                        "question": "Q?",
+                        "expected_answer": "A.",
+                        "expected_sources": ["doc.pdf"],
+                        "document_format": "pdf",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
 
     with pytest.raises(ValueError, match="OpenAI models"):
         run_comparison(golden_set_path=gs, model="claude-sonnet-4-6")
@@ -393,10 +436,20 @@ def test_run_comparison_success(monkeypatch, tmp_path):
     gs_path.write_text(json.dumps(golden_data), encoding="utf-8")
 
     # Mock both pipeline query functions
-    monkeypatch.setattr(ba_module, "query_baseline", lambda q, top_k, model: _fake_qa_result("baseline answer text"))
-    monkeypatch.setattr(ba_module, "query_catchup", lambda q, top_k, model: _fake_qa_result("catchup answer text"))
+    monkeypatch.setattr(
+        ba_module,
+        "query_baseline",
+        lambda q, top_k, model: _fake_qa_result("baseline answer text"),
+    )
+    monkeypatch.setattr(
+        ba_module,
+        "query_catchup",
+        lambda q, top_k, model: _fake_qa_result("catchup answer text"),
+    )
     # Mock scoring to avoid LLM calls
-    monkeypatch.setattr(ba_module, "_score_answer", lambda q, exp, act, judge_model="gpt-4o": 0.5)
+    monkeypatch.setattr(
+        ba_module, "_score_answer", lambda q, exp, act, judge_model="gpt-4o": 0.5
+    )
 
     report = run_comparison(golden_set_path=gs_path, model="gpt-4o-mini")
 
@@ -419,7 +472,11 @@ def test_save_report_creates_file(tmp_path):
     """save_report writes a timestamped JSON file to the specified output directory."""
     report = ComparisonReport(
         total=1,
-        by_tier={1: TierStats(total=1, before_score=0.5, after_score=0.8, improvement_pct=60.0)},
+        by_tier={
+            1: TierStats(
+                total=1, before_score=0.5, after_score=0.8, improvement_pct=60.0
+            )
+        },
         overall_before=0.5,
         overall_after=0.8,
         overall_improvement=60.0,
@@ -469,10 +526,20 @@ def test_comparison_report_tier_aggregation(monkeypatch, tmp_path):
     gs_path = tmp_path / "golden_set.json"
     gs_path.write_text(json.dumps(golden_data), encoding="utf-8")
 
-    scores = iter([1.0, 0.0, 1.0, 1.0, 0.0, 1.0])  # before/after alternating for each item
-    monkeypatch.setattr(ba_module, "query_baseline", lambda q, top_k, model: _fake_qa_result("b answer"))
-    monkeypatch.setattr(ba_module, "query_catchup", lambda q, top_k, model: _fake_qa_result("c answer"))
-    monkeypatch.setattr(ba_module, "_score_answer", lambda q, exp, act, judge_model="gpt-4o": next(scores))
+    scores = iter(
+        [1.0, 0.0, 1.0, 1.0, 0.0, 1.0]
+    )  # before/after alternating for each item
+    monkeypatch.setattr(
+        ba_module, "query_baseline", lambda q, top_k, model: _fake_qa_result("b answer")
+    )
+    monkeypatch.setattr(
+        ba_module, "query_catchup", lambda q, top_k, model: _fake_qa_result("c answer")
+    )
+    monkeypatch.setattr(
+        ba_module,
+        "_score_answer",
+        lambda q, exp, act, judge_model="gpt-4o": next(scores),
+    )
 
     report = run_comparison(golden_set_path=gs_path)
 
@@ -503,10 +570,19 @@ def test_golden_set_has_16_items():
 def test_golden_set_all_required_fields():
     """Every item in golden_set.json has the required fields."""
     data = json.loads(GOLDEN_SET_PATH.read_text(encoding="utf-8"))
-    required = {"id", "tier", "question", "expected_answer", "expected_sources", "document_format"}
+    required = {
+        "id",
+        "tier",
+        "question",
+        "expected_answer",
+        "expected_sources",
+        "document_format",
+    }
     for item in data["items"]:
         missing = required - item.keys()
-        assert missing == set(), f"Item {item.get('id', '?')} is missing fields: {missing}"
+        assert missing == set(), (
+            f"Item {item.get('id', '?')} is missing fields: {missing}"
+        )
 
 
 def test_golden_set_tier_distribution():
@@ -526,4 +602,6 @@ def test_golden_set_valid_tiers():
     data = json.loads(GOLDEN_SET_PATH.read_text(encoding="utf-8"))
     valid = {1, 2, 3, 4}
     for item in data["items"]:
-        assert item["tier"] in valid, f"Item {item['id']} has invalid tier: {item['tier']}"
+        assert item["tier"] in valid, (
+            f"Item {item['id']} has invalid tier: {item['tier']}"
+        )

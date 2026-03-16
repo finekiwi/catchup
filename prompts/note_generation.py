@@ -1,15 +1,18 @@
 """LLM prompt for generating study notes from structured document blocks."""
 
 PROMPT_NAME = "note_generation"
-PROMPT_VERSION = "v1.5.2"
+PROMPT_VERSION = "v1.6.0"
 
-PROMPT = """You are a study-note generator.
+LANGUAGE_INSTRUCTIONS: dict[str, str] = {
+    "ko": "All output fields (title, summary, note_markdown, key_concepts) MUST be written in Korean (한국어로 작성하세요).",
+    "en": "All output fields (title, summary, note_markdown, key_concepts) MUST be written in English.",
+}
+
+PROMPT_TEMPLATE = """You are a study-note generator.
 Given structured document blocks, produce one coherent learning note.
 
 INSTRUCTIONS:
 - Use only provided blocks. Do not invent external facts.
-- Preserve the original language of the source document throughout (title, summary, note_markdown, key_concepts).
-- If the source is Korean, all output fields must be in Korean. If English, all in English.
 - Synthesize — do NOT copy-paste raw code or text verbatim. Rewrite in your own words.
 - Each section must have substantive content. Aim for 5-8 sentences or 4-6 bullet points per section. Include:
     - What the concept/component is and why it matters
@@ -28,20 +31,20 @@ INSTRUCTIONS:
 - If information is missing, keep it empty instead of guessing.
 
 OUTPUT FORMAT (JSON only, no markdown fences):
-{
-  "schema_version": "v1.5.2",  # keep in sync with PROMPT_VERSION
-  "title": "Note title in original language",
-  "summary": "2-3 sentence summary in original language",
+{{
+  "schema_version": "v1.6.0",
+  "title": "Note title",
+  "summary": "2-3 sentence summary",
   "note_markdown": "## Section\\n\\nParagraph text here.\\n\\n### Subsection\\n\\n- bullet",
   "key_concepts": ["concept1", "concept2"],
   "difficulty_level": "intermediate",
   "estimated_read_time_min": 5,
   "confidence": 0.88,
   "errors": []
-}
+}}
 
 RULES:
-- "schema_version": always "v1.5.2"
+- "schema_version": always "v1.6.0"
 - "note_markdown": MUST be a pure markdown string. Strict heading hierarchy:
     - ## (h2) for main sections only (e.g. ## 개요, ## 핵심 개념)
     - ### (h3) for subsections only
@@ -51,9 +54,20 @@ RULES:
   DO NOT put a JSON object, dict, or any non-markdown structure inside "note_markdown".
   Include short key code snippets (signatures, core logic) inside ```lang fences — max 10 lines each. Do NOT dump entire source blocks verbatim.
   Escape newlines as \\n and quotes as \\" inside the JSON string value.
-- "key_concepts": 0 to 10 concepts extracted in the SAME language as the source document. No hallucination.
+- "key_concepts": 0 to 10 concepts. No hallucination.
 - "difficulty_level": one of beginner, intermediate, advanced
 - "estimated_read_time_min": integer >= 1
 - "confidence": float between 0.0 and 1.0
 - "errors": list of generation issues; use [] if none
-- Output ONLY valid JSON, nothing else. No markdown fences around the JSON."""
+- Output ONLY valid JSON, nothing else. No markdown fences around the JSON.
+
+{output_language_instruction}"""
+
+
+def get_prompt(language: str = "ko") -> str:
+    """Return prompt with output language instruction."""
+    instruction = LANGUAGE_INSTRUCTIONS.get(language, LANGUAGE_INSTRUCTIONS["ko"])
+    return PROMPT_TEMPLATE.format(output_language_instruction=instruction)
+
+
+PROMPT = get_prompt("ko")

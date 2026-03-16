@@ -15,7 +15,9 @@ from rag.query_rewriter import rewrite_query
 # ---------------------------------------------------------------------------
 
 
-def _make_openai_response(content: str, input_tokens: int = 10, output_tokens: int = 5) -> MagicMock:
+def _make_openai_response(
+    content: str, input_tokens: int = 10, output_tokens: int = 5
+) -> MagicMock:
     """Build a minimal mock that looks like an openai ChatCompletion response."""
     usage = SimpleNamespace(prompt_tokens=input_tokens, completion_tokens=output_tokens)
     message = SimpleNamespace(content=content)
@@ -60,7 +62,9 @@ def test_rewrite_query_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_rewrite_query_api_exception_returns_original(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rewrite_query_api_exception_returns_original(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """rewrite_query falls back to the original question on API exception."""
     question = "커밋 로그 보는 법"
 
@@ -86,7 +90,9 @@ def test_rewrite_query_api_exception_returns_original(monkeypatch: pytest.Monkey
 # ---------------------------------------------------------------------------
 
 
-def test_rewrite_query_empty_response_returns_original(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rewrite_query_empty_response_returns_original(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """rewrite_query returns the original question when the LLM emits an empty string."""
     question = "RAG 파이프라인 설명"
 
@@ -107,7 +113,9 @@ def test_rewrite_query_empty_response_returns_original(monkeypatch: pytest.Monke
 # ---------------------------------------------------------------------------
 
 
-def test_rewrite_query_whitespace_response_returns_original(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rewrite_query_whitespace_response_returns_original(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """rewrite_query returns the original question when the LLM response is whitespace only."""
     question = "노드 조회 방법"
 

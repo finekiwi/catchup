@@ -36,4 +36,3 @@ class NoteGenerationOutput(BaseModel):
     def _normalize_errors(cls, value: list[str]) -> list[str]:
         """Normalize empty/whitespace-only error items."""
         return [item.strip() for item in value if item.strip()]
-

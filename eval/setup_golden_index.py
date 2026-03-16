@@ -19,7 +19,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+)
 LOGGER = logging.getLogger(__name__)
 
 GOLDEN_DIR = Path("data/golden")
@@ -67,9 +69,13 @@ def index_all_catchup_chunked() -> None:
         try:
             doc = parse_pdf(str(pdf))
             index_document_chunked(doc)
-            LOGGER.info("    -> %d blocks parsed, rechunked and indexed", len(doc.blocks))
+            LOGGER.info(
+                "    -> %d blocks parsed, rechunked and indexed", len(doc.blocks)
+            )
         except Exception:
-            LOGGER.exception("Failed to index %s via CatchUp-chunked pipeline", pdf.name)
+            LOGGER.exception(
+                "Failed to index %s via CatchUp-chunked pipeline", pdf.name
+            )
     LOGGER.info("CatchUp-chunked indexing complete.")
 
 
@@ -109,15 +115,21 @@ def index_all_catchup_chunked_ipynb() -> None:
     from rag.qa_chain import index_document_chunked
 
     notebooks = sorted(GOLDEN_DIR.glob("*.ipynb"))
-    LOGGER.info("Indexing %d notebooks into CatchUp-chunked collection...", len(notebooks))
+    LOGGER.info(
+        "Indexing %d notebooks into CatchUp-chunked collection...", len(notebooks)
+    )
     for nb in notebooks:
         LOGGER.info("  catchup-chunked-ipynb: %s", nb.name)
         try:
             doc = parse_ipynb(str(nb))
             index_document_chunked(doc)
-            LOGGER.info("    -> %d blocks parsed, rechunked and indexed", len(doc.blocks))
+            LOGGER.info(
+                "    -> %d blocks parsed, rechunked and indexed", len(doc.blocks)
+            )
         except Exception:
-            LOGGER.exception("Failed to index %s via CatchUp-chunked ipynb pipeline", nb.name)
+            LOGGER.exception(
+                "Failed to index %s via CatchUp-chunked ipynb pipeline", nb.name
+            )
     LOGGER.info("CatchUp-chunked ipynb indexing complete.")
 
 
@@ -138,7 +150,9 @@ def main() -> None:
         index_all_catchup_chunked()
 
     if notebooks:
-        LOGGER.info("Found %d notebook(s): %s", len(notebooks), [n.name for n in notebooks])
+        LOGGER.info(
+            "Found %d notebook(s): %s", len(notebooks), [n.name for n in notebooks]
+        )
         index_all_baseline_ipynb()
         index_all_catchup_ipynb()
         index_all_catchup_chunked_ipynb()

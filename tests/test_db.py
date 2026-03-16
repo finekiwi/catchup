@@ -7,7 +7,15 @@ from typing import Any
 
 from db import chroma as chroma_db
 from db import sqlite as sqlite_db
-from models.document import Block, BlockType, Document, DocumentFormat, DocumentMetadata, ProcessingStatus
+from models.document import (
+    Block,
+    BlockMetadata,
+    BlockType,
+    Document,
+    DocumentFormat,
+    DocumentMetadata,
+    ProcessingStatus,
+)
 
 
 def _build_document(doc_id: str = "doc-1", source: str = "sample.pdf") -> Document:
@@ -16,7 +24,18 @@ def _build_document(doc_id: str = "doc-1", source: str = "sample.pdf") -> Docume
         id=doc_id,
         source=source,
         format=DocumentFormat.PDF,
-        metadata=DocumentMetadata(title="Sample Title", tags=["math", "ml"], total_pages=10),
+        blocks=[
+            Block(
+                type=BlockType.TEXT,
+                content="설명 블록",
+                order=0,
+                image_path=f"data/figures/{doc_id}/0.png",
+                metadata=BlockMetadata(page=3),
+            )
+        ],
+        metadata=DocumentMetadata(
+            title="Sample Title", tags=["math", "ml"], total_pages=10
+        ),
         created_at=datetime(2026, 3, 3, tzinfo=timezone.utc),
     )
 
@@ -57,6 +76,15 @@ def test_sqlite_upsert_on_duplicate_document_id(tmp_path, monkeypatch) -> None:
         source="second.pdf",
         format=DocumentFormat.PDF,
         status=ProcessingStatus.CONCEPTS_EXTRACTED,
+        blocks=[
+            Block(
+                type=BlockType.CODE,
+                content="print('updated')",
+                order=1,
+                image_path="data/figures/duplicate-doc/1.png",
+                metadata=BlockMetadata(page=5, language="python"),
+            )
+        ],
         metadata=DocumentMetadata(title="Updated Title", tags=["updated"]),
         created_at=datetime(2026, 3, 3, tzinfo=timezone.utc),
     )
@@ -67,7 +95,25 @@ def test_sqlite_upsert_on_duplicate_document_id(tmp_path, monkeypatch) -> None:
     assert fetched.source == "second.pdf"
     assert fetched.status == ProcessingStatus.CONCEPTS_EXTRACTED
     assert fetched.metadata.title == "Updated Title"
+    assert len(fetched.blocks) == 1
+    assert fetched.blocks[0].image_path == "data/figures/duplicate-doc/1.png"
     assert len(sqlite_db.list_documents()) == 1
+
+
+def test_sqlite_roundtrip_preserves_blocks_and_image_paths(tmp_path, monkeypatch) -> None:
+    """Stored library documents must keep blocks so inline figures can render later."""
+    sqlite_path = tmp_path / "sqlite" / "catchup.db"
+    monkeypatch.setenv("CATCHUP_SQLITE_PATH", str(sqlite_path))
+
+    document = _build_document(doc_id="doc-with-figure", source="figure.pdf")
+    sqlite_db.save_document(document)
+
+    fetched = sqlite_db.get_document(document.id)
+    assert fetched is not None
+    assert len(fetched.blocks) == 1
+    assert fetched.blocks[0].content == "설명 블록"
+    assert fetched.blocks[0].image_path == "data/figures/doc-with-figure/0.png"
+    assert fetched.blocks[0].metadata.page == 3
 
 
 def test_sqlite_creates_db_file_automatically(tmp_path, monkeypatch) -> None:
@@ -146,7 +192,11 @@ class _FakeCollection:
         """Delete records matching where filter (supports doc_id key)."""
         doc_id = where.get("doc_id")
         if doc_id:
-            keys_to_delete = [k for k, v in self.records.items() if v["metadata"].get("doc_id") == doc_id]
+            keys_to_delete = [
+                k
+                for k, v in self.records.items()
+                if v["metadata"].get("doc_id") == doc_id
+            ]
             for key in keys_to_delete:
                 del self.records[key]
 
@@ -158,14 +208,18 @@ class _FakeCollection:
         embeddings: list[list[float]],
     ) -> None:
         """Store records by ID."""
-        for record_id, document, metadata, embedding in zip(ids, documents, metadatas, embeddings):
+        for record_id, document, metadata, embedding in zip(
+            ids, documents, metadatas, embeddings
+        ):
             self.records[record_id] = {
                 "document": document,
                 "metadata": metadata,
                 "embedding": embedding,
             }
 
-    def query(self, query_embeddings: list[list[float]], n_results: int, include: list[str]) -> dict[str, list[list[Any]]]:
+    def query(
+        self, query_embeddings: list[list[float]], n_results: int, include: list[str]
+    ) -> dict[str, list[list[Any]]]:
         """Return deterministic mock query payload."""
         del query_embeddings
         del include
@@ -173,8 +227,12 @@ class _FakeCollection:
         # NOTE: real ChromaDB returns by similarity score; this fake returns alphabetically by ID.
         # Update when switching to real embeddings.
         selected_ids = sorted(self.records.keys())[:n_results]
-        selected_documents = [self.records[item_id]["document"] for item_id in selected_ids]
-        selected_metadatas = [self.records[item_id]["metadata"] for item_id in selected_ids]
+        selected_documents = [
+            self.records[item_id]["document"] for item_id in selected_ids
+        ]
+        selected_metadatas = [
+            self.records[item_id]["metadata"] for item_id in selected_ids
+        ]
         selected_distances = [0.0 for _ in selected_ids]
         return {
             "ids": [selected_ids],
@@ -204,7 +262,9 @@ def test_chroma_reingest_removes_stale_vectors(monkeypatch) -> None:
     ]
     chroma_db.store_embeddings("doc-reingest", blocks_v2)
 
-    assert len(fake_collection.records) == 1, "Stale vectors from first ingest must be removed"
+    assert len(fake_collection.records) == 1, (
+        "Stale vectors from first ingest must be removed"
+    )
     assert "doc-reingest:0" in fake_collection.records
     assert fake_collection.records["doc-reingest:0"]["document"] == "Block A updated"
 
@@ -226,4 +286,3 @@ def test_chroma_store_and_search(monkeypatch) -> None:
     assert results[1]["id"] == "doc-1:1"
     assert results[1]["metadata"]["doc_id"] == "doc-1"
     assert results[1]["metadata"]["type"] == BlockType.TEXT.value
-

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import copy
 import hashlib
 import importlib.util
@@ -18,6 +19,7 @@ import streamlit as st
 import streamlit.testing.v1.local_script_runner as local_script_runner
 from llm.note_editor import NoteEditResult
 from llm.note_generator import SUPPORTED_LLM_MODELS
+from llm.section_splitter import SectionInfo
 from models.document import (
     Block,
     BlockMetadata,
@@ -35,6 +37,7 @@ DEFAULT_VLM_MODEL = SUPPORTED_MODELS[0]
 DEFAULT_LLM_MODEL = SUPPORTED_LLM_MODELS[0]
 TEST_SESSION_ID = "test session id"
 UNSET = object()
+ANALYSIS_CACHE_VERSION = "v2"
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,7 @@ class DemoAppHarness:
     has_document_vectors: MagicMock
     rag_query: MagicMock
     rewrite_query: MagicMock
+    enrich_pdf_figures: MagicMock
     pyperclip_copy: MagicMock
     documents_db: dict[str, Document]
     notes_db: dict[tuple[str, str, str], dict[str, Any]]
@@ -225,7 +229,7 @@ class DemoAppHarness:
         llm_model: str = DEFAULT_LLM_MODEL,
     ) -> str:
         """Return the app's session cache key for a rendered note result."""
-        return f"result_{upload.file_hash}_{vlm_model}_{llm_model}"
+        return f"result_{ANALYSIS_CACHE_VERSION}_{upload.file_hash}_{vlm_model}_{llm_model}"
 
     def doc_cache_key(
         self,
@@ -234,7 +238,7 @@ class DemoAppHarness:
         vlm_model: str = DEFAULT_VLM_MODEL,
     ) -> str:
         """Return the app's session cache key for a parsed document."""
-        return f"doc_{upload.file_hash}_{vlm_model}"
+        return f"doc_{ANALYSIS_CACHE_VERSION}_{upload.file_hash}_{vlm_model}"
 
     def seed_library(
         self,
@@ -359,13 +363,14 @@ def _sample_document_row(
     doc_id: str = "doc-library",
     source: str = "library.pdf",
     fmt: DocumentFormat = DocumentFormat.PDF,
+    blocks: list[Block] | None = None,
 ) -> Document:
     """Build a library document row like db.sqlite.get_document() returns."""
     return Document(
         id=doc_id,
         source=source,
         format=fmt,
-        blocks=[],
+        blocks=copy.deepcopy(blocks) if blocks is not None else _sample_document().blocks,
         metadata=DocumentMetadata(title=Path(source).stem),
         created_at=datetime(2026, 3, 15, tzinfo=timezone.utc),
     )
@@ -439,10 +444,8 @@ def _qa_result(
 
 
 def _stored_document_copy(document: Document) -> Document:
-    """Store a SQLite-like copy of a document without raw blocks."""
-    stored = copy.deepcopy(document)
-    stored.blocks = []
-    return stored
+    """Store a SQLite-like copy of a document with full block content preserved."""
+    return copy.deepcopy(document)
 
 
 def _session_messages(harness: DemoAppHarness, doc_id: str) -> list[dict[str, Any]]:
@@ -591,7 +594,7 @@ def make_app() -> Iterator[Any]:
                 patch(
                     "parsers.image_parser.parse_image",
                     new=MagicMock(
-                        side_effect=lambda _path, model=DEFAULT_VLM_MODEL: (
+                        side_effect=lambda _path, model=DEFAULT_VLM_MODEL, language="ko": (
                             _sample_document(
                                 doc_id="doc-image",
                                 source="sample.png",
@@ -613,7 +616,7 @@ def make_app() -> Iterator[Any]:
                 patch(
                     "llm.note_generator.generate_note_sectioned",
                     new=MagicMock(
-                        side_effect=lambda doc, model=DEFAULT_LLM_MODEL: (
+                        side_effect=lambda doc, model=DEFAULT_LLM_MODEL, language="ko": (
                             _sample_note_result()
                         )
                     ),
@@ -680,6 +683,12 @@ def make_app() -> Iterator[Any]:
                     new=MagicMock(side_effect=_rag_query),
                 )
             )
+            enrich_pdf_figures = stack.enter_context(
+                patch(
+                    "parsers.figure_enricher.enrich_pdf_figures",
+                    new=MagicMock(side_effect=lambda doc, **kwargs: doc),
+                )
+            )
             pyperclip_copy = stack.enter_context(
                 patch("pyperclip.copy", new=MagicMock())
             )
@@ -703,6 +712,7 @@ def make_app() -> Iterator[Any]:
                 has_document_vectors=has_document_vectors,
                 rag_query=rag_query,
                 rewrite_query=rewrite_query,
+                enrich_pdf_figures=enrich_pdf_figures,
                 pyperclip_copy=pyperclip_copy,
                 documents_db=documents_db,
                 notes_db=notes_db,
@@ -771,6 +781,64 @@ def test_render_source_block_expanders_deduplicates_by_source_and_location() -> 
     )
     assert recorder.expanders[1]["texts"] == ["다른 위치 미리보기"], (
         "Second unique source should still render its preview"
+    )
+
+
+def test_filter_inline_figure_blocks_skips_front_matter_images() -> None:
+    """Inline note rendering should ignore image_path blocks before the first body page."""
+    spec = importlib.util.spec_from_file_location("ui_demo_unit_test", DEMO_APP_PATH)
+    assert spec is not None and spec.loader is not None, (
+        "ui/demo.py should be importable for testing"
+    )
+    module = importlib.util.module_from_spec(spec)
+
+    with patch.object(st, "set_page_config", side_effect=_StopDemoImport):
+        try:
+            spec.loader.exec_module(module)
+        except _StopDemoImport:
+            pass
+
+    front_text = Block(
+        type=BlockType.TEXT,
+        content="예제 코드 제공",
+        order=0,
+        image_path="front.png",
+        metadata=BlockMetadata(page=1),
+    )
+    body_figure = Block(
+        type=BlockType.FIGURE,
+        content="본문 다이어그램",
+        order=1,
+        image_path="body.png",
+        metadata=BlockMetadata(page=17),
+    )
+    doc = _sample_document(blocks=[front_text, body_figure])
+    grouped_sections = [
+        SectionInfo(
+            heading="1. 본문",
+            level=1,
+            start_block_order=1,
+            end_block_order=None,
+            blocks=[
+                Block(
+                    type=BlockType.TEXT,
+                    content="본문 설명이 충분히 이어집니다.",
+                    order=10,
+                    metadata=BlockMetadata(page=17),
+                )
+            ],
+            from_toc=True,
+        )
+    ]
+
+    with (
+        patch("llm.section_splitter.extract_sections", return_value=grouped_sections),
+        patch("llm.section_splitter.group_blocks_by_section", return_value=grouped_sections),
+    ):
+        filtered = module._filter_inline_figure_blocks(doc, [front_text, body_figure])
+
+    assert [block.order for block in filtered] == [1], (
+        "Only body-page images should remain eligible for inline note rendering"
     )
 
 
@@ -865,7 +933,7 @@ class TestUploadFlow:
 
         with make_app() as harness:
             harness.generate_note.side_effect = (
-                lambda doc, model=DEFAULT_LLM_MODEL: sectioned_result
+                lambda doc, model=DEFAULT_LLM_MODEL, language="ko": sectioned_result
             )
             app = _analyze_upload(harness, pdf_upload)
 
@@ -1345,7 +1413,7 @@ class TestLibraryPersistence:
     """Coverage for saved-document restoration and session persistence."""
 
     def test_analysis_saves_and_sidebar_lists_document(self, make_app: Any) -> None:
-        """Completed analyses should persist and show up in the sidebar library."""
+        """Completed analyses should persist and show up in the sidebar library on next rerun."""
         pdf_upload = _pdf_upload(name="library.pdf", file_id="upload-library")
         parsed_doc = _sample_document(doc_id="doc-library", source="library.pdf")
 
@@ -1360,8 +1428,14 @@ class TestLibraryPersistence:
             assert harness.save_note.call_count == 1, (
                 "Finished analyses should call save_note once"
             )
+
+            # The sidebar re-renders with the new document on the next user interaction.
+            # (The old code called st.rerun() here which caused the note to not show immediately;
+            # sidebar library updates on the following rerun instead.)
+            harness.run(upload=pdf_upload)
+            _assert_no_exception(harness.app)
             assert harness.app.button(key="lib_doc-library").label.startswith("📄"), (
-                "Saved documents should render in the sidebar library"
+                "Saved documents should render in the sidebar library after next rerun"
             )
 
     def test_library_load_restores_without_reanalysis_and_survives_stale_uploader(
@@ -1404,6 +1478,62 @@ class TestLibraryPersistence:
             )
             assert harness.parse_pdf.call_count == 0, (
                 "A stale uploader value should not restart the pipeline"
+            )
+
+    def test_library_load_renders_inline_figures_when_blocks_are_restored(
+        self,
+        make_app: Any,
+        tmp_path: Path,
+    ) -> None:
+        """Library-loaded notes should restore figure-bearing blocks for inline rendering."""
+        png_bytes = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z0x8AAAAASUVORK5CYII="
+        )
+        figure_path = tmp_path / "library-body.png"
+        figure_path.write_bytes(png_bytes)
+
+        document = _sample_document_row(
+            doc_id="doc-library-fig",
+            source="library-fig.pdf",
+            blocks=[
+                Block(
+                    type=BlockType.TEXT,
+                    content="본문 설명 블록입니다.",
+                    order=0,
+                    image_path=str(figure_path),
+                    metadata=BlockMetadata(page=17),
+                ),
+                Block(
+                    type=BlockType.TEXT,
+                    content="충분히 긴 본문 설명이 이어집니다.",
+                    order=1,
+                    metadata=BlockMetadata(page=17),
+                ),
+            ],
+        )
+        note_row = _sample_note_row(
+            document_id=document.id,
+            file_hash="library-fig-hash",
+            result=_sample_note_result(
+                title="이미지 복원 노트",
+                note_markdown="## 서론\n\n본문 설명입니다.\n\n## 본문\n\n추가 설명입니다.",
+            ),
+        )
+
+        with make_app() as harness:
+            harness.seed_library(document, note_row, has_vectors=True)
+            harness.run()
+            harness.click_button(key="lib_doc-library-fig", upload=None)
+
+            _assert_no_exception(harness.app)
+            doc_cache_key = harness.session_value("_library_doc_cache_key")
+            restored_doc = harness.session_value(doc_cache_key)
+            assert restored_doc is not None
+            assert len(restored_doc.blocks) == 2, (
+                "Library-loaded documents should restore full block content"
+            )
+            assert restored_doc.blocks[0].image_path == str(figure_path), (
+                "Restored blocks should keep image_path so note rendering can inject figures"
             )
 
     def test_delete_evicts_cache_then_reupload_reprocesses(self, make_app: Any) -> None:
@@ -1503,9 +1633,9 @@ class TestLibraryPersistence:
             assert len(harness.app.chat_input) == 0, (
                 "Q&A should be disabled when no document vectors are available"
             )
-            assert any("벡터" in info.value for info in harness.app.info), (
-                "The UI should explain why Q&A is unavailable without vectors"
-            )
+            assert any(
+                "벡터" in el.value for el in harness.app.markdown
+            ), "The UI should explain why Q&A is unavailable without vectors"
 
     def test_library_note_edit_persists_dirty_note(self, make_app: Any) -> None:
         """Editing a library-loaded note should save with the restored file hash and models."""
@@ -1558,3 +1688,299 @@ class TestLibraryPersistence:
                 ]["result"]["note_markdown"]
                 == updated_markdown
             ), "Dirty library edits should update the persisted note body"
+
+
+class TestFigureEnrichment:
+    """PDF upload flow should trigger figure enrichment and degrade gracefully on failure."""
+
+    def test_pdf_upload_triggers_figure_enrichment(self, make_app: Any) -> None:
+        """Figure enrichment must be called once per PDF analysis."""
+        pdf_upload = _pdf_upload()
+
+        with make_app() as harness:
+            _analyze_upload(harness, pdf_upload)
+
+            _assert_no_exception(harness.app)
+            assert harness.enrich_pdf_figures.call_count == 1, (
+                "enrich_pdf_figures should be called once per PDF upload"
+            )
+
+    def test_pdf_enrichment_failure_does_not_crash_pipeline(self, make_app: Any) -> None:
+        """If enrichment raises, the pipeline should still complete successfully."""
+        pdf_upload = _pdf_upload()
+
+        with make_app() as harness:
+            harness.enrich_pdf_figures.side_effect = RuntimeError("VLM quota exceeded")
+            app = _analyze_upload(harness, pdf_upload)
+
+            _assert_no_exception(app)
+            assert harness.generate_note.call_count == 1, (
+                "Note generation should proceed even if enrichment fails"
+            )
+            assert harness.save_document.call_count == 1, (
+                "Document should be persisted even if enrichment fails"
+            )
+
+    def test_note_renders_figures_inline(self, make_app: Any, tmp_path: Path) -> None:
+        """Note read view should not crash when enriched FIGURE blocks have image_path set."""
+        from PIL import Image as _PILImage
+        import io as _io
+
+        buf = _io.BytesIO()
+        _PILImage.new("RGB", (4, 4), color=(128, 128, 128)).save(buf, "PNG")
+        img_file = tmp_path / "fig.png"
+        img_file.write_bytes(buf.getvalue())
+        img_path = str(img_file)
+
+        pdf_upload = _pdf_upload()
+        fh = pdf_upload.file_hash
+        doc_cache_key = f"doc_{ANALYSIS_CACHE_VERSION}_{fh}_{DEFAULT_VLM_MODEL}"
+
+        with make_app() as harness:
+
+            def _enrich_inject_figure(doc: Document, **kwargs: Any) -> Document:
+                doc.blocks.append(
+                    Block(
+                        type=BlockType.FIGURE,
+                        content="extracted figure",
+                        order=99,
+                        image_path=img_path,
+                        metadata=BlockMetadata(page=1, confidence=0.9),
+                    )
+                )
+                return doc
+
+            harness.enrich_pdf_figures.side_effect = _enrich_inject_figure
+            _analyze_upload(harness, pdf_upload)
+
+            _assert_no_exception(harness.app)
+            cached_doc = harness.session_value(doc_cache_key)
+            assert cached_doc is not None, "Document should be cached in session state"
+            fig_blocks = [b for b in cached_doc.blocks if b.type == BlockType.FIGURE]
+            assert fig_blocks, "Cached doc should contain the injected FIGURE block"
+            assert fig_blocks[0].image_path == img_path, (
+                "FIGURE block image_path should be set by the enrichment mock"
+            )
+
+    def test_qa_source_block_shows_figure_image(self, make_app: Any, tmp_path: Path) -> None:
+        """Q&A chat should not crash and should preserve image_path in source blocks."""
+        from PIL import Image as _PILImage
+        import io as _io
+
+        buf = _io.BytesIO()
+        _PILImage.new("RGB", (4, 4), color=(64, 64, 64)).save(buf, "PNG")
+        img_file = tmp_path / "src_fig.png"
+        img_file.write_bytes(buf.getvalue())
+        img_path = str(img_file)
+
+        pdf_upload = _pdf_upload()
+
+        with make_app() as harness:
+            harness.rag_query.side_effect = lambda question, **kwargs: _qa_result(
+                "다이어그램은 데이터 흐름을 보여줍니다.",
+                source_blocks=[
+                    {
+                        "document_id": "doc-pdf",
+                        "source": "sample.pdf",
+                        "block_order": 0,
+                        "block_type": "figure",
+                        "content_preview": "Fig. 1",
+                        "page": 1,
+                        "cell_index": None,
+                        "image_path": img_path,
+                    }
+                ],
+            )
+
+            _analyze_upload(harness, pdf_upload)
+            harness.set_chat_input("이 다이어그램이 뭘 보여주나?", upload=pdf_upload)
+
+            _assert_no_exception(harness.app)
+            messages = _session_messages(harness, "doc-pdf")
+            assistant_msgs = [m for m in messages if m.get("role") == "assistant"]
+            assert assistant_msgs, "Assistant message expected after Q&A"
+            last_srcs = assistant_msgs[-1].get("source_blocks", [])
+            assert any(
+                s.get("image_path") == img_path for s in last_srcs
+            ), "image_path should be propagated into chat message source_blocks"
+
+
+# ---------------------------------------------------------------------------
+# _render_qa_notice palette unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_render_qa_notice_loading_uses_info_palette() -> None:
+    """Loading state should render Steel Blue info palette (#DDE8ED / #5A7B8C)."""
+    spec = importlib.util.spec_from_file_location("ui_demo_qa_notice_loading", DEMO_APP_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+
+    captured: list[str] = []
+    with (
+        patch.object(st, "set_page_config", side_effect=_StopDemoImport),
+        patch.object(st, "markdown", side_effect=lambda h, **kw: captured.append(str(h))),
+    ):
+        try:
+            spec.loader.exec_module(module)
+        except _StopDemoImport:
+            pass
+        module._render_qa_notice("Q&A 인덱싱 중입니다. 잠시 기다려 주세요...", is_loading=True)
+
+    assert captured, "st.markdown should be called by _render_qa_notice"
+    html = captured[0]
+    assert "#F5EDE4" in html, "Loading notice background should use warm accent palette"
+    assert "#C4553A" in html, "Loading notice border should use warm accent palette"
+    assert "⏳" in html, "Loading notice should include a spinner icon"
+
+
+def test_render_qa_notice_disabled_uses_warning_palette() -> None:
+    """Disabled state (vectors missing) should render Amber warning palette (#F5EBDB / #C4883A)."""
+    spec = importlib.util.spec_from_file_location("ui_demo_qa_notice_disabled", DEMO_APP_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+
+    captured: list[str] = []
+    with (
+        patch.object(st, "set_page_config", side_effect=_StopDemoImport),
+        patch.object(st, "markdown", side_effect=lambda h, **kw: captured.append(str(h))),
+    ):
+        try:
+            spec.loader.exec_module(module)
+        except _StopDemoImport:
+            pass
+        module._render_qa_notice("Q&A를 사용하려면 문서 벡터가 필요합니다.", is_loading=False)
+
+    assert captured, "st.markdown should be called by _render_qa_notice"
+    html = captured[0]
+    assert "#F5EBDB" in html, "Disabled notice background should use Amber warning palette"
+    assert "#C4883A" in html, "Disabled notice border should use Amber warning palette"
+    assert "ℹ️" in html, "Disabled notice should include an info icon"
+
+
+# ---------------------------------------------------------------------------
+# Language parameter propagation
+# ---------------------------------------------------------------------------
+
+
+class TestLanguageParam:
+    """Output language selectbox should wire through to all downstream callers."""
+
+    def test_language_selectbox_renders_with_default_ko(self, make_app: Any) -> None:
+        """The language selectbox should default to 'ko' on first load."""
+        with make_app() as harness:
+            harness.run()
+            lang_sb = harness.app.selectbox(key="output_language_select")
+            assert lang_sb.value == "ko", "Language selectbox should default to Korean"
+
+    def test_pdf_note_generation_called_with_language_en(self, make_app: Any) -> None:
+        """Switching to English should call generate_note_sectioned with language='en'."""
+        pdf_upload = _pdf_upload()
+
+        with make_app() as harness:
+            harness.run()
+            harness.run(upload=pdf_upload)
+            harness.set_selectbox("output_language_select", "en", upload=pdf_upload)
+            harness.click_button(label="분석 시작")
+
+            _assert_no_exception(harness.app)
+            assert harness.generate_note.called, "Note generation should be called"
+            _, kwargs = harness.generate_note.call_args
+            assert kwargs.get("language") == "en", (
+                "generate_note_sectioned should receive language='en' from selectbox"
+            )
+
+    def test_image_parse_called_with_language_en(self, make_app: Any) -> None:
+        """Image upload with English selectbox should call parse_image with language='en'."""
+        img_upload = _image_upload()
+
+        with make_app() as harness:
+            harness.run()
+            harness.run(upload=img_upload)
+            harness.set_selectbox("output_language_select", "en", upload=img_upload)
+            harness.click_button(label="분석 시작")
+
+            _assert_no_exception(harness.app)
+            assert harness.parse_image.called, "parse_image should be called for image upload"
+            _, kwargs = harness.parse_image.call_args
+            assert kwargs.get("language") == "en", (
+                "parse_image should receive language='en' from selectbox"
+            )
+
+    def test_enrich_pdf_figures_called_with_language_en(self, make_app: Any) -> None:
+        """PDF enrichment should receive the language param from the selectbox."""
+        pdf_upload = _pdf_upload()
+
+        with make_app() as harness:
+            harness.run()
+            harness.run(upload=pdf_upload)
+            harness.set_selectbox("output_language_select", "en", upload=pdf_upload)
+            harness.click_button(label="분석 시작")
+
+            _assert_no_exception(harness.app)
+            assert harness.enrich_pdf_figures.called, "enrich_pdf_figures should be called for PDF"
+            _, kwargs = harness.enrich_pdf_figures.call_args
+            assert kwargs.get("language") == "en", (
+                "enrich_pdf_figures should receive language='en' from selectbox"
+            )
+
+
+# ---------------------------------------------------------------------------
+# _parse_followup_suggestions unit tests
+# ---------------------------------------------------------------------------
+
+
+def _load_parse_followup() -> Any:
+    """Load _parse_followup_suggestions from ui/demo.py without running the app."""
+    spec = importlib.util.spec_from_file_location("ui_demo_parse_followup", DEMO_APP_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    with patch.object(st, "set_page_config", side_effect=_StopDemoImport):
+        try:
+            spec.loader.exec_module(module)
+        except _StopDemoImport:
+            pass
+    return module._parse_followup_suggestions
+
+
+def test_parse_followup_single_newline() -> None:
+    """Standard single-newline-separated block should parse correctly."""
+    fn = _load_parse_followup()
+    answer = "본문 내용\n---SUGGESTIONS---\n질문1\n질문2\n질문3\n---END---"
+    clean, suggestions = fn(answer)
+    assert clean == "본문 내용"
+    assert suggestions == ["질문1", "질문2", "질문3"]
+
+
+def test_parse_followup_double_newline_before_marker() -> None:
+    """LLM sometimes emits two blank lines before ---SUGGESTIONS---; must still parse."""
+    fn = _load_parse_followup()
+    answer = "본문 내용\n\n---SUGGESTIONS---\n질문1\n질문2\n질문3\n---END---"
+    clean, suggestions = fn(answer)
+    assert clean == "본문 내용", "double-newline before marker should be stripped from clean answer"
+    assert len(suggestions) == 3
+
+
+def test_parse_followup_no_block_returns_unchanged() -> None:
+    """Answer without SUGGESTIONS block should be returned as-is."""
+    fn = _load_parse_followup()
+    answer = "그냥 답변입니다."
+    clean, suggestions = fn(answer)
+    assert clean == answer
+    assert suggestions == []
+
+
+def test_parse_followup_strips_numbering() -> None:
+    """Numbered questions (1. / 1) ...) should have their prefix stripped."""
+    fn = _load_parse_followup()
+    answer = "답변\n---SUGGESTIONS---\n1. 질문1\n2) 질문2\n3. 질문3\n---END---"
+    _, suggestions = fn(answer)
+    assert suggestions == ["질문1", "질문2", "질문3"]
+
+
+def test_parse_followup_truncates_to_three() -> None:
+    """More than 3 suggestions should be truncated."""
+    fn = _load_parse_followup()
+    answer = "답변\n---SUGGESTIONS---\nQ1\nQ2\nQ3\nQ4\n---END---"
+    _, suggestions = fn(answer)
+    assert len(suggestions) == 3
