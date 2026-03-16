@@ -26,10 +26,10 @@ class ModelConfig(TypedDict):
 
 
 MODEL_REGISTRY: dict[str, ModelConfig] = {
+    "gpt-4.1-nano": {"provider": "openai", "input": 0.10, "output": 0.40},
     "gpt-4o-mini": {"provider": "openai", "input": 0.15, "output": 0.60},
     "gpt-4o": {"provider": "openai", "input": 2.50, "output": 10.00},
     "gpt-4.1-mini": {"provider": "openai", "input": 0.40, "output": 1.60},
-    "gpt-4.1-nano": {"provider": "openai", "input": 0.10, "output": 0.40},
     "gpt-5-nano": {"provider": "openai", "input": 0.20, "output": 0.80},
     "claude-haiku-4-5-20251001": {
         "provider": "anthropic",

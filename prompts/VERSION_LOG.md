@@ -3,16 +3,19 @@
 ## vlm_code.py
 | Version | Date | Change | Quality Impact |
 |---------|------|--------|----------------|
+| v1.2.0 | 2026-03-16 | Output language selection (ko/en). `PROMPT` → `PROMPT_TEMPLATE` + `get_prompt(language)`. `LANGUAGE_INSTRUCTIONS` dict. Backward compat `PROMPT = get_prompt("ko")`. Removed "original language" instructions — replaced with explicit `{output_language_instruction}`. | Eliminates random Spanish/mixed-language VLM output |
 | v1.1.0 | 2026-03-03 | Added `schema_version`, `code_markdown`, `errors`, stricter JSON escaping rules, explicit no-guess policy. | Higher parse stability, lower hallucination |
 
 ## vlm_diagram.py
 | Version | Date | Change | Quality Impact |
 |---------|------|--------|----------------|
+| v1.2.0 | 2026-03-16 | Output language selection (ko/en). Same `get_prompt(language)` pattern as vlm_code. Labels preserved as-is, descriptions/flow_summary in chosen language. | Deterministic output language |
 | v1.1.0 | 2026-03-03 | Added `schema_version`, `has_truncation`, `errors`, nullable title/relationship label policy, no-guess policy. | Better uncertain-input handling |
 
 ## vlm_text.py
 | Version | Date | Change | Quality Impact |
 |---------|------|--------|----------------|
+| v1.2.0 | 2026-03-16 | Output language selection (ko/en). Same `get_prompt(language)` pattern. Content/title/key_points in chosen language. | Deterministic output language |
 | v1.1.0 | 2026-03-03 | Added `schema_version`, `has_truncation`, `errors`, key points relaxed to 0-5, stricter no-guess policy. | Lower hallucination on sparse text |
 
 ## vlm_classify.py
@@ -36,6 +39,7 @@
 | v1.4.1 | 2026-03-15 | note_generator.py: OpenAI `response_format={"type":"json_object"}` 강제 + JSON 파싱 실패 시 1회 retry (nudge 메시지 추가). 프롬프트 텍스트 변경 없음 — 동작 레이어 수정. | gpt-4o-mini가 JSON 대신 마크다운 텍스트 반환하는 케이스 방어 |
 | v1.5.0 | 2026-03-15 | "5-10 major sections" → "Cover EVERY distinct topic, dedicated ## section per topic, TOC headings must all appear"; MINIMUM LENGTH 2000 → 3000자; max_tokens 4096 → 8192. | LLM이 섹션 누락하거나 1060 토큰에서 자발적으로 멈추는 문제 해결 |
 | v1.5.1 | 2026-03-15 | No-merge rule 강화: "one heading = one ## section, no exceptions. Do NOT merge adjacent or similar-sounding sections (e.g. 'git commit' and 'git commit -a' are separate sections)." | 유사 섹션 병합으로 인한 TOC 커버리지 누락 방지 (3.5/3.7/3.8 섹션 누락 케이스) |
+| v1.6.0 | 2026-03-16 | Output language selection (ko/en). `PROMPT` → `PROMPT_TEMPLATE` + `get_prompt(language)`. Removed implicit "original language" / "source Korean/English" instructions — replaced with explicit `{output_language_instruction}`. `generate_note()` and `generate_note_sectioned()` accept `language` parameter. | Eliminates random Spanish/mixed-language note output; user can choose English notes for English sources |
 | v1.5.2 | 2026-03-15 | EXCLUDE auxiliary content rule 추가: 부록(Appendix), 참고문헌, 색인, 챕터 개요 blurb는 노트에 포함 금지. 코드 레벨: `_HEADING_PATTERN`에 `부록/Appendix` 추가 + `_CHAPTER_INTRO_MAX_LEN=450` — 첫 줄이 CHAPTER/부록 패턴인 짧은 multi-line 블록도 노이즈 필터 적용. | "CHAPTER 5 소개합니다…" 블록과 "부록 B GitLab" 섹션이 노트에 포함되는 문제 수정 |
 
 ## note_generation_section.py
@@ -43,6 +47,7 @@
 |---------|------|--------|----------------|
 | v1.0.0 | 2026-03-15 | Initial section-based note generation prompts. SECTION_PROMPT: per-section body generation (raw markdown, no heading). ASSEMBLY_PROMPT: metadata-only JSON extraction from concatenated sectioned notes (title, summary, key_concepts, difficulty, read_time, confidence). | Enables full TOC coverage for large documents via per-section LLM calls |
 | v1.1.0 | 2026-03-15 | ASSEMBLY_PROMPT: replaced full `note_markdown` with per-section snippets (`## heading` + first 2-3 sentences of body). `estimated_read_time_min` pre-computed from word count (200 wpm). ~80% token reduction vs full note while preserving summary quality. | Faster assembly call; summary quality maintained via opening sentences per section |
+| v1.3.0 | 2026-03-16 | Output language selection (ko/en). SECTION_PROMPT → `get_section_prompt(language)`, ASSEMBLY_PROMPT → `get_assembly_prompt(language)`. Removed implicit "original language" instructions — replaced with `{output_language_instruction}`. Backward compat variables preserved. | Deterministic output language for sectioned notes |
 | v1.2.0 | 2026-03-15 | SECTION_PROMPT: add "DO NOT restate the section title in the opening sentence." Code-level: `_strip_leading_heading()` extended to also strip plain-text restatements (normalized match against section heading, handles colons/case). | Eliminates duplicate heading lines when LLM outputs plain-text title instead of markdown `##` |
 
 ## eval_judge.py
