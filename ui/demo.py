@@ -1461,7 +1461,7 @@ def _parse_followup_suggestions(answer: str) -> tuple[str, list[str]]:
     Returns (clean_answer, suggestions) where suggestions is a list of up to 3 strings.
     If no block is found, suggestions is empty and answer is returned unchanged.
     """
-    match = re.search(r"\n?---SUGGESTIONS---\n(.*?)\n---END---", answer, re.DOTALL)
+    match = re.search(r"---SUGGESTIONS---\s*(.*?)\s*---END---", answer, re.DOTALL)
     if not match:
         return answer, []
     clean = answer[: match.start()].rstrip()
