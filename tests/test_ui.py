@@ -1803,3 +1803,123 @@ class TestFigureEnrichment:
             assert any(
                 s.get("image_path") == img_path for s in last_srcs
             ), "image_path should be propagated into chat message source_blocks"
+
+
+# ---------------------------------------------------------------------------
+# _render_qa_notice palette unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_render_qa_notice_loading_uses_info_palette() -> None:
+    """Loading state should render Steel Blue info palette (#DDE8ED / #5A7B8C)."""
+    spec = importlib.util.spec_from_file_location("ui_demo_qa_notice_loading", DEMO_APP_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+
+    captured: list[str] = []
+    with (
+        patch.object(st, "set_page_config", side_effect=_StopDemoImport),
+        patch.object(st, "markdown", side_effect=lambda h, **kw: captured.append(str(h))),
+    ):
+        try:
+            spec.loader.exec_module(module)
+        except _StopDemoImport:
+            pass
+        module._render_qa_notice("Q&A 인덱싱 중입니다. 잠시 기다려 주세요...", is_loading=True)
+
+    assert captured, "st.markdown should be called by _render_qa_notice"
+    html = captured[0]
+    assert "#DDE8ED" in html, "Loading notice background should use Steel Blue info palette"
+    assert "#5A7B8C" in html, "Loading notice border should use Steel Blue info palette"
+    assert "⏳" in html, "Loading notice should include a spinner icon"
+
+
+def test_render_qa_notice_disabled_uses_warning_palette() -> None:
+    """Disabled state (vectors missing) should render Amber warning palette (#F5EBDB / #C4883A)."""
+    spec = importlib.util.spec_from_file_location("ui_demo_qa_notice_disabled", DEMO_APP_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+
+    captured: list[str] = []
+    with (
+        patch.object(st, "set_page_config", side_effect=_StopDemoImport),
+        patch.object(st, "markdown", side_effect=lambda h, **kw: captured.append(str(h))),
+    ):
+        try:
+            spec.loader.exec_module(module)
+        except _StopDemoImport:
+            pass
+        module._render_qa_notice("Q&A를 사용하려면 문서 벡터가 필요합니다.", is_loading=False)
+
+    assert captured, "st.markdown should be called by _render_qa_notice"
+    html = captured[0]
+    assert "#F5EBDB" in html, "Disabled notice background should use Amber warning palette"
+    assert "#C4883A" in html, "Disabled notice border should use Amber warning palette"
+    assert "ℹ️" in html, "Disabled notice should include an info icon"
+
+
+# ---------------------------------------------------------------------------
+# Language parameter propagation
+# ---------------------------------------------------------------------------
+
+
+class TestLanguageParam:
+    """Output language selectbox should wire through to all downstream callers."""
+
+    def test_language_selectbox_renders_with_default_ko(self, make_app: Any) -> None:
+        """The language selectbox should default to 'ko' on first load."""
+        with make_app() as harness:
+            harness.run()
+            lang_sb = harness.app.selectbox(key="output_language_select")
+            assert lang_sb.value == "ko", "Language selectbox should default to Korean"
+
+    def test_pdf_note_generation_called_with_language_en(self, make_app: Any) -> None:
+        """Switching to English should call generate_note_sectioned with language='en'."""
+        pdf_upload = _pdf_upload()
+
+        with make_app() as harness:
+            harness.run()
+            harness.run(upload=pdf_upload)
+            harness.set_selectbox("output_language_select", "en", upload=pdf_upload)
+            harness.click_button(label="분석 시작")
+
+            _assert_no_exception(harness.app)
+            assert harness.generate_note.called, "Note generation should be called"
+            _, kwargs = harness.generate_note.call_args
+            assert kwargs.get("language") == "en", (
+                "generate_note_sectioned should receive language='en' from selectbox"
+            )
+
+    def test_image_parse_called_with_language_en(self, make_app: Any) -> None:
+        """Image upload with English selectbox should call parse_image with language='en'."""
+        img_upload = _image_upload()
+
+        with make_app() as harness:
+            harness.run()
+            harness.run(upload=img_upload)
+            harness.set_selectbox("output_language_select", "en", upload=img_upload)
+            harness.click_button(label="분석 시작")
+
+            _assert_no_exception(harness.app)
+            assert harness.parse_image.called, "parse_image should be called for image upload"
+            _, kwargs = harness.parse_image.call_args
+            assert kwargs.get("language") == "en", (
+                "parse_image should receive language='en' from selectbox"
+            )
+
+    def test_enrich_pdf_figures_called_with_language_en(self, make_app: Any) -> None:
+        """PDF enrichment should receive the language param from the selectbox."""
+        pdf_upload = _pdf_upload()
+
+        with make_app() as harness:
+            harness.run()
+            harness.run(upload=pdf_upload)
+            harness.set_selectbox("output_language_select", "en", upload=pdf_upload)
+            harness.click_button(label="분석 시작")
+
+            _assert_no_exception(harness.app)
+            assert harness.enrich_pdf_figures.called, "enrich_pdf_figures should be called for PDF"
+            _, kwargs = harness.enrich_pdf_figures.call_args
+            assert kwargs.get("language") == "en", (
+                "enrich_pdf_figures should receive language='en' from selectbox"
+            )

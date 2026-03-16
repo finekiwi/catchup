@@ -1909,6 +1909,7 @@ with st.sidebar:
             options=["ko", "en"],
             format_func=lambda x: "한국어" if x == "ko" else "English",
             index=0,
+            key="output_language_select",
         )
 
 # ===================================================================
