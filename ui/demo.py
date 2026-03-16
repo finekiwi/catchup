@@ -1003,7 +1003,8 @@ def _render_note_with_figures(raw_md: str, fig_blocks: list, doc=None) -> None:
         return
 
     if doc is not None:
-        ranges = _build_section_page_ranges(doc, n)
+        headings = [h for h, _ in sections]
+        ranges = _build_section_page_ranges(doc, n, section_headings=headings)
         section_figs = _place_figures_page_based(fig_blocks, ranges)
     else:
         pages = [b.metadata.page for b in fig_blocks]

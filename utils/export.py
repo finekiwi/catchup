@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 from collections import defaultdict
 from io import BytesIO
 from pathlib import Path
@@ -15,26 +16,104 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-def _build_section_page_ranges(doc: "Document", n_sections: int) -> list[tuple[int, int]]:
-    """Compute the page range covered by each note section using document blocks.
+# Matches section-number prefixes like "4.1.2" at the start of a text block.
+_DOC_SEC_RE = re.compile(r"^\d+(?:\.\d+)+\s+\S")
+# Extracts the first section number from any string (e.g. "## 4.1.2 Title" → "4.1.2").
+_SEC_NUM_RE = re.compile(r"(\d+(?:\.\d+)+)")
 
-    Divides body blocks (non-image, with page metadata) evenly across n_sections
-    and returns the min/max page of each chunk.
+
+def _build_section_page_ranges(
+    doc: "Document",
+    n_sections: int,
+    section_headings: Optional[list[str]] = None,
+) -> list[tuple[int, int]]:
+    """Compute the page range covered by each note section.
+
+    Primary strategy (when ``section_headings`` is provided):
+        1. Extract section-header blocks from the document by matching the
+           pattern ``<number> <title>`` (e.g. "4.1.2 Activation Functions").
+        2. Build a map of section-number → start page.
+        3. For each note section heading, extract its section number and look up
+           the start page.  The end page is one before the next document section
+           that starts on a later page.
+        4. For unmatched headings, fall back to the even-split strategy below.
+
+    Fallback strategy (even split):
+        Divide all body blocks (non-image, with page) evenly across n_sections
+        and return the min/max page of each chunk.
+
+    Args:
+        doc: Parsed Document.
+        n_sections: Number of note sections.
+        section_headings: List of raw note section headings (e.g. "## 4.1.2 …").
+            When provided, enables the primary section-number matching strategy.
 
     Returns:
         List of (min_page, max_page) tuples, one per section.
     """
+    # --- collect document section-header pages ---
+    doc_sec_map: dict[str, int] = {}  # "4.1.2" → page
+    if section_headings:
+        for b in doc.blocks:
+            if b.metadata.page and not b.image_path and _DOC_SEC_RE.match(b.content.strip()):
+                m = _SEC_NUM_RE.match(b.content.strip())
+                if m:
+                    doc_sec_map[m.group(1)] = b.metadata.page
+
+    # --- primary strategy: section-number matching ---
+    if doc_sec_map and section_headings:
+        max_page = max((b.metadata.page for b in doc.blocks if b.metadata.page), default=9999)
+        # sorted (sec_num, page) for next-boundary lookup
+        sec_pages_sorted = sorted(doc_sec_map.values())
+
+        def _page_range_for_sec(sec_num: str) -> Optional[tuple[int, int]]:
+            if sec_num not in doc_sec_map:
+                return None
+            lo = doc_sec_map[sec_num]
+            # next document section that starts on a later page
+            hi = next((p - 1 for p in sec_pages_sorted if p > lo), max_page)
+            return (lo, max(lo, hi))
+
+        # body blocks for fallback chunks
+        body_blocks = sorted(
+            [b for b in doc.blocks if b.metadata.page is not None and not b.image_path],
+            key=lambda b: b.order,
+        )
+        total = len(body_blocks)
+
+        ranges: list[tuple[int, int]] = []
+        for i, heading in enumerate(section_headings):
+            m = _SEC_NUM_RE.search(heading)
+            if m:
+                pr = _page_range_for_sec(m.group(1))
+                if pr:
+                    ranges.append(pr)
+                    continue
+            # fallback: even-split chunk for this index
+            if total:
+                start = (i * total) // n_sections
+                end = ((i + 1) * total) // n_sections
+                chunk = body_blocks[start:end]
+                pages = [b.metadata.page for b in chunk if b.metadata.page is not None]
+                if pages:
+                    ranges.append((min(pages), max(pages)))
+                    continue
+            prev = ranges[-1][1] if ranges else 1
+            ranges.append((prev, prev))
+        return ranges
+
+    # --- fallback: even split ---
     body_blocks = sorted(
         [b for b in doc.blocks if b.metadata.page is not None and not b.image_path],
         key=lambda b: b.order,
     )
-    m = len(body_blocks)
-    if m == 0:
+    m_total = len(body_blocks)
+    if m_total == 0:
         return [(1, 9999)] * n_sections
-    ranges: list[tuple[int, int]] = []
+    ranges = []
     for i in range(n_sections):
-        start = (i * m) // n_sections
-        end = ((i + 1) * m) // n_sections
+        start = (i * m_total) // n_sections
+        end = ((i + 1) * m_total) // n_sections
         chunk = body_blocks[start:end]
         pages = [b.metadata.page for b in chunk if b.metadata.page is not None]
         if pages:
@@ -110,8 +189,9 @@ def interleave_figures_into_sections(
         return body
 
     if doc is not None:
-        # Page-based mapping: use actual section page ranges from document blocks
-        ranges = _build_section_page_ranges(doc, n)
+        # Page-based mapping: use section-header page boundaries when available
+        headings = [h for h, _ in sections]
+        ranges = _build_section_page_ranges(doc, n, section_headings=headings)
         section_figs = _place_figures_page_based(fig_blocks, ranges)
     else:
         # Legacy page interpolation fallback

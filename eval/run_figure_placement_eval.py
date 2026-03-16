@@ -208,7 +208,8 @@ def _build_placement(
         return {}
 
     if doc is not None:
-        ranges = _build_section_page_ranges(doc, n)
+        headings = [h for h, _ in sections]
+        ranges = _build_section_page_ranges(doc, n, section_headings=headings)
         return _place_figures_page_based(fig_blocks, ranges)
 
     # Legacy page interpolation fallback
