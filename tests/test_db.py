@@ -9,6 +9,7 @@ from db import chroma as chroma_db
 from db import sqlite as sqlite_db
 from models.document import (
     Block,
+    BlockMetadata,
     BlockType,
     Document,
     DocumentFormat,
@@ -23,6 +24,15 @@ def _build_document(doc_id: str = "doc-1", source: str = "sample.pdf") -> Docume
         id=doc_id,
         source=source,
         format=DocumentFormat.PDF,
+        blocks=[
+            Block(
+                type=BlockType.TEXT,
+                content="설명 블록",
+                order=0,
+                image_path=f"data/figures/{doc_id}/0.png",
+                metadata=BlockMetadata(page=3),
+            )
+        ],
         metadata=DocumentMetadata(
             title="Sample Title", tags=["math", "ml"], total_pages=10
         ),
@@ -66,6 +76,15 @@ def test_sqlite_upsert_on_duplicate_document_id(tmp_path, monkeypatch) -> None:
         source="second.pdf",
         format=DocumentFormat.PDF,
         status=ProcessingStatus.CONCEPTS_EXTRACTED,
+        blocks=[
+            Block(
+                type=BlockType.CODE,
+                content="print('updated')",
+                order=1,
+                image_path="data/figures/duplicate-doc/1.png",
+                metadata=BlockMetadata(page=5, language="python"),
+            )
+        ],
         metadata=DocumentMetadata(title="Updated Title", tags=["updated"]),
         created_at=datetime(2026, 3, 3, tzinfo=timezone.utc),
     )
@@ -76,7 +95,25 @@ def test_sqlite_upsert_on_duplicate_document_id(tmp_path, monkeypatch) -> None:
     assert fetched.source == "second.pdf"
     assert fetched.status == ProcessingStatus.CONCEPTS_EXTRACTED
     assert fetched.metadata.title == "Updated Title"
+    assert len(fetched.blocks) == 1
+    assert fetched.blocks[0].image_path == "data/figures/duplicate-doc/1.png"
     assert len(sqlite_db.list_documents()) == 1
+
+
+def test_sqlite_roundtrip_preserves_blocks_and_image_paths(tmp_path, monkeypatch) -> None:
+    """Stored library documents must keep blocks so inline figures can render later."""
+    sqlite_path = tmp_path / "sqlite" / "catchup.db"
+    monkeypatch.setenv("CATCHUP_SQLITE_PATH", str(sqlite_path))
+
+    document = _build_document(doc_id="doc-with-figure", source="figure.pdf")
+    sqlite_db.save_document(document)
+
+    fetched = sqlite_db.get_document(document.id)
+    assert fetched is not None
+    assert len(fetched.blocks) == 1
+    assert fetched.blocks[0].content == "설명 블록"
+    assert fetched.blocks[0].image_path == "data/figures/doc-with-figure/0.png"
+    assert fetched.blocks[0].metadata.page == 3
 
 
 def test_sqlite_creates_db_file_automatically(tmp_path, monkeypatch) -> None:

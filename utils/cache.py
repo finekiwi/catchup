@@ -29,6 +29,8 @@ from models.document import Document
 LOGGER = logging.getLogger(__name__)
 
 _DEFAULT_CACHE_DIR = Path("data/parsed")
+_PARSE_CACHE_VERSION = "v2"
+_DOCLING_CACHE_VERSION = "v2"
 
 
 def _cache_dir() -> Path:
@@ -76,6 +78,9 @@ def load_cached_parse(file_path: Path) -> Optional[Document]:
         if stored_hash != current_hash:
             LOGGER.debug("Cache hash mismatch for %s — invalidating", file_path.name)
             return None
+        if raw.get("_cache_version") != _PARSE_CACHE_VERSION:
+            LOGGER.debug("Cache version mismatch for %s — invalidating", file_path.name)
+            return None
 
         doc = Document.model_validate(raw["document"])
         LOGGER.info("Cache hit: %s (%s)", file_path.name, path.name)
@@ -103,6 +108,7 @@ def save_cached_parse(file_path: Path, document: Document) -> None:
         path = _cache_path(file_path)
         payload = {
             "_cache_hash": _file_sha256(file_path),
+            "_cache_version": _PARSE_CACHE_VERSION,
             "_source": str(file_path),
             "document": document.model_dump(mode="json"),
         }
@@ -151,7 +157,7 @@ def load_docling_doc(file_path: Path) -> Optional[Any]:
 
         # Invalidate caches that were saved without generate_picture_images=True.
         # Version "v2" indicates the cache was built with picture image generation enabled.
-        if raw.get("_cache_version") != "v2":
+        if raw.get("_cache_version") != _DOCLING_CACHE_VERSION:
             LOGGER.debug(
                 "Docling cache version mismatch for %s — invalidating (no picture images)",
                 file_path.name,
@@ -181,7 +187,7 @@ def save_docling_doc(file_path: Path, dl_doc: Any) -> None:
         path = _docling_cache_path(file_path)
         payload = {
             "_cache_hash": _file_sha256(file_path),
-            "_cache_version": "v2",  # v2 = built with generate_picture_images=True
+            "_cache_version": _DOCLING_CACHE_VERSION,
             "_source": str(file_path),
             "docling_document": dl_doc.model_dump(mode="json"),
         }
@@ -284,6 +290,9 @@ def load_docling_doc_by_id(doc_id: str) -> Optional[Any]:
             return None
 
         raw = json.loads(path.read_text(encoding="utf-8"))
+        if raw.get("_cache_version") != _DOCLING_CACHE_VERSION:
+            LOGGER.debug("Docling cache version mismatch for %s — invalidating", doc_id)
+            return None
         doc = DoclingDocument.model_validate(raw["docling_document"])
         LOGGER.info("Docling cache hit by id: %s (%s)", doc_id, path.name)
         return doc
