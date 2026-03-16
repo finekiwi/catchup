@@ -23,12 +23,9 @@ from parsers.schemas.vlm_outputs import (
     CodeVLMOutput,
     DiagramVLMOutput,
     TextVLMOutput,
-    VLMOutputBase,
 )
 from prompts.vlm_classify import PROMPT as CLASSIFY_PROMPT
-from prompts.vlm_code import PROMPT as VLM_CODE_PROMPT
-from prompts.vlm_diagram import PROMPT as VLM_DIAGRAM_PROMPT
-from prompts.vlm_text import PROMPT as VLM_TEXT_PROMPT
+from prompts import vlm_code, vlm_diagram, vlm_text
 from vlm.client import call_vlm
 
 LOGGER = logging.getLogger(__name__)
@@ -43,16 +40,21 @@ _IMAGE_TYPE_MAP: dict[str, ImageType] = {
     "other": ImageType.OTHER,
 }
 
+_PROMPT_GETTER_BY_IMAGE_TYPE = {
+    ImageType.CODE_SCREENSHOT: vlm_code.get_prompt,
+    ImageType.DIAGRAM: vlm_diagram.get_prompt,
+    ImageType.TEXT_CAPTURE: vlm_text.get_prompt,
+    ImageType.EQUATION: vlm_text.get_prompt,
+    ImageType.OTHER: vlm_text.get_prompt,
+}
+
+# Backward compat: static prompt map (Korean default) used by figure_enricher
 _PROMPT_BY_IMAGE_TYPE: dict[ImageType, str] = {
-    ImageType.CODE_SCREENSHOT: VLM_CODE_PROMPT,
-    ImageType.DIAGRAM: VLM_DIAGRAM_PROMPT,
-    ImageType.TEXT_CAPTURE: VLM_TEXT_PROMPT,
-    ImageType.EQUATION: VLM_TEXT_PROMPT,
-    ImageType.OTHER: VLM_TEXT_PROMPT,
+    k: fn("ko") for k, fn in _PROMPT_GETTER_BY_IMAGE_TYPE.items()
 }
 
 
-def parse_image(file_path: str, model: str = "gpt-4o-mini") -> Document:
+def parse_image(file_path: str, model: str = "gpt-4o-mini", language: str = "ko") -> Document:
     """
     Parse one image file through VLM (classify then analyze) and return a Document.
 
@@ -63,6 +65,7 @@ def parse_image(file_path: str, model: str = "gpt-4o-mini") -> Document:
     Args:
         file_path: Path to the image file (JPEG / PNG / GIF / WebP).
         model: VLM model identifier. Defaults to "gpt-4o-mini".
+        language: Output language for VLM descriptions ("ko" or "en").
 
     Returns:
         Document with one Block from analysis, or empty blocks on VLM failure.
@@ -75,7 +78,7 @@ def parse_image(file_path: str, model: str = "gpt-4o-mini") -> Document:
     image_type = classify_image(file_path, model)
 
     # Step 2: analyze
-    analysis_prompt = _PROMPT_BY_IMAGE_TYPE[image_type]
+    analysis_prompt = _PROMPT_GETTER_BY_IMAGE_TYPE[image_type](language)
     result = call_vlm(model, file_path, analysis_prompt, stage="image_analysis")
 
     blocks: list[Block] = []
@@ -161,11 +164,10 @@ def map_vlm_output_to_block(
     VLM JSON schema != Block / BlockMetadata schema.
     """
     metadata = BlockMetadata(image_type=image_type, confidence=payload.confidence)
-    quality_note = _build_quality_note(payload)
 
     if isinstance(payload, CodeVLMOutput):
         metadata.language = payload.language
-        metadata.caption = _join_notes(payload.description, quality_note)
+        metadata.caption = payload.description or None
         return Block(
             type=BlockType.CODE,
             content=_normalize_escaped_text(payload.code_markdown or payload.code),
@@ -175,7 +177,7 @@ def map_vlm_output_to_block(
         )
 
     if isinstance(payload, DiagramVLMOutput):
-        metadata.caption = _join_notes(payload.title, quality_note)
+        metadata.caption = payload.title or None
         return Block(
             type=BlockType.FIGURE,
             content=_diagram_to_text(payload),
@@ -185,7 +187,7 @@ def map_vlm_output_to_block(
         )
 
     # TextVLMOutput
-    metadata.caption = _join_notes(payload.title, quality_note)
+    metadata.caption = payload.title or None
     return Block(
         type=BlockType.TEXT,
         content=payload.content,
@@ -273,21 +275,6 @@ def _diagram_to_text(payload: DiagramVLMOutput) -> str:
 
     return "\n".join(lines).strip()
 
-
-def _build_quality_note(payload: VLMOutputBase) -> str | None:
-    """Build quality metadata text from truncation/errors."""
-    notes: list[str] = []
-    if payload.has_truncation:
-        notes.append("truncation=true")
-    if payload.errors:
-        notes.append(f"errors={'; '.join(payload.errors)}")
-    return " | ".join(notes) if notes else None
-
-
-def _join_notes(first: str | None, second: str | None) -> str | None:
-    """Join two optional text notes into one caption field."""
-    parts = [value for value in (first, second) if value]
-    return " | ".join(parts) if parts else None
 
 
 def _normalize_escaped_text(value: str) -> str:
