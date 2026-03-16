@@ -17,6 +17,11 @@ from llm.block_filter import is_noise_block, _HEADING_PATTERN, _SECTION_NUM_PATT
 LOGGER = logging.getLogger(__name__)
 
 _MARKDOWN_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
+_NORMALIZED_WS_RE = re.compile(r"\s+")
+_TOC_LEADER_RE = re.compile(r"(?:\.{4,}|-{4,}|·{4,}|•{4,})")
+_SHORT_SECTION_FRAGMENT_RE = re.compile(r"^\d+(?:\.\d+){1,4}$")
+_TABLE_ROW_RE = re.compile(r"\|.+\|")
+_SENTENCE_END_RE = re.compile(r'(?:다\.|[.?!])(?:["\')\]]+)?$')
 
 # Patterns that look like figure/table captions or code snippets — NOT structural TOC entries
 _CAPTION_RE = re.compile(
@@ -32,7 +37,7 @@ _STRUCTURAL_RE = re.compile(
 
 def _is_structural_heading(text: str) -> bool:
     """Return True if ``text`` looks like a real TOC entry (not a figure/table caption)."""
-    t = text.strip()
+    t = _normalized_text(text)
     if _CAPTION_RE.match(t):
         return False
     if _STRUCTURAL_RE.match(t):
@@ -41,6 +46,124 @@ def _is_structural_heading(text: str) -> bool:
     if _HEADING_PATTERN.match(t) or _SECTION_NUM_PATTERN.match(t):
         return True
     return False
+
+
+def _normalized_text(text: str) -> str:
+    """Normalize Docling text for heuristic checks."""
+    return _NORMALIZED_WS_RE.sub(" ", text.replace("\xa0", " ")).strip()
+
+
+def _looks_sentence_like(text: str) -> bool:
+    """Return True if text looks like a short natural-language sentence."""
+    return bool(_SENTENCE_END_RE.search(text))
+
+
+def _looks_like_toc_fragment(text: str) -> bool:
+    """Return True for navigation fragments commonly found on TOC pages."""
+    normalized = _normalized_text(text)
+    if not normalized:
+        return False
+    if _TOC_LEADER_RE.search(normalized):
+        return True
+    if _TABLE_ROW_RE.search(normalized):
+        return True
+    if _SHORT_SECTION_FRAGMENT_RE.match(normalized):
+        return True
+    if _is_structural_heading(normalized) and "\n" not in normalized and not _looks_sentence_like(normalized):
+        return True
+    return False
+
+
+def _is_body_like_block(block: Block) -> bool:
+    """Return True when a block looks like actual body content, not navigation."""
+    if is_noise_block(block):
+        return False
+
+    if block.type == BlockType.TEXT:
+        text = _normalized_text(block.content)
+        if not text:
+            return False
+        if _looks_like_toc_fragment(text):
+            return False
+        if "|" in text and _TABLE_ROW_RE.search(text):
+            return False
+        if len(text) >= 45:
+            return True
+        if len(text) >= 25 and _looks_sentence_like(text):
+            return True
+        return False
+
+    if block.type in {BlockType.CODE, BlockType.TABLE, BlockType.FIGURE}:
+        return True
+
+    return False
+
+
+def _blocks_in_range(blocks: list[Block], start: int, end: int | None) -> list[Block]:
+    """Return blocks whose order falls within [start, end)."""
+    return [
+        block
+        for block in blocks
+        if block.order >= start and (end is None or block.order < end)
+    ]
+
+
+def _recompute_end_block_orders(sections: list["SectionInfo"]) -> None:
+    """Set end_block_order based on the next surviving section."""
+    for index, section in enumerate(sections):
+        if index + 1 < len(sections):
+            section.end_block_order = sections[index + 1].start_block_order
+        else:
+            section.end_block_order = None
+
+
+def _section_has_body_like_followers(section: "SectionInfo", raw_blocks: list[Block]) -> bool:
+    """Return True when a structural heading is followed by body-like content."""
+    for block in raw_blocks:
+        if block.order <= section.start_block_order:
+            continue
+        if _is_body_like_block(block):
+            return True
+    return False
+
+
+def _page_is_toc_like(blocks_on_page: list[Block]) -> bool:
+    """Return True when a page is dominated by TOC/navigation fragments."""
+    toc_fragments = 0
+    has_body_like = False
+
+    for block in blocks_on_page:
+        if block.type != BlockType.TEXT:
+            if _is_body_like_block(block):
+                has_body_like = True
+            continue
+
+        text = _normalized_text(block.content)
+        if not text:
+            continue
+        if text.upper() == "CONTENTS":
+            return True
+        if _looks_like_toc_fragment(text):
+            toc_fragments += 1
+        elif _is_body_like_block(block):
+            has_body_like = True
+
+    return toc_fragments >= 3 or (toc_fragments >= 2 and not has_body_like)
+
+
+def _section_pages(raw_blocks: list[Block]) -> set[int]:
+    """Collect known page numbers for blocks in a section."""
+    return {
+        block.metadata.page
+        for block in raw_blocks
+        if block.metadata.page is not None
+    }
+
+
+def _all_blocks_before_page(raw_blocks: list[Block], page: int) -> bool:
+    """Return True when every block in a range belongs to pages before ``page``."""
+    pages = _section_pages(raw_blocks)
+    return bool(pages) and all(block_page < page for block_page in pages)
 
 
 @dataclass
@@ -312,10 +435,12 @@ def group_blocks_by_section(
     if not sections:
         return sections
 
-    # Build a mutable copy so we don't modify the caller's data
-    result: list[SectionInfo] = []
+    # Build a mutable copy so we don't modify the caller's data.
+    # ``from_toc`` here means "structural-looking heading", not confirmed
+    # provenance from a TOC page.
+    working: list[SectionInfo] = []
     for s in sections:
-        result.append(
+        working.append(
             SectionInfo(
                 heading=s.heading,
                 level=s.level,
@@ -326,37 +451,137 @@ def group_blocks_by_section(
             )
         )
 
-    # Preamble: blocks before first section heading
-    first_order = result[0].start_block_order
-    preamble_blocks = [
-        b for b in doc.blocks if b.order < first_order and not is_noise_block(b)
-    ]
-    if preamble_blocks:
-        preamble = SectionInfo(
-            heading="서론",
-            level=1,
-            start_block_order=0,
-            end_block_order=first_order,
-            blocks=preamble_blocks,
-            from_toc=False,  # preamble is never a TOC entry
+    # Step A: assign raw own-range blocks to each candidate so structural
+    # headings can be validated against actual follower content.
+    raw_ranges: dict[int, list[Block]] = {}
+    for section in working:
+        raw_ranges[section.start_block_order] = _blocks_in_range(
+            doc.blocks,
+            section.start_block_order,
+            section.end_block_order,
         )
-        result.insert(0, preamble)
 
-    # Step A: assign own-range blocks to all sections
-    for section in result:
-        if section.blocks:  # preamble already populated
+    has_page_metadata = any(block.metadata.page is not None for block in doc.blocks)
+
+    # Step B: validate structural PDF headings. Headings that never lead into
+    # body-like content are likely TOC/menu artefacts and should not become
+    # note sections. Skip this path when page metadata is unavailable because
+    # the front-matter/TOC heuristics rely on real PDF pagination.
+    validated: list[SectionInfo] = []
+    for section in working:
+        raw_blocks = raw_ranges[section.start_block_order]
+        if (
+            has_page_metadata
+            and section.from_toc
+            and _is_structural_heading(section.heading)
+            and not _section_has_body_like_followers(section, raw_blocks)
+        ):
             continue
-        start = section.start_block_order
-        end = section.end_block_order
-        section.blocks = [
-            b
-            for b in doc.blocks
-            if b.order >= start
-            and (end is None or b.order < end)
-            and not is_noise_block(b)
-        ]
+        validated.append(section)
 
-    # Step B: determine merge strategy based on whether real TOC sections exist.
+    if not validated:
+        return []
+
+    _recompute_end_block_orders(validated)
+
+    # Step C: detect whether front-matter trimming should activate.
+    first_structural = next(
+        (
+            section
+            for section in validated
+            if section.from_toc and _is_structural_heading(section.heading)
+        ),
+        None,
+    )
+    first_body_page = None
+    if has_page_metadata and first_structural is not None:
+        heading_pages = _section_pages(raw_ranges[first_structural.start_block_order])
+        if heading_pages:
+            first_body_page = min(heading_pages)
+
+    trim_front_matter = False
+    if first_body_page is not None:
+        blocks_by_page: dict[int, list[Block]] = {}
+        for block in doc.blocks:
+            page = block.metadata.page
+            if page is None or page >= first_body_page:
+                continue
+            blocks_by_page.setdefault(page, []).append(block)
+        trim_front_matter = any(
+            _page_is_toc_like(page_blocks)
+            for _, page_blocks in sorted(blocks_by_page.items())
+        )
+
+    if trim_front_matter and first_body_page is not None:
+        validated = [
+            section
+            for section in validated
+            if not _all_blocks_before_page(
+                raw_ranges[section.start_block_order],
+                first_body_page,
+            )
+        ]
+        if not validated:
+            return []
+        _recompute_end_block_orders(validated)
+        first_structural = next(
+            (
+                section
+                for section in validated
+                if section.from_toc and _is_structural_heading(section.heading)
+            ),
+            None,
+        )
+
+    # Step D: build the optional preamble only after structural validation and
+    # optional front-matter trim so early TOC pages do not leak into "서론".
+    has_toc = any(section.from_toc for section in validated)
+    anchor_section = first_structural if has_toc and first_structural is not None else validated[0]
+    anchor_order = anchor_section.start_block_order
+    preamble_blocks = [
+        block
+        for block in doc.blocks
+        if block.order < anchor_order
+        and not is_noise_block(block)
+        and (
+            not trim_front_matter
+            or block.metadata.page is None
+            or (
+                first_body_page is not None and block.metadata.page >= first_body_page
+            )
+        )
+    ]
+
+    result: list[SectionInfo] = []
+    if preamble_blocks:
+        result.append(
+            SectionInfo(
+                heading="서론",
+                level=1,
+                start_block_order=0,
+                end_block_order=anchor_order,
+                blocks=preamble_blocks,
+                from_toc=False,
+            )
+        )
+
+    first_structural_start = first_structural.start_block_order if first_structural else None
+    for section in validated:
+        if (
+            has_toc
+            and not section.from_toc
+            and first_structural_start is not None
+            and section.start_block_order < first_structural_start
+        ):
+            continue
+        section.blocks = [
+            block
+            for block in _blocks_in_range(doc.blocks, section.start_block_order, section.end_block_order)
+            if not is_noise_block(block)
+        ]
+        result.append(section)
+
+    # Step E: determine merge strategy based on whether real TOC sections exist.
     #
     # If from_toc=True sections are present (Docling / ipynb headings), absorb all
     # from_toc=False sections into the nearest preceding from_toc=True section.
@@ -368,56 +593,31 @@ def group_blocks_by_section(
     has_toc = any(s.from_toc for s in result if s.heading != "서론")
 
     if has_toc:
-        # Absorb from_toc=False into preceding from_toc=True.
-        # Preamble (heading="서론", from_toc=False) is always kept standalone.
-        # from_toc=False sections appearing before any toc section (e.g. document
-        # title page, introduction blurb) are collected into the preamble so their
-        # content is preserved rather than silently dropped.
+        # Structural sections now define the main note skeleton. Any remaining
+        # non-structural sections are treated as subordinate content and folded
+        # into the nearest preceding structural section.
         toc_sections: list[SectionInfo] = []
-        pre_toc_blocks: list[Block] = []  # content from non-structural sections before first TOC
+        last_structural: SectionInfo | None = None
         for section in result:
-            if section.from_toc:
+            if section.heading == "서론":
                 toc_sections.append(section)
-            elif section.heading == "서론":
-                # Add any accumulated pre-toc blocks into the preamble
-                if pre_toc_blocks:
-                    section.blocks = pre_toc_blocks + section.blocks
-                    pre_toc_blocks = []
-                toc_sections.insert(0, section)  # preamble always first
-            elif not toc_sections:
-                # Before the first structural TOC section: accumulate as preamble content
-                if section.blocks:
-                    heading_block = Block(
-                        type=BlockType.TEXT,
-                        content=f"### {section.heading}",
-                        order=section.start_block_order,
-                    )
-                    pre_toc_blocks.extend([heading_block] + section.blocks)
+            elif section.from_toc:
+                toc_sections.append(section)
+                last_structural = section
             else:
-                parent = toc_sections[-1]
+                if last_structural is None:
+                    if toc_sections and toc_sections[0].heading == "서론":
+                        toc_sections[0].blocks.extend(section.blocks)
+                    else:
+                        toc_sections.append(section)
+                    continue
                 if section.blocks:
                     heading_block = Block(
                         type=BlockType.TEXT,
                         content=f"### {section.heading}",
                         order=section.start_block_order,
                     )
-                    parent.blocks.extend([heading_block] + section.blocks)
-
-        # If pre-toc blocks were accumulated but no "서론" preamble was created,
-        # prepend them to the first TOC section so they are not lost.
-        if pre_toc_blocks and toc_sections:
-            toc_sections[0].blocks = pre_toc_blocks + toc_sections[0].blocks
-        elif pre_toc_blocks:
-            # No toc sections at all (shouldn't happen given has_toc=True, but guard anyway)
-            preamble = SectionInfo(
-                heading="서론",
-                level=1,
-                start_block_order=0,
-                end_block_order=None,
-                blocks=pre_toc_blocks,
-                from_toc=False,
-            )
-            toc_sections.insert(0, preamble)
+                    last_structural.blocks.extend([heading_block] + section.blocks)
 
         work = toc_sections
     else:
