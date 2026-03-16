@@ -27,6 +27,7 @@ load_dotenv()
 import markdown as md_lib  # noqa: E402
 import streamlit as st  # noqa: E402
 import pyperclip  # noqa: E402
+from PIL import Image as _PILImage  # noqa: E402
 
 LOGGER = logging.getLogger(__name__)
 
@@ -981,6 +982,19 @@ def _filter_inline_figure_blocks(doc: "Document", fig_blocks: list) -> list:
     return filtered
 
 
+def _st_image_sized(img_path: str, caption: str) -> None:
+    """Render an image with width capped only for large images; small images use natural size."""
+    try:
+        w, _ = _PILImage.open(img_path).size
+    except Exception:  # noqa: BLE001
+        st.image(img_path, caption=caption, use_container_width=True)
+        return
+    if w < 400:
+        st.image(img_path, caption=caption, width=w)
+    else:
+        st.image(img_path, caption=caption, use_container_width=True)
+
+
 def _render_note_with_figures(raw_md: str, fig_blocks: list, doc=None) -> None:
     """Render note markdown section-by-section, injecting figure images between sections.
 
@@ -1039,7 +1053,7 @@ def _render_note_with_figures(raw_md: str, fig_blocks: list, doc=None) -> None:
                 caption = b.metadata.caption or ""
                 _, _col_img, _ = st.columns([1, 4, 1])
                 with _col_img:
-                    st.image(img_path, caption=caption, width="stretch")
+                    _st_image_sized(img_path, caption)
 
 
 def _render_note_section_html(note_md: str) -> str:
@@ -1428,7 +1442,7 @@ def _render_source_block_expanders(source_blocks: list[dict]) -> None:
         seen_images.add(img_path)
         page = src.get("page")
         caption = f"그림 (page {page})" if page is not None else "그림"
-        st.image(img_path, caption=caption, use_container_width=True)
+        _st_image_sized(img_path, caption)
 
     # 2. all source blocks: collapsed expanders (image already rendered above)
     st.caption("참조 블록")
