@@ -42,6 +42,7 @@ class ImageType(str, Enum):
 
     CODE_SCREENSHOT = "code_screenshot"
     DIAGRAM = "diagram"
+    CHART = "chart"
     TEXT_CAPTURE = "text_capture"
     EQUATION = "equation"
     OTHER = "other"

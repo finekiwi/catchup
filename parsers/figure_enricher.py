@@ -549,7 +549,7 @@ def _reconvert_with_images(file_path: str) -> object | None:
         pipeline_options = PdfPipelineOptions()
         pipeline_options.generate_page_images = True
         pipeline_options.generate_picture_images = True
-        pipeline_options.images_scale = 2.0
+        pipeline_options.images_scale = 1.0
         converter = DocumentConverter(
             format_options={
                 InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
