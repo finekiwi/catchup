@@ -58,6 +58,13 @@ _DECORATIVE_ANALYSIS_KEYWORDS = (
     "paper craft",
     "paper model",
     "origami",
+    "openai",
+    "chatgpt",
+    "gpt",
+    "app screenshot",
+    "ui screenshot",
+    "screen capture",
+    "interface",
     "표지",
     "책 표지",
     "로고",
@@ -77,6 +84,10 @@ _DECORATIVE_ANALYSIS_KEYWORDS = (
     "종이 모형",
     "종이 모델",
     "종이 공예",
+    "앱 화면",
+    "화면 캡처",
+    "스크린샷",
+    "인터페이스",
 )
 _NON_INSTRUCTIONAL_TEXT_CAPTURE_KEYWORDS = (
     "예제 코드 제공",
@@ -422,8 +433,14 @@ def _match_figures_by_page(
         for idx, (pi, pi_page) in enumerate(picture_items):
             if idx in used:
                 continue
-            # Match: same page, or either side has no page info (fallback)
-            if fb_page is None or pi_page is None or fb_page == pi_page:
+            # Require same page when both have page info to avoid wrong-item consumption.
+            # Fall back to order-based (first unused) only when BOTH sides lack page info.
+            if fb_page is not None and pi_page is not None:
+                if fb_page == pi_page:
+                    matched.append((fb, pi))
+                    used.add(idx)
+                    break
+            elif fb_page is None and pi_page is None:
                 matched.append((fb, pi))
                 used.add(idx)
                 break
@@ -549,7 +566,7 @@ def _reconvert_with_images(file_path: str) -> object | None:
         pipeline_options = PdfPipelineOptions()
         pipeline_options.generate_page_images = True
         pipeline_options.generate_picture_images = True
-        pipeline_options.images_scale = 1.0
+        pipeline_options.images_scale = 2.0
         converter = DocumentConverter(
             format_options={
                 InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)

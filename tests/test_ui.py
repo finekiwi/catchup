@@ -1829,8 +1829,8 @@ def test_render_qa_notice_loading_uses_info_palette() -> None:
 
     assert captured, "st.markdown should be called by _render_qa_notice"
     html = captured[0]
-    assert "#DDE8ED" in html, "Loading notice background should use Steel Blue info palette"
-    assert "#5A7B8C" in html, "Loading notice border should use Steel Blue info palette"
+    assert "#F5EDE4" in html, "Loading notice background should use warm accent palette"
+    assert "#C4553A" in html, "Loading notice border should use warm accent palette"
     assert "⏳" in html, "Loading notice should include a spinner icon"
 
 
@@ -1923,3 +1923,64 @@ class TestLanguageParam:
             assert kwargs.get("language") == "en", (
                 "enrich_pdf_figures should receive language='en' from selectbox"
             )
+
+
+# ---------------------------------------------------------------------------
+# _parse_followup_suggestions unit tests
+# ---------------------------------------------------------------------------
+
+
+def _load_parse_followup() -> Any:
+    """Load _parse_followup_suggestions from ui/demo.py without running the app."""
+    spec = importlib.util.spec_from_file_location("ui_demo_parse_followup", DEMO_APP_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    with patch.object(st, "set_page_config", side_effect=_StopDemoImport):
+        try:
+            spec.loader.exec_module(module)
+        except _StopDemoImport:
+            pass
+    return module._parse_followup_suggestions
+
+
+def test_parse_followup_single_newline() -> None:
+    """Standard single-newline-separated block should parse correctly."""
+    fn = _load_parse_followup()
+    answer = "본문 내용\n---SUGGESTIONS---\n질문1\n질문2\n질문3\n---END---"
+    clean, suggestions = fn(answer)
+    assert clean == "본문 내용"
+    assert suggestions == ["질문1", "질문2", "질문3"]
+
+
+def test_parse_followup_double_newline_before_marker() -> None:
+    """LLM sometimes emits two blank lines before ---SUGGESTIONS---; must still parse."""
+    fn = _load_parse_followup()
+    answer = "본문 내용\n\n---SUGGESTIONS---\n질문1\n질문2\n질문3\n---END---"
+    clean, suggestions = fn(answer)
+    assert clean == "본문 내용", "double-newline before marker should be stripped from clean answer"
+    assert len(suggestions) == 3
+
+
+def test_parse_followup_no_block_returns_unchanged() -> None:
+    """Answer without SUGGESTIONS block should be returned as-is."""
+    fn = _load_parse_followup()
+    answer = "그냥 답변입니다."
+    clean, suggestions = fn(answer)
+    assert clean == answer
+    assert suggestions == []
+
+
+def test_parse_followup_strips_numbering() -> None:
+    """Numbered questions (1. / 1) ...) should have their prefix stripped."""
+    fn = _load_parse_followup()
+    answer = "답변\n---SUGGESTIONS---\n1. 질문1\n2) 질문2\n3. 질문3\n---END---"
+    _, suggestions = fn(answer)
+    assert suggestions == ["질문1", "질문2", "질문3"]
+
+
+def test_parse_followup_truncates_to_three() -> None:
+    """More than 3 suggestions should be truncated."""
+    fn = _load_parse_followup()
+    answer = "답변\n---SUGGESTIONS---\nQ1\nQ2\nQ3\nQ4\n---END---"
+    _, suggestions = fn(answer)
+    assert len(suggestions) == 3

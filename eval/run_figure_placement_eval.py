@@ -7,8 +7,8 @@ deterministic, no LLM chat cost).  An optional ``--llm-judge`` flag enables
 an LLM-as-judge cross-check.
 
 Placement logic mirrors ui/demo.py `_render_note_with_figures`:
-  - figures are mapped to sections by linear page interpolation
-  - same-page figures are spread across consecutive sections
+  - figures are mapped to sections by section-header page boundary matching (v3)
+  - falls back to even body-block split when no section-number match is found
 
 Usage:
     # Evaluate by original PDF path (embedding similarity only):
@@ -190,15 +190,29 @@ def _split_sections(markdown: str) -> list[tuple[str, str]]:
 def _build_placement(
     sections: list[tuple[str, str]],
     fig_blocks: list,  # list[Block] with image_path set
+    doc=None,
 ) -> dict[int, list]:
-    """Map each figure to a section index using page interpolation.
+    """Map each figure to a section index.
+
+    When ``doc`` is provided, uses page-to-section mapping (preferred): computes
+    the actual page range covered by each section from document body blocks and
+    places each figure in the section whose range contains its page number.
+    Falls back to legacy page interpolation when ``doc`` is None.
 
     Returns dict[section_idx → list[Block]].
     """
+    from utils.export import _build_section_page_ranges, _place_figures_page_based
+
     n = len(sections)
     if n == 0:
         return {}
 
+    if doc is not None:
+        headings = [h for h, _ in sections]
+        ranges = _build_section_page_ranges(doc, n, section_headings=headings)
+        return _place_figures_page_based(fig_blocks, ranges)
+
+    # Legacy page interpolation fallback
     pages = [b.metadata.page for b in fig_blocks]
     valid_pages = [p for p in pages if p is not None]
     page_min = min(valid_pages) if valid_pages else 1
@@ -456,16 +470,14 @@ def build_cases(doc, note_markdown: str) -> list[FigurePlacementCase]:
 
     Returns a list of FigurePlacementCase — one per placed figure.
     Figures without image_path (not enriched) are excluded.
-    """
-    from models.document import BlockType
 
-    fig_blocks = [
-        b for b in doc.blocks
-        if b.type == BlockType.FIGURE and b.image_path
-    ]
+    Uses ``b.image_path`` as the sole discriminator (same as the UI rendering
+    filter) so enriched CODE / TEXT_CAPTURE / FIGURE blocks are all included.
+    """
+    fig_blocks = [b for b in doc.blocks if b.image_path]
 
     if not fig_blocks:
-        LOGGER.info("No enriched FIGURE blocks found in document %s", doc.id)
+        LOGGER.info("No blocks with image_path found in document %s", doc.id)
         return []
 
     sections = _split_sections(note_markdown)
@@ -473,7 +485,7 @@ def build_cases(doc, note_markdown: str) -> list[FigurePlacementCase]:
         LOGGER.warning("Note has no ## sections — cannot compute placement")
         return []
 
-    placement = _build_placement(sections, fig_blocks)
+    placement = _build_placement(sections, fig_blocks, doc)
 
     cases: list[FigurePlacementCase] = []
     for section_idx, blocks in placement.items():
@@ -523,12 +535,8 @@ def run_placement_eval(
     Returns:
         FigurePlacementReport with per-figure scores.
     """
-    from models.document import BlockType
-
-    total_figures = sum(
-        1 for b in doc.blocks
-        if b.type == BlockType.FIGURE and b.image_path
-    )
+    # Count all blocks with image_path — same discriminator as UI rendering and build_cases.
+    total_figures = sum(1 for b in doc.blocks if b.image_path)
 
     cases = build_cases(doc, note_markdown)
     sections = _split_sections(note_markdown)

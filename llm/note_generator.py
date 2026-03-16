@@ -758,8 +758,17 @@ def generate_note_sectioned(
 
     # Detect Streamlit context: ThreadPoolExecutor deadlocks when Streamlit's
     # script runner holds a reentrant lock that worker threads cannot acquire.
-    # Simple check: if streamlit is imported we're in a streamlit process.
-    _in_streamlit = "streamlit" in sys.modules
+    # Use streamlit.runtime.exists() instead of "streamlit" in sys.modules —
+    # figure_enricher imports streamlit.runtime as a side effect of its own
+    # _is_streamlit_runtime() check, which would poison the sys.modules test.
+    def _is_streamlit_runtime() -> bool:
+        try:
+            import streamlit.runtime as _st_rt
+            return _st_rt.exists()
+        except Exception:  # noqa: BLE001
+            return False
+
+    _in_streamlit = _is_streamlit_runtime()
 
     results: dict[int, str] = {}
 

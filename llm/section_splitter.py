@@ -234,10 +234,13 @@ def extract_sections_pdf(doc_id: str, max_level: int = 2) -> list[SectionInfo]:
             item.label.value if hasattr(item.label, "value") else str(item.label)
         )
 
-        # Determine content the same way pdf_parser._to_blocks does
+        # Determine content the same way pdf_parser._to_blocks does.
+        # Pass dl_doc to export_to_markdown so Docling versions that require
+        # document context for table export (e.g. for cross-references) work
+        # correctly — mirrors parsers/pdf_parser._to_blocks line 144.
         if isinstance(item, TableItem):
             content = (
-                item.export_to_markdown()
+                item.export_to_markdown(dl_doc)
                 if hasattr(item, "export_to_markdown")
                 else "[table]"
             )

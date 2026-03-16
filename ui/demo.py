@@ -27,6 +27,7 @@ load_dotenv()
 import markdown as md_lib  # noqa: E402
 import streamlit as st  # noqa: E402
 import pyperclip  # noqa: E402
+from PIL import Image as _PILImage  # noqa: E402
 
 LOGGER = logging.getLogger(__name__)
 
@@ -981,39 +982,62 @@ def _filter_inline_figure_blocks(doc: "Document", fig_blocks: list) -> list:
     return filtered
 
 
-def _render_note_with_figures(raw_md: str, fig_blocks: list) -> None:
+def _st_image_sized(img_path: str, caption: str) -> None:
+    """Render an image with width capped only for large images; small images use natural size."""
+    try:
+        w, _ = _PILImage.open(img_path).size
+    except Exception:  # noqa: BLE001
+        st.image(img_path, caption=caption, use_container_width=True)
+        return
+    if w < 400:
+        st.image(img_path, caption=caption, width=w)
+    else:
+        st.image(img_path, caption=caption, use_container_width=True)
+
+
+def _render_note_with_figures(raw_md: str, fig_blocks: list, doc=None) -> None:
     """Render note markdown section-by-section, injecting figure images between sections.
 
-    Each figure is placed after the section whose page position best matches
-    the figure's page number. Same-page figures are spread across adjacent sections
-    to avoid stacking.
+    When ``doc`` is provided, uses page-to-section mapping: computes the actual
+    page range covered by each section from document body blocks and places each
+    figure in the section whose range contains the figure's page.
+    Falls back to legacy page interpolation when ``doc`` is None.
 
     Args:
         raw_md: Note markdown text (without title prefix).
-        fig_blocks: List of Block objects with type==FIGURE and image_path set.
+        fig_blocks: List of Block objects with image_path set.
+        doc: Parsed Document for page-based placement (preferred). None = fallback.
     """
+    from utils.export import _build_section_page_ranges, _place_figures_page_based
+
     sections = _split_note_sections(raw_md)  # list of (heading, body) tuples
     n = len(sections)
     if n == 0:
         st.markdown(_render_note_html(raw_md), unsafe_allow_html=True)
         return
 
-    pages = [b.metadata.page for b in fig_blocks]
-    valid_pages = [p for p in pages if p is not None]
-    page_min = min(valid_pages) if valid_pages else 1
-    page_max = max(valid_pages) if valid_pages else 1
-    page_range = max(page_max - page_min, 1)
+    if doc is not None:
+        headings = [h for h, _ in sections]
+        ranges = _build_section_page_ranges(doc, n, section_headings=headings)
+        section_figs = _place_figures_page_based(fig_blocks, ranges)
+    else:
+        pages = [b.metadata.page for b in fig_blocks]
+        valid_pages = [p for p in pages if p is not None]
+        page_min = min(valid_pages) if valid_pages else 1
+        page_max = max(valid_pages) if valid_pages else 1
+        page_range = max(page_max - page_min, 1)
 
-    section_figs: dict[int, list] = defaultdict(list)
-    page_counters: dict = defaultdict(int)
-    for b in fig_blocks:
-        p = b.metadata.page if b.metadata.page is not None else page_max
-        ratio = (p - page_min) / page_range
-        base_idx = min(int(ratio * n), n - 1)
-        count = page_counters[b.metadata.page]
-        page_counters[b.metadata.page] += 1
-        idx = min(base_idx + count, n - 1)
-        section_figs[idx].append(b)
+        section_figs_dd: dict[int, list] = defaultdict(list)
+        page_counters: dict = defaultdict(int)
+        for b in fig_blocks:
+            p = b.metadata.page if b.metadata.page is not None else page_max
+            ratio = (p - page_min) / page_range
+            base_idx = min(int(ratio * n), n - 1)
+            count = page_counters[b.metadata.page]
+            page_counters[b.metadata.page] += 1
+            idx = min(base_idx + count, n - 1)
+            section_figs_dd[idx].append(b)
+        section_figs = dict(section_figs_dd)
 
     for i, (heading, body) in enumerate(sections):
         # Skip heading-only sections with no body and no figures — these are
@@ -1029,7 +1053,7 @@ def _render_note_with_figures(raw_md: str, fig_blocks: list) -> None:
                 caption = b.metadata.caption or ""
                 _, _col_img, _ = st.columns([1, 4, 1])
                 with _col_img:
-                    st.image(img_path, caption=caption, width="stretch")
+                    _st_image_sized(img_path, caption)
 
 
 def _render_note_section_html(note_md: str) -> str:
@@ -1387,11 +1411,11 @@ def _serialize_source_blocks(source_blocks: list) -> list[dict]:
 def _render_qa_notice(msg: str, *, is_loading: bool = False) -> None:
     """Render a palette-styled notice in the Q&A panel.
 
-    Uses info palette (#DDE8ED / #5A7B8C) for loading states and
+    Uses warm accent palette (#F5EDE4 / #C4553A) for loading states and
     warning palette (#F5EBDB / #C4883A) for disabled / missing-vector states.
     """
     if is_loading:
-        bg, border, color, icon = "#DDE8ED", "#5A7B8C", "#3A5260", "⏳"
+        bg, border, color, icon = "#F5EDE4", "#C4553A", "#7A2A14", "⏳"
     else:
         bg, border, color, icon = "#F5EBDB", "#C4883A", "#7A5020", "ℹ️"
     st.markdown(
@@ -1418,7 +1442,7 @@ def _render_source_block_expanders(source_blocks: list[dict]) -> None:
         seen_images.add(img_path)
         page = src.get("page")
         caption = f"그림 (page {page})" if page is not None else "그림"
-        st.image(img_path, caption=caption, use_container_width=True)
+        _st_image_sized(img_path, caption)
 
     # 2. all source blocks: collapsed expanders (image already rendered above)
     st.caption("참조 블록")
@@ -1451,7 +1475,7 @@ def _parse_followup_suggestions(answer: str) -> tuple[str, list[str]]:
     Returns (clean_answer, suggestions) where suggestions is a list of up to 3 strings.
     If no block is found, suggestions is empty and answer is returned unchanged.
     """
-    match = re.search(r"\n?---SUGGESTIONS---\n(.*?)\n---END---", answer, re.DOTALL)
+    match = re.search(r"---SUGGESTIONS---\s*(.*?)\s*---END---", answer, re.DOTALL)
     if not match:
         return answer, []
     clean = answer[: match.start()].rstrip()
@@ -2278,14 +2302,69 @@ with col_content:
         with toolbar_col:
             edit_mode = st.toggle("✏️ 편집 모드", value=False, key="note_edit_toggle")
         with export_col:
+            from utils.export import export_docx, export_markdown_zip, export_pdf
+
+            _all_fig_blocks = [b for b in doc.blocks if b.image_path and Path(b.image_path).exists()]
+            _export_fig_blocks = _filter_inline_figure_blocks(doc, _all_fig_blocks)
+            _export_cache_key = f"export_{cache_key}"
             with st.popover("📤 내보내기 ▾", use_container_width=True):
-                st.download_button(
-                    "📥 마크다운 다운로드",
-                    data=full_md,
-                    file_name=f"{file_stem}_note.md",
-                    mime="text/markdown",
-                    use_container_width=True,
-                )
+                # --- ZIP ---
+                # Export data is generated lazily on first button click and cached in
+                # session_state to avoid re-running expensive export functions on every rerun.
+                _zip_key = f"{_export_cache_key}_zip"
+                if _zip_key not in st.session_state:
+                    if st.button("📥 마크다운+이미지 (.zip)", use_container_width=True, key="gen_zip_btn"):
+                        st.session_state[_zip_key] = export_markdown_zip(raw_md, title, _export_fig_blocks, doc)
+                        st.rerun()
+                else:
+                    st.download_button(
+                        "📥 마크다운+이미지 (.zip)",
+                        data=st.session_state[_zip_key],
+                        file_name=f"{file_stem}_note.zip",
+                        mime="application/zip",
+                        use_container_width=True,
+                    )
+                # --- PDF ---
+                _pdf_key = f"{_export_cache_key}_pdf"
+                if _pdf_key not in st.session_state:
+                    if st.button("📄 PDF (.pdf)", use_container_width=True, key="gen_pdf_btn"):
+                        try:
+                            st.session_state[_pdf_key] = export_pdf(raw_md, title, _export_fig_blocks, doc)
+                        except Exception as _pdf_exc:
+                            st.session_state[_pdf_key] = None
+                            st.session_state[f"{_pdf_key}_err"] = str(_pdf_exc)
+                        st.rerun()
+                elif st.session_state.get(f"{_pdf_key}_err"):
+                    st.caption(f"PDF 생성 불가: {st.session_state[f'{_pdf_key}_err']}")
+                else:
+                    st.download_button(
+                        "📄 PDF (.pdf)",
+                        data=st.session_state[_pdf_key],
+                        file_name=f"{file_stem}_note.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                    )
+                # --- DOCX ---
+                _docx_key = f"{_export_cache_key}_docx"
+                if _docx_key not in st.session_state:
+                    if st.button("📝 Word (.docx)", use_container_width=True, key="gen_docx_btn"):
+                        try:
+                            st.session_state[_docx_key] = export_docx(raw_md, title, _export_fig_blocks, doc)
+                        except Exception as _docx_exc:
+                            st.session_state[_docx_key] = None
+                            st.session_state[f"{_docx_key}_err"] = str(_docx_exc)
+                        st.rerun()
+                elif st.session_state.get(f"{_docx_key}_err"):
+                    st.caption(f"DOCX 생성 불가: {st.session_state[f'{_docx_key}_err']}")
+                else:
+                    st.download_button(
+                        "📝 Word (.docx)",
+                        data=st.session_state[_docx_key],
+                        file_name=f"{file_stem}_note.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True,
+                    )
+                # --- Clipboard — plain markdown without images (no base64 bloat) ---
                 if st.button(
                     "📋 클립보드 복사", use_container_width=True, key="copy_note_btn"
                 ):
@@ -2385,7 +2464,7 @@ with col_content:
                 fig_blocks = [b for b in doc.blocks if b.image_path]
                 fig_blocks = _filter_inline_figure_blocks(doc, fig_blocks)
                 if fig_blocks:
-                    _render_note_with_figures(raw_md, fig_blocks)
+                    _render_note_with_figures(raw_md, fig_blocks, doc)
                 else:
                     st.markdown(_render_note_html(raw_md), unsafe_allow_html=True)
     else:
@@ -2393,7 +2472,7 @@ with col_content:
 
 with col_chat:
     _qa_ready = bool(st.session_state.get(_indexed_key))
-    _indexing_in_progress = not _qa_ready and bool(doc.blocks) and not is_image and not _lib_mode
+    _indexing_in_progress = not _qa_ready and bool(doc.blocks) and not _lib_mode
     _qa_disabled_msg = (
         "Q&A 인덱싱 중입니다. 잠시 기다려 주세요..."
         if _indexing_in_progress else
@@ -2430,14 +2509,15 @@ with col_chat:
 # ─── Lazy RAG indexing (runs after note + Q&A columns are rendered) ──
 # Indexing is deferred here so the note appears immediately. The Q&A panel
 # shows "인덱싱 중..." above until indexing completes and st.rerun() fires.
-if not st.session_state.get(_indexed_key) and doc.blocks and not is_image and not _lib_mode:
+# Both image and non-image modes require indexing for Q&A to become available.
+if not st.session_state.get(_indexed_key) and doc.blocks and not _lib_mode:
     try:
         index_document(doc)
         st.session_state[_indexed_key] = True
+        st.rerun()
     except Exception as _idx_exc:
         LOGGER.warning("RAG indexing failed: %s", _idx_exc)
         st.warning(f"RAG 인덱싱 실패: {_idx_exc}")
-    st.rerun()
 
 # ─── Persist dirty note edits to SQLite ──────────────────────────────
 if st.session_state.pop("_note_dirty", False):
