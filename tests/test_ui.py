@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import copy
 import hashlib
 import importlib.util
@@ -18,6 +19,7 @@ import streamlit as st
 import streamlit.testing.v1.local_script_runner as local_script_runner
 from llm.note_editor import NoteEditResult
 from llm.note_generator import SUPPORTED_LLM_MODELS
+from llm.section_splitter import SectionInfo
 from models.document import (
     Block,
     BlockMetadata,
@@ -35,6 +37,7 @@ DEFAULT_VLM_MODEL = SUPPORTED_MODELS[0]
 DEFAULT_LLM_MODEL = SUPPORTED_LLM_MODELS[0]
 TEST_SESSION_ID = "test session id"
 UNSET = object()
+ANALYSIS_CACHE_VERSION = "v2"
 
 
 @dataclass(frozen=True)
@@ -226,7 +229,7 @@ class DemoAppHarness:
         llm_model: str = DEFAULT_LLM_MODEL,
     ) -> str:
         """Return the app's session cache key for a rendered note result."""
-        return f"result_{upload.file_hash}_{vlm_model}_{llm_model}"
+        return f"result_{ANALYSIS_CACHE_VERSION}_{upload.file_hash}_{vlm_model}_{llm_model}"
 
     def doc_cache_key(
         self,
@@ -235,7 +238,7 @@ class DemoAppHarness:
         vlm_model: str = DEFAULT_VLM_MODEL,
     ) -> str:
         """Return the app's session cache key for a parsed document."""
-        return f"doc_{upload.file_hash}_{vlm_model}"
+        return f"doc_{ANALYSIS_CACHE_VERSION}_{upload.file_hash}_{vlm_model}"
 
     def seed_library(
         self,
@@ -360,13 +363,14 @@ def _sample_document_row(
     doc_id: str = "doc-library",
     source: str = "library.pdf",
     fmt: DocumentFormat = DocumentFormat.PDF,
+    blocks: list[Block] | None = None,
 ) -> Document:
     """Build a library document row like db.sqlite.get_document() returns."""
     return Document(
         id=doc_id,
         source=source,
         format=fmt,
-        blocks=[],
+        blocks=copy.deepcopy(blocks) if blocks is not None else _sample_document().blocks,
         metadata=DocumentMetadata(title=Path(source).stem),
         created_at=datetime(2026, 3, 15, tzinfo=timezone.utc),
     )
@@ -440,10 +444,8 @@ def _qa_result(
 
 
 def _stored_document_copy(document: Document) -> Document:
-    """Store a SQLite-like copy of a document without raw blocks."""
-    stored = copy.deepcopy(document)
-    stored.blocks = []
-    return stored
+    """Store a SQLite-like copy of a document with full block content preserved."""
+    return copy.deepcopy(document)
 
 
 def _session_messages(harness: DemoAppHarness, doc_id: str) -> list[dict[str, Any]]:
@@ -592,7 +594,7 @@ def make_app() -> Iterator[Any]:
                 patch(
                     "parsers.image_parser.parse_image",
                     new=MagicMock(
-                        side_effect=lambda _path, model=DEFAULT_VLM_MODEL: (
+                        side_effect=lambda _path, model=DEFAULT_VLM_MODEL, language="ko": (
                             _sample_document(
                                 doc_id="doc-image",
                                 source="sample.png",
@@ -614,7 +616,7 @@ def make_app() -> Iterator[Any]:
                 patch(
                     "llm.note_generator.generate_note_sectioned",
                     new=MagicMock(
-                        side_effect=lambda doc, model=DEFAULT_LLM_MODEL: (
+                        side_effect=lambda doc, model=DEFAULT_LLM_MODEL, language="ko": (
                             _sample_note_result()
                         )
                     ),
@@ -782,6 +784,64 @@ def test_render_source_block_expanders_deduplicates_by_source_and_location() -> 
     )
 
 
+def test_filter_inline_figure_blocks_skips_front_matter_images() -> None:
+    """Inline note rendering should ignore image_path blocks before the first body page."""
+    spec = importlib.util.spec_from_file_location("ui_demo_unit_test", DEMO_APP_PATH)
+    assert spec is not None and spec.loader is not None, (
+        "ui/demo.py should be importable for testing"
+    )
+    module = importlib.util.module_from_spec(spec)
+
+    with patch.object(st, "set_page_config", side_effect=_StopDemoImport):
+        try:
+            spec.loader.exec_module(module)
+        except _StopDemoImport:
+            pass
+
+    front_text = Block(
+        type=BlockType.TEXT,
+        content="예제 코드 제공",
+        order=0,
+        image_path="front.png",
+        metadata=BlockMetadata(page=1),
+    )
+    body_figure = Block(
+        type=BlockType.FIGURE,
+        content="본문 다이어그램",
+        order=1,
+        image_path="body.png",
+        metadata=BlockMetadata(page=17),
+    )
+    doc = _sample_document(blocks=[front_text, body_figure])
+    grouped_sections = [
+        SectionInfo(
+            heading="1. 본문",
+            level=1,
+            start_block_order=1,
+            end_block_order=None,
+            blocks=[
+                Block(
+                    type=BlockType.TEXT,
+                    content="본문 설명이 충분히 이어집니다.",
+                    order=10,
+                    metadata=BlockMetadata(page=17),
+                )
+            ],
+            from_toc=True,
+        )
+    ]
+
+    with (
+        patch("llm.section_splitter.extract_sections", return_value=grouped_sections),
+        patch("llm.section_splitter.group_blocks_by_section", return_value=grouped_sections),
+    ):
+        filtered = module._filter_inline_figure_blocks(doc, [front_text, body_figure])
+
+    assert [block.order for block in filtered] == [1], (
+        "Only body-page images should remain eligible for inline note rendering"
+    )
+
+
 class TestUploadFlow:
     """Upload and parsing scenarios for the main pipeline."""
 
@@ -873,7 +933,7 @@ class TestUploadFlow:
 
         with make_app() as harness:
             harness.generate_note.side_effect = (
-                lambda doc, model=DEFAULT_LLM_MODEL: sectioned_result
+                lambda doc, model=DEFAULT_LLM_MODEL, language="ko": sectioned_result
             )
             app = _analyze_upload(harness, pdf_upload)
 
@@ -1420,6 +1480,62 @@ class TestLibraryPersistence:
                 "A stale uploader value should not restart the pipeline"
             )
 
+    def test_library_load_renders_inline_figures_when_blocks_are_restored(
+        self,
+        make_app: Any,
+        tmp_path: Path,
+    ) -> None:
+        """Library-loaded notes should restore figure-bearing blocks for inline rendering."""
+        png_bytes = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z0x8AAAAASUVORK5CYII="
+        )
+        figure_path = tmp_path / "library-body.png"
+        figure_path.write_bytes(png_bytes)
+
+        document = _sample_document_row(
+            doc_id="doc-library-fig",
+            source="library-fig.pdf",
+            blocks=[
+                Block(
+                    type=BlockType.TEXT,
+                    content="본문 설명 블록입니다.",
+                    order=0,
+                    image_path=str(figure_path),
+                    metadata=BlockMetadata(page=17),
+                ),
+                Block(
+                    type=BlockType.TEXT,
+                    content="충분히 긴 본문 설명이 이어집니다.",
+                    order=1,
+                    metadata=BlockMetadata(page=17),
+                ),
+            ],
+        )
+        note_row = _sample_note_row(
+            document_id=document.id,
+            file_hash="library-fig-hash",
+            result=_sample_note_result(
+                title="이미지 복원 노트",
+                note_markdown="## 서론\n\n본문 설명입니다.\n\n## 본문\n\n추가 설명입니다.",
+            ),
+        )
+
+        with make_app() as harness:
+            harness.seed_library(document, note_row, has_vectors=True)
+            harness.run()
+            harness.click_button(key="lib_doc-library-fig", upload=None)
+
+            _assert_no_exception(harness.app)
+            doc_cache_key = harness.session_value("_library_doc_cache_key")
+            restored_doc = harness.session_value(doc_cache_key)
+            assert restored_doc is not None
+            assert len(restored_doc.blocks) == 2, (
+                "Library-loaded documents should restore full block content"
+            )
+            assert restored_doc.blocks[0].image_path == str(figure_path), (
+                "Restored blocks should keep image_path so note rendering can inject figures"
+            )
+
     def test_delete_evicts_cache_then_reupload_reprocesses(self, make_app: Any) -> None:
         """Deleting a library document should clear caches and force re-analysis on re-upload."""
         upload = _pdf_upload(name="delete-me.pdf", file_id="upload-delete")
@@ -1517,9 +1633,9 @@ class TestLibraryPersistence:
             assert len(harness.app.chat_input) == 0, (
                 "Q&A should be disabled when no document vectors are available"
             )
-            assert any("벡터" in info.value for info in harness.app.info), (
-                "The UI should explain why Q&A is unavailable without vectors"
-            )
+            assert any(
+                "벡터" in el.value for el in harness.app.markdown
+            ), "The UI should explain why Q&A is unavailable without vectors"
 
     def test_library_note_edit_persists_dirty_note(self, make_app: Any) -> None:
         """Editing a library-loaded note should save with the restored file hash and models."""
@@ -1618,7 +1734,7 @@ class TestFigureEnrichment:
 
         pdf_upload = _pdf_upload()
         fh = pdf_upload.file_hash
-        doc_cache_key = f"doc_{fh}_{DEFAULT_VLM_MODEL}"
+        doc_cache_key = f"doc_{ANALYSIS_CACHE_VERSION}_{fh}_{DEFAULT_VLM_MODEL}"
 
         with make_app() as harness:
 
