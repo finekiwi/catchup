@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import re
 
-from prompts import note_generation, vlm_code, vlm_diagram, vlm_text
+from prompts import note_generation, vlm_classify, vlm_code, vlm_diagram, vlm_text
 
 
 def test_prompt_common_constants() -> None:
     """All prompt modules should expose name/version constants."""
-    modules = [vlm_code, vlm_diagram, vlm_text, note_generation]
+    modules = [vlm_code, vlm_diagram, vlm_text, vlm_classify, note_generation]
     for module in modules:
         assert module.PROMPT_NAME
         assert re.match(r"v\d+\.\d+\.\d+", module.PROMPT_VERSION)
@@ -31,3 +31,9 @@ def test_note_generation_prompt_requires_escaped_markdown() -> None:
     assert "note_markdown" in prompt
     assert "\\n" in prompt or "escaped newlines" in prompt
     assert "Output ONLY valid JSON" in prompt
+
+
+def test_vlm_classify_prompt_includes_chart_output() -> None:
+    """The classifier prompt should expose chart as a first-class output type."""
+    assert '"chart"' in vlm_classify.PROMPT
+    assert "quantitative visualization" in vlm_classify.PROMPT

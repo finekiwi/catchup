@@ -218,6 +218,9 @@ data/chroma/
 data/golden/
 data/parsed/
 data/figures/
+
+# Generated image preprocessing artifacts
+*_preprocessed.*
 data/*.db
 eval/results/
 refs/
