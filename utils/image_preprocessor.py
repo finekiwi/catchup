@@ -36,6 +36,7 @@ class ResizeConfig:
     output_format: str
     jpeg_quality: int | None
 
+
 RESIZE_POLICY: dict[ImageType, ResizeConfig] = {
     ImageType.CODE_SCREENSHOT: ResizeConfig(
         max_long_edge=1600, output_format="PNG", jpeg_quality=None

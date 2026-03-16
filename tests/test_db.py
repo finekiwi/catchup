@@ -95,6 +95,7 @@ def test_sqlite_upsert_on_duplicate_document_id(tmp_path, monkeypatch) -> None:
     assert fetched.source == "second.pdf"
     assert fetched.status == ProcessingStatus.CONCEPTS_EXTRACTED
     assert fetched.metadata.title == "Updated Title"
+    assert fetched.created_at == datetime(2026, 3, 3, tzinfo=timezone.utc)
     assert len(fetched.blocks) == 1
     assert fetched.blocks[0].image_path == "data/figures/duplicate-doc/1.png"
     assert len(sqlite_db.list_documents()) == 1
@@ -180,6 +181,80 @@ def test_notes_delete(tmp_path, monkeypatch) -> None:
 
     sqlite_db.delete_note("doc-1", "vlm", "llm")
     assert sqlite_db.get_note("doc-1", "vlm", "llm") is None
+
+
+def test_get_note_accepts_legacy_rows_without_version_key(tmp_path, monkeypatch) -> None:
+    """Legacy note rows without a version marker should remain readable."""
+    monkeypatch.setenv("CATCHUP_SQLITE_PATH", str(tmp_path / "test.db"))
+
+    connection = sqlite_db._connect()
+    assert connection is not None
+    connection.execute(
+        """
+        INSERT INTO notes (document_id, file_hash, vlm_model, llm_model, result_json, is_image, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "doc-legacy",
+            "legacy-hash",
+            "vlm",
+            "llm",
+            '{"title": "Legacy", "note_markdown": "## Legacy"}',
+            0,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    fetched = sqlite_db.get_note("doc-legacy", "vlm", "llm")
+    assert fetched is not None
+    assert fetched["result"]["title"] == "Legacy"
+
+
+def test_list_notes_skips_only_unknown_future_versions(tmp_path, monkeypatch) -> None:
+    """Future-version rows should be skipped without invalidating legacy/current rows."""
+    monkeypatch.setenv("CATCHUP_SQLITE_PATH", str(tmp_path / "test.db"))
+
+    sqlite_db.save_note("doc-1", "current-hash", {"title": "Current"}, "vlm1", "llm1")
+    connection = sqlite_db._connect()
+    assert connection is not None
+    connection.execute(
+        """
+        INSERT INTO notes (document_id, file_hash, vlm_model, llm_model, result_json, is_image, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "doc-1",
+            "legacy-hash",
+            "vlm2",
+            "llm2",
+            '{"title": "Legacy"}',
+            0,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+    connection.execute(
+        """
+        INSERT INTO notes (document_id, file_hash, vlm_model, llm_model, result_json, is_image, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "doc-1",
+            "future-hash",
+            "vlm3",
+            "llm3",
+            '{"title": "Future", "_note_result_version": "v999"}',
+            0,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    notes = sqlite_db.list_notes_for_document("doc-1")
+    titles = {row["result"]["title"] for row in notes}
+    assert titles == {"Current", "Legacy"}
 
 
 class _FakeCollection:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -91,40 +92,39 @@ def parse_image(file_path: str, model: str = "gpt-4o-mini", language: str = "ko"
             exc,
         )
 
-    # Step 2: analyze
-    analysis_prompt = _PROMPT_GETTER_BY_IMAGE_TYPE[image_type](language)
-    result = call_vlm(model, processed_path, analysis_prompt, stage="image_analysis")
+    try:
+        # Step 2: analyze
+        analysis_prompt = _PROMPT_GETTER_BY_IMAGE_TYPE[image_type](language)
+        result = call_vlm(model, processed_path, analysis_prompt, stage="image_analysis")
 
-    blocks: list[Block] = []
-    if result.success:
-        try:
-            parsed = parse_vlm_output(result.content, image_type)
-            block = map_vlm_output_to_block(
-                image_type=image_type, payload=parsed, order=0, image_path=file_path
-            )
-            if preprocess_meta is not None:
-                block.metadata = block.metadata.model_copy(
-                    update={"preprocess": preprocess_meta}
+        blocks: list[Block] = []
+        if result.success:
+            try:
+                parsed = parse_vlm_output(result.content, image_type)
+                block = map_vlm_output_to_block(
+                    image_type=image_type, payload=parsed, order=0, image_path=file_path
                 )
-            blocks.append(block)
-        except Exception as exc:  # noqa: BLE001
-            LOGGER.warning(
-                "VLM JSON parse failed for %s, using raw fallback: %s", file_path, exc
-            )
-            metadata = BlockMetadata(image_type=image_type)
-            if preprocess_meta is not None:
-                metadata = metadata.model_copy(update={"preprocess": preprocess_meta})
-            blocks.append(
-                Block(
-                    type=BlockType.TEXT,
-                    content=_json_to_plain_text(result.content),
-                    order=0,
-                    metadata=metadata,
-                    image_path=file_path,
+                if preprocess_meta is not None:
+                    block.metadata.preprocess = preprocess_meta
+                blocks.append(block)
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning(
+                    "VLM JSON parse failed for %s, using raw fallback: %s", file_path, exc
                 )
-            )
-    else:
-        LOGGER.error("VLM analysis call failed for %s: %s", file_path, result.error)
+                metadata = BlockMetadata(image_type=image_type, preprocess=preprocess_meta)
+                blocks.append(
+                    Block(
+                        type=BlockType.TEXT,
+                        content=_json_to_plain_text(result.content),
+                        order=0,
+                        metadata=metadata,
+                        image_path=file_path,
+                    )
+                )
+        else:
+            LOGGER.error("VLM analysis call failed for %s: %s", file_path, result.error)
+    finally:
+        _cleanup_preprocessed_image(file_path, processed_path)
 
     processing = ProcessingInfo(
         parser_model="image_parser_v2.0",
@@ -341,6 +341,21 @@ def _safe_document_id(file_path: str) -> str:
         return generate_document_id(file_path)
     except Exception:  # noqa: BLE001
         return hashlib.sha256(file_path.encode("utf-8")).hexdigest()[:16]
+
+
+def _cleanup_preprocessed_image(original_path: str, processed_path: str) -> None:
+    """Delete transient preprocessed images created next to temporary upload files."""
+    if processed_path == original_path:
+        return
+    processed = Path(processed_path)
+    if "_preprocessed" not in processed.stem:
+        return
+    try:
+        os.unlink(processed)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        LOGGER.warning("Failed to remove transient preprocessed image %s: %s", processed_path, exc)
 
 
 __all__ = ["classify_image", "map_vlm_output_to_block", "parse_image", "parse_vlm_output"]

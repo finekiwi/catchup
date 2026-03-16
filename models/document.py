@@ -14,7 +14,7 @@ import hashlib
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -70,6 +70,7 @@ class BlockMetadata(BaseModel):
     # image/VLM-specific
     image_type: Optional[ImageType] = None
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    preprocess: Optional[dict[str, Any]] = None
 
     # code-specific
     language: Optional[str] = None

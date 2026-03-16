@@ -21,6 +21,7 @@ DEFAULT_SQLITE_PATH = "data/catchup.db"
 _NOTE_RESULT_VERSION = "v2"
 _NOTE_RESULT_VERSION_KEY = "_note_result_version"
 _DOCUMENT_JSON_COLUMN = "document_json"
+# Legacy rows without a version marker remain readable; only unknown future versions are skipped.
 
 
 def _sqlite_path() -> Path:
@@ -164,7 +165,6 @@ def save_document(doc: Document) -> None:
                 source = excluded.source,
                 format = excluded.format,
                 status = excluded.status,
-                created_at = excluded.created_at,
                 metadata = excluded.metadata,
                 document_json = excluded.document_json
             """,
@@ -173,7 +173,7 @@ def save_document(doc: Document) -> None:
                 doc.source,
                 doc.format.value,
                 doc.status.value,
-                datetime.now(timezone.utc).isoformat(),
+                doc.created_at.isoformat() if doc.created_at else datetime.now(timezone.utc).isoformat(),
                 metadata_json,
                 document_json,
             ),
@@ -354,10 +354,9 @@ def get_note(document_id: str, vlm_model: str, llm_model: str) -> Optional[dict]
         ).fetchone()
         if row is None:
             return None
-        result = json.loads(row["result_json"])
-        if result.get(_NOTE_RESULT_VERSION_KEY) != _NOTE_RESULT_VERSION:
+        result = _deserialize_note_result(row["result_json"])
+        if result is None:
             return None
-        result.pop(_NOTE_RESULT_VERSION_KEY, None)
         return {
             "result": result,
             "file_hash": row["file_hash"],
@@ -391,25 +390,19 @@ def list_notes_for_document(document_id: str) -> list[dict]:
         ).fetchall()
         results = []
         for row in rows:
-            try:
-                result = json.loads(row["result_json"])
-                if result.get(_NOTE_RESULT_VERSION_KEY) != _NOTE_RESULT_VERSION:
-                    continue
-                result.pop(_NOTE_RESULT_VERSION_KEY, None)
-                results.append(
-                    {
-                        "result": result,
-                        "file_hash": row["file_hash"],
-                        "vlm_model": row["vlm_model"],
-                        "llm_model": row["llm_model"],
-                        "is_image": bool(row["is_image"]),
-                        "updated_at": row["updated_at"],
-                    }
-                )
-            except json.JSONDecodeError:
-                LOGGER.warning(
-                    "Skipping note with invalid JSON for document_id=%s", document_id
-                )
+            result = _deserialize_note_result(row["result_json"])
+            if result is None:
+                continue
+            results.append(
+                {
+                    "result": result,
+                    "file_hash": row["file_hash"],
+                    "vlm_model": row["vlm_model"],
+                    "llm_model": row["llm_model"],
+                    "is_image": bool(row["is_image"]),
+                    "updated_at": row["updated_at"],
+                }
+            )
         return results
     except sqlite3.Error:
         LOGGER.exception("Failed to list notes for document_id=%s", document_id)
@@ -437,3 +430,24 @@ def delete_note(document_id: str, vlm_model: str, llm_model: str) -> None:
         LOGGER.exception("Failed to delete note for document_id=%s", document_id)
     finally:
         connection.close()
+
+
+def _deserialize_note_result(result_json: str) -> dict | None:
+    """Load note JSON, accepting both current-version rows and legacy pre-version rows."""
+    try:
+        result = json.loads(result_json)
+    except json.JSONDecodeError:
+        LOGGER.warning("Skipping note with invalid JSON payload")
+        return None
+
+    if not isinstance(result, dict):
+        LOGGER.warning("Skipping note with non-object JSON payload")
+        return None
+
+    note_version = result.get(_NOTE_RESULT_VERSION_KEY)
+    if note_version not in {None, _NOTE_RESULT_VERSION}:
+        LOGGER.warning("Skipping note with unsupported result version=%s", note_version)
+        return None
+
+    result.pop(_NOTE_RESULT_VERSION_KEY, None)
+    return result
