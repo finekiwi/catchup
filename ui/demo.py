@@ -2278,19 +2278,49 @@ with col_content:
         with toolbar_col:
             edit_mode = st.toggle("✏️ 편집 모드", value=False, key="note_edit_toggle")
         with export_col:
+            from utils.export import export_docx, export_markdown, export_pdf
+
+            _export_fig_blocks = [b for b in doc.blocks if b.image_path and Path(b.image_path).exists()]
             with st.popover("📤 내보내기 ▾", use_container_width=True):
+                # Markdown with inline base64 images
+                _md_data = export_markdown(raw_md, title, _export_fig_blocks)
                 st.download_button(
-                    "📥 마크다운 다운로드",
-                    data=full_md,
+                    "📥 마크다운 (.md)",
+                    data=_md_data,
                     file_name=f"{file_stem}_note.md",
                     mime="text/markdown",
                     use_container_width=True,
                 )
+                # PDF
+                try:
+                    _pdf_data = export_pdf(raw_md, title, _export_fig_blocks)
+                    st.download_button(
+                        "📄 PDF (.pdf)",
+                        data=_pdf_data,
+                        file_name=f"{file_stem}_note.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                    )
+                except Exception as _pdf_exc:
+                    st.caption(f"PDF 생성 불가: {_pdf_exc}")
+                # DOCX
+                try:
+                    _docx_data = export_docx(raw_md, title, _export_fig_blocks)
+                    st.download_button(
+                        "📝 Word (.docx)",
+                        data=_docx_data,
+                        file_name=f"{file_stem}_note.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True,
+                    )
+                except Exception as _docx_exc:
+                    st.caption(f"DOCX 생성 불가: {_docx_exc}")
+                # Clipboard (existing)
                 if st.button(
                     "📋 클립보드 복사", use_container_width=True, key="copy_note_btn"
                 ):
                     try:
-                        pyperclip.copy(full_md)
+                        pyperclip.copy(_md_data)
                         st.toast("📋 클립보드에 복사됐어요!")
                     except Exception:
                         st.toast("복사 실패")
