@@ -1,7 +1,7 @@
 """VLM prompt for image type classification."""
 
 PROMPT_NAME = "vlm_classify"
-PROMPT_VERSION = "v1.2.0"
+PROMPT_VERSION = "v1.3.0"
 
 PROMPT = """Classify the educational content type of this image.
 
@@ -18,6 +18,9 @@ DEFINITIONS — assign to the FIRST matching type:
     - book title images (large title text, author name, series name — even if it says a technical term like "Deep Learning")
     - book/report covers or back covers
     - chapter divider pages with only a chapter number and title
+    - mascot characters, cartoon characters, decorative illustrations
+    - chapter divider art, title-page artwork, paper-craft style decorations
+    - decorative animals or ornamental characters, even if they look like a diagram
     - copyright pages, dedication pages, table of contents
     - author portraits or photos
     - decorative illustrations, animals, nature photos
