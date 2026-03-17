@@ -2018,9 +2018,9 @@ with st.sidebar:
             "LLM 모델 (노트/Q&A)", options=SUPPORTED_LLM_MODELS, index=0
         )
         _LLM_HINTS = {
-            "gpt-4.1-nano": "빠르고 저렴 (기본값)",
+            "gpt-4.1-mini": "고품질 · 중간 비용 (기본값)",
+            "gpt-4.1-nano": "빠르고 저렴",
             "gpt-4o-mini": "균형",
-            "gpt-4.1-mini": "고품질 · 중간 비용",
             "gpt-4o": "최고 품질 · 고비용",
             "gpt-5-nano": "빠르고 저렴",
             "claude-haiku-4-5-20251001": "빠르고 저렴 (Anthropic)",

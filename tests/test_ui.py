@@ -1002,9 +1002,9 @@ class TestUploadFlow:
         with make_app() as harness:
             app = harness.run()
             _assert_no_exception(app)
-            # The default model (index 0, gpt-4o-mini) has a known hint
+            # The default model (index 0, gpt-4.1-mini) has a known hint
             caption_values = [c.value for c in app.caption]
-            assert any("균형" in v or "권장" in v or "저렴" in v for v in caption_values), (
+            assert any("균형" in v or "권장" in v or "저렴" in v or "고품질" in v for v in caption_values), (
                 "A model hint caption should be visible for the selected LLM model"
             )
 
