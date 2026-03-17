@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 PROMPT_NAME = "concept_linking"
-VERSION = "v1.0.0"
+VERSION = "v1.1.0"
 
 # ---------------------------------------------------------------------------
 # Prompt A — canonical normalization
@@ -12,7 +12,7 @@ VERSION = "v1.0.0"
 CANONICAL_NORMALIZE_PROMPT = """You are a knowledge-graph assistant. Given a list of raw concept names,
 normalize each one into a canonical form with aliases and a short definition.
 
-Output a JSON array where each element has EXACTLY these keys:
+Output a JSON object with key "concepts" containing an array where each element has EXACTLY these keys:
 - "raw": the original input string (preserve exactly)
 - "canonical": lowercase English canonical name (e.g. "backpropagation", "gradient descent")
 - "aliases": list of KO/EN synonyms — include the original Korean name if the input was Korean
@@ -23,7 +23,7 @@ Rules:
 - If the input is already English, just lowercase it
 - aliases may be empty list [] if no meaningful synonyms exist
 - definition must be a single Korean sentence (20-60 characters)
-- Output ONLY the raw JSON array — no markdown fences, no extra text
+- Output ONLY the raw JSON object {"concepts": [...]} — no markdown fences, no extra text
 """
 
 

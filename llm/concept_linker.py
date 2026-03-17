@@ -44,12 +44,15 @@ def _strip_fence(text: str) -> str:
 
 
 def _get_concepts_collection() -> Any | None:
-    """Get or create the catchup_concepts ChromaDB collection."""
+    """Get or create the catchup_concepts ChromaDB collection with cosine distance space."""
     try:
         from db.chroma import _build_client
 
         client = _build_client()
-        return client.get_or_create_collection(name=CONCEPTS_COLLECTION_NAME)
+        return client.get_or_create_collection(
+            name=CONCEPTS_COLLECTION_NAME,
+            metadata={"hnsw:space": "cosine"},
+        )
     except Exception:
         LOGGER.exception("Failed to initialize concepts ChromaDB collection")
         return None
@@ -120,20 +123,23 @@ def normalize_concepts(raw_concepts: list[str], model: str) -> list[dict]:
         success=True,
     )
 
-    # Parse JSON — LLM may return a list directly or wrapped in an object
+    # Parse JSON — LLM returns {"concepts": [...]} wrapper (json_object mode forbids top-level arrays)
     try:
         cleaned = _strip_fence(raw_text)
         parsed = json.loads(cleaned)
-        # If LLM returned {"concepts": [...]} or similar wrapper, unwrap
+        # Unwrap {"concepts": [...]} or any dict with a single list value
         if isinstance(parsed, dict):
-            # Find first list value
-            for v in parsed.values():
-                if isinstance(v, list):
-                    parsed = v
-                    break
+            if "concepts" in parsed and isinstance(parsed["concepts"], list):
+                parsed = parsed["concepts"]
             else:
-                LOGGER.warning("normalize_concepts: unexpected dict response, wrapping as list")
-                parsed = list(parsed.values())
+                # Fallback: find first list value
+                for v in parsed.values():
+                    if isinstance(v, list):
+                        parsed = v
+                        break
+                else:
+                    LOGGER.warning("normalize_concepts: unexpected dict response (no list value)")
+                    return []
         if not isinstance(parsed, list):
             LOGGER.warning("normalize_concepts: JSON is not a list, returning empty")
             return []
@@ -276,7 +282,7 @@ def find_similar_concepts(
     document_id: str,
     concepts: list[dict],
     already_matched_pairs: set[tuple],
-    threshold: float = 0.80,
+    threshold: float = 0.75,
     top_k: int = 3,
 ) -> list[dict]:
     """Tier 2: Find similar concepts via ChromaDB cosine similarity.
@@ -288,7 +294,7 @@ def find_similar_concepts(
         document_id: Document.id of the newly uploaded document.
         concepts: Normalized concept dicts for the new document (with 'id' field).
         already_matched_pairs: Set of (min_id, max_id) pairs already found in Tier 1.
-        threshold: Minimum cosine similarity to consider a match (default 0.80).
+        threshold: Minimum cosine similarity to consider a match (default 0.75).
         top_k: Maximum number of pairs to return across all queries.
 
     Returns:
@@ -496,7 +502,7 @@ def label_relationships(pairs: list[dict], model: str) -> list[dict]:
     return labeled
 
 
-def link_concepts(document_id: str, key_concepts: list[str], model: str) -> list[dict]:
+def link_concepts(document_id: str, key_concepts: list[str], model: str, threshold: float = 0.75) -> list[dict]:
     """Main entry point: run full concept linking pipeline for a newly indexed document.
 
     Pipeline:
@@ -505,7 +511,7 @@ def link_concepts(document_id: str, key_concepts: list[str], model: str) -> list
     3. Embed and store concepts in ChromaDB catchup_concepts collection.
     4. Save normalized concepts to SQLite (get integer IDs).
     5. Tier 1: exact canonical match search.
-    6. Tier 2: ChromaDB similarity search (threshold=0.80, top_k=3).
+    6. Tier 2: ChromaDB similarity search (threshold=0.75, top_k=3).
     7. LLM relationship labeling for Tier 2 pairs only.
     8. Combine Tier 1 + labeled Tier 2, save links to SQLite.
     9. Return connection list for UI rendering.
@@ -514,6 +520,7 @@ def link_concepts(document_id: str, key_concepts: list[str], model: str) -> list
         document_id: Document.id of the newly uploaded document.
         key_concepts: Raw concept name strings from note generation output.
         model: LLM model for normalization and labeling.
+        threshold: Cosine similarity threshold for Tier 2 search (default 0.80).
 
     Returns:
         List of connection dicts suitable for _render_concept_connections() in UI.
@@ -571,7 +578,7 @@ def link_concepts(document_id: str, key_concepts: list[str], model: str) -> list
         document_id,
         concepts_with_ids,
         already_matched_pairs=tier1_pair_keys,
-        threshold=0.80,
+        threshold=threshold,
         top_k=3,
     )
 
