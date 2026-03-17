@@ -339,3 +339,60 @@ secondaryBackgroundColor = "#FFF7ED"  # 연한 주황 → 빨강 primary와 조�
 | 10 | Gemini 모델명 404 오류 | `vlm/client.py`, `llm/note_generator.py` | — | Fixed |
 | 11 | ipynb 코드 블록 → note_markdown 복사 + JSON parse fail | `llm/note_generator.py` | — | Fixed |
 | 12 | 데모 UI 색상 테마 불일치 (보라/파랑 잔존) | `ui/demo.py`, `.streamlit/config.toml` | — | Fixed |
+
+---
+
+## Issue #13: Review follow-up — CU-16 persistence / compatibility / chart branch
+
+**Status**: ✅ Fixed (`261d82b`)
+
+**Symptom**:
+- adaptive preprocessing metadata가 런타임에는 붙지만 저장 후 다시 불러오면 사라짐
+- 기존 note row가 `_note_result_version`이 없다는 이유로 라이브러리에서 읽히지 않음
+- 문서를 다시 저장할 때 original `created_at`이 현재 시각으로 덮여 library ordering이 흔들림
+- resize policy에 `CHART`용 1024px branch가 정의돼 있어도 실제 분류 결과에서는 도달하지 못함
+- 이미지 파싱 중 생성된 `*_preprocessed.*` 파일이 temp/upload 경로에 남음
+
+**Root Cause**:
+1. `models/document.py`의 `BlockMetadata`에 `preprocess` 필드가 없어 `doc.model_dump()`/`model_validate()` round-trip 시 메타데이터가 증발함.
+2. `db/sqlite.py`가 `_note_result_version == "v2"`만 허용해서 legacy saved note를 전부 버림.
+3. `save_document()`가 original `created_at` 의미를 보존하지 않아 재저장 시 library 정렬 기준이 흔들림.
+4. `prompts/vlm_classify.py`는 `chart`를 출력하지 않는데 런타임 policy는 `ImageType.CHART`를 기대하고 있었음.
+5. `parsers/image_parser.py`가 preprocess 결과 파일을 만들고도 후처리 cleanup을 하지 않았음.
+
+**Fix**:
+- `models/document.py`
+  - `BlockMetadata.preprocess: Optional[dict[str, Any]]` 추가
+- `db/sqlite.py`
+  - `_deserialize_note_result()` 추가
+  - legacy row (`version` 없음)는 허용
+  - unknown future version만 skip
+  - `save_document()`는 `doc.created_at`을 그대로 저장하고 upsert 시 `created_at`을 덮어쓰지 않음
+- `prompts/vlm_classify.py`
+  - `PROMPT_VERSION` `v1.4.0`
+  - output enum에 `"chart"` 추가
+  - diagram vs chart definition 분리
+- `parsers/image_parser.py`
+  - chart classification → `ImageType.CHART`
+  - chart는 diagram parser branch 사용
+  - `_cleanup_preprocessed_image()` 추가로 transient sibling 파일 제거
+  - `block.metadata.preprocess` 저장
+- `prompts/VERSION_LOG.md`
+  - `vlm_classify` v1.4.0 entry 추가
+
+**Regression Tests**:
+- `tests/test_db.py`
+  - duplicate upsert 후 `created_at` 보존
+  - legacy note row read 허용
+  - future version row만 skip
+- `tests/test_image_parser.py`
+  - `preprocess` metadata JSON serialization 확인
+  - transient preprocessed file cleanup 확인
+  - `chart` classification path 확인
+- `tests/test_prompt_contracts.py`
+  - classify prompt에 `chart`/`quantitative visualization` 포함 확인
+
+**Takeaway**:
+- 런타임에만 존재하는 metadata는 반드시 schema field까지 같이 추가해야 persistence에서 안 사라진다.
+- version gate는 migration safety와 backward compatibility를 같이 봐야 한다. `unknown future`만 막고 `legacy known-shape`는 살리는 편이 안전했다.
+- policy enum과 classifier prompt가 분리되어 있으면 dead branch가 생긴다. 분류 가능성까지 함께 검증해야 한다.

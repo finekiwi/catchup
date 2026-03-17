@@ -6,6 +6,8 @@ import base64
 import copy
 import hashlib
 import importlib.util
+import os
+import tempfile
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -87,6 +89,7 @@ class DemoAppHarness:
     rag_query: MagicMock
     rewrite_query: MagicMock
     enrich_pdf_figures: MagicMock
+    link_concepts: MagicMock
     pyperclip_copy: MagicMock
     documents_db: dict[str, Document]
     notes_db: dict[tuple[str, str, str], dict[str, Any]]
@@ -567,6 +570,14 @@ def make_app() -> Iterator[Any]:
                 )
 
         with ExitStack() as stack:
+            preview_dir = stack.enter_context(tempfile.TemporaryDirectory())
+            preview_env = os.environ.get("CATCHUP_IMAGE_PREVIEW_DIR", preview_dir)
+            stack.enter_context(
+                patch.dict(
+                    os.environ,
+                    {"CATCHUP_IMAGE_PREVIEW_DIR": preview_env},
+                )
+            )
             stack.enter_context(
                 patch.object(
                     local_script_runner.LocalScriptRunner, "__init__", _patched_init
@@ -692,6 +703,24 @@ def make_app() -> Iterator[Any]:
             pyperclip_copy = stack.enter_context(
                 patch("pyperclip.copy", new=MagicMock())
             )
+            link_concepts = stack.enter_context(
+                patch(
+                    "llm.concept_linker.link_concepts",
+                    new=MagicMock(return_value=[]),
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "llm.concept_linker.delete_document_concepts",
+                    new=MagicMock(return_value=None),
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "db.sqlite.get_concept_links_for_document",
+                    new=MagicMock(return_value=[]),
+                )
+            )
 
             harness = DemoAppHarness(
                 app=AppTest.from_file("ui/demo.py"),
@@ -713,6 +742,7 @@ def make_app() -> Iterator[Any]:
                 rag_query=rag_query,
                 rewrite_query=rewrite_query,
                 enrich_pdf_figures=enrich_pdf_figures,
+                link_concepts=link_concepts,
                 pyperclip_copy=pyperclip_copy,
                 documents_db=documents_db,
                 notes_db=notes_db,
@@ -1263,6 +1293,27 @@ class TestImagePipeline:
                 "The image workspace should survive reruns while cached"
             )
 
+    def test_image_upload_persists_original_preview_file(
+        self,
+        make_app: Any,
+        tmp_path: Path,
+    ) -> None:
+        """Image uploads should persist original bytes for later library-mode preview restore."""
+        image_upload = _image_upload()
+        preview_dir = tmp_path / "image-previews"
+
+        with patch.dict(os.environ, {"CATCHUP_IMAGE_PREVIEW_DIR": str(preview_dir)}):
+            with make_app() as harness:
+                _analyze_upload(harness, image_upload)
+
+        persisted_path = preview_dir / f"{image_upload.file_hash}.png"
+        assert persisted_path.exists(), (
+            "Analyzed image uploads should persist the original file for future preview restore"
+        )
+        assert persisted_path.read_bytes() == image_upload.data, (
+            "Persisted preview bytes should match the original uploaded image"
+        )
+
     def test_image_api_key_error_surfaces_message(self, make_app: Any) -> None:
         """Image parser auth failures should show a user-facing API key error."""
         image_upload = _image_upload(name="slide.webp", file_id="upload-webp")
@@ -1535,6 +1586,52 @@ class TestLibraryPersistence:
             assert restored_doc.blocks[0].image_path == str(figure_path), (
                 "Restored blocks should keep image_path so note rendering can inject figures"
             )
+
+    def test_library_image_load_restores_original_preview(
+        self,
+        make_app: Any,
+        tmp_path: Path,
+    ) -> None:
+        """Library-loaded image docs should render the persisted original preview instead of the fallback warning."""
+        image_upload = _image_upload(name="library-image.png", file_id="upload-library-image")
+        preview_dir = tmp_path / "image-previews"
+        preview_dir.mkdir(parents=True, exist_ok=True)
+        persisted_path = preview_dir / f"{image_upload.file_hash}.png"
+        persisted_path.write_bytes(image_upload.data)
+
+        document = _sample_document_row(
+            doc_id="doc-library-image",
+            source="library-image.png",
+            fmt=DocumentFormat.IMAGE,
+            blocks=[
+                Block(
+                    type=BlockType.FIGURE,
+                    content="이미지 설명",
+                    order=0,
+                    metadata=BlockMetadata(page=1),
+                )
+            ],
+        )
+        note_row = _sample_note_row(
+            document_id=document.id,
+            file_hash=image_upload.file_hash,
+            result={},
+            is_image=True,
+        )
+
+        with patch.dict(os.environ, {"CATCHUP_IMAGE_PREVIEW_DIR": str(preview_dir)}):
+            with make_app() as harness:
+                harness.seed_library(document, note_row, has_vectors=True)
+                harness.run()
+                harness.click_button(key="lib_doc-library-image", upload=None)
+
+                _assert_no_exception(harness.app)
+                assert not _contains_markdown(harness.app, "이미지 미리보기를 복원하지 못했습니다"), (
+                    "Library image restore should not show the missing-preview warning when persisted bytes exist"
+                )
+                assert _contains_markdown(harness.app, "원본 미리보기"), (
+                    "Library image restore should render the original image preview card"
+                )
 
     def test_delete_evicts_cache_then_reupload_reprocesses(self, make_app: Any) -> None:
         """Deleting a library document should clear caches and force re-analysis on re-upload."""
@@ -1984,3 +2081,64 @@ def test_parse_followup_truncates_to_three() -> None:
     answer = "답변\n---SUGGESTIONS---\nQ1\nQ2\nQ3\nQ4\n---END---"
     _, suggestions = fn(answer)
     assert len(suggestions) == 3
+
+
+# ---------------------------------------------------------------------------
+# _render_concept_connections unit tests (CU-17)
+# ---------------------------------------------------------------------------
+
+
+def _load_render_concept_connections() -> Any:
+    """Load _render_concept_connections from ui/demo.py without running the app."""
+    spec = importlib.util.spec_from_file_location("ui_demo_concept_conn", DEMO_APP_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    with patch.object(st, "set_page_config", side_effect=_StopDemoImport):
+        try:
+            spec.loader.exec_module(module)
+        except _StopDemoImport:
+            pass
+    fn = getattr(module, "_render_concept_connections", None)
+    assert fn is not None, "_render_concept_connections not found in ui/demo.py"
+    return fn
+
+
+def test_concept_connections_banner_renders() -> None:
+    """_render_concept_connections should call st.markdown when connections are provided."""
+    fn = _load_render_concept_connections()
+
+    connections = [
+        {
+            "concept_id_a": 1,
+            "concept_id_b": 2,
+            "confidence_score": 1.0,
+            "relationship_type": "same_concept",
+            "relationship_desc": "",
+            "source_concept_name": "backpropagation",
+            "source_canonical_name": "backpropagation",
+            "target_concept_name": "backpropagation",
+            "target_canonical_name": "backpropagation",
+            "target_document_id": "doc-other",
+            "target_document_title": "lecture_b.pdf",
+        }
+    ]
+
+    rendered_calls: list[str] = []
+    with patch.object(st, "markdown", side_effect=lambda html, **_kw: rendered_calls.append(html)):
+        fn(connections)
+
+    assert len(rendered_calls) == 1
+    html_out = rendered_calls[0]
+    assert "backpropagation" in html_out
+    assert "lecture_b.pdf" in html_out
+
+
+def test_concept_connections_empty_no_banner() -> None:
+    """_render_concept_connections with empty list should not call st.markdown."""
+    fn = _load_render_concept_connections()
+
+    rendered_calls: list[str] = []
+    with patch.object(st, "markdown", side_effect=lambda html, **_kw: rendered_calls.append(html)):
+        fn([])
+
+    assert rendered_calls == []

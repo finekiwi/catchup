@@ -79,6 +79,11 @@
 | v1.5.0 | 2026-03-14 | Add follow-up suggestion block (---SUGGESTIONS---/---END--- delimiters) appended after genuine document answers. UI parses and renders as clickable buttons (NotebookLM-style). Skip for note-mod redirects, emotional responses, and "not found" fallbacks. | Improves discovery of follow-on questions; no impact on main answer quality |
 | v1.5.1 | 2026-03-15 | Add indirect-evidence rule: if context touches topic implicitly (e.g. explains life without X), synthesize answer instead of falling back. Fallback reserved for genuinely unrelated context only. | Fixes false "찾을 수 없습니다" on implicit/indirect evidence blocks |
 
+## concept_linking.py
+| Version | Date | Change | Quality Impact |
+|---------|------|--------|----------------|
+| v1.0.0 | 2026-03-17 | Initial prompts for CU-17 concept linking. CANONICAL_NORMALIZE_PROMPT: batch-normalizes raw concept names into canonical EN + KO aliases + one-line KO definition. RELATIONSHIP_LABEL_PROMPT: classifies semantic relationship between two concepts as implements/extends/prerequisite/application or null. | Enables cross-document concept linking with precision-first approach (null → drop pair) |
+
 ## query_rewrite.py
 | Version | Date | Change | Quality Impact |
 |---------|------|--------|----------------|
