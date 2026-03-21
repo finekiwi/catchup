@@ -17,12 +17,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install CPU-only torch first (prevents docling from pulling 2.5GB GPU build)
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-
-# Install dependencies via pyproject.toml with uv
+# Install dependencies via pyproject.toml with uv (re-resolve for Linux platform)
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev
+ENV UV_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu
+RUN uv sync --no-dev
 
 # Copy app code
 COPY . .
