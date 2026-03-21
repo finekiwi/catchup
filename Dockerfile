@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
 
 # Install dependencies via pyproject.toml with uv
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --system
+RUN uv sync --frozen --no-dev
 
 # Copy app code
 COPY . .
