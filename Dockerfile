@@ -20,9 +20,9 @@ WORKDIR /app
 # Install CPU-only torch first (prevents docling from pulling 2.5GB GPU build)
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
-# Install remaining dependencies with uv (10x faster than pip)
-COPY requirements.txt .
-RUN uv pip install --system --no-cache -r requirements.txt
+# Install dependencies via pyproject.toml with uv
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --system
 
 # Copy app code
 COPY . .
