@@ -1,5 +1,8 @@
 FROM python:3.12-slim
 
+# Install uv for fast dependency resolution
+RUN pip install --no-cache-dir uv
+
 # System dependencies for docling + chromadb + PIL
 RUN apt-get update && apt-get install -y --no-install-recommends \
     poppler-utils \
@@ -7,6 +10,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     tesseract-ocr \
     git \
+    build-essential \
+    libcairo2-dev \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -14,9 +20,9 @@ WORKDIR /app
 # Install CPU-only torch first (prevents docling from pulling 2.5GB GPU build)
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
-# Install remaining dependencies
+# Install remaining dependencies with uv (10x faster than pip)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN uv pip install --system --no-cache -r requirements.txt
 
 # Copy app code
 COPY . .
