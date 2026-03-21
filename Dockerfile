@@ -29,12 +29,12 @@ COPY . .
 # Create writable data directories
 RUN mkdir -p data/chroma data/logs data/parsed data/figures data/image_uploads
 
-EXPOSE 8501
+EXPOSE 7860
 
-HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health || exit 1
+HEALTHCHECK CMD curl --fail http://localhost:7860/_stcore/health || exit 1
 
 ENTRYPOINT ["uv", "run", "streamlit", "run", "ui/demo.py", \
-    "--server.port=8501", \
+    "--server.port=7860", \
     "--server.address=0.0.0.0", \
     "--server.headless=true", \
     "--browser.gatherUsageStats=false"]
