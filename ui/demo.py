@@ -2681,6 +2681,25 @@ if not st.session_state.get(_indexed_key) and doc.blocks and not _lib_mode:
         LOGGER.warning("RAG indexing failed: %s", _idx_exc)
         st.warning(f"RAG 인덱싱 실패: {_idx_exc}")
 
+# ─── Lazy concept linking (covers lib-mode and docs analyzed before this feature) ──
+# Runs once per session per doc. If concepts are missing from DB (e.g. doc was
+# analyzed before concept linking was added, or loaded from library on first open),
+# trigger linking now so cross-document connections are always up-to-date.
+_cl_trigger_key = f"_cl_triggered_{doc.id}"
+if result.get("key_concepts") and not st.session_state.get(_cl_trigger_key):
+    st.session_state[_cl_trigger_key] = True
+    try:
+        from db.sqlite import get_concepts_for_document as _get_doc_concepts
+
+        if not _get_doc_concepts(doc.id):
+            from llm.concept_linker import link_concepts as _link_concepts
+
+            _connections = _link_concepts(doc.id, result["key_concepts"], model=llm_model)
+            st.session_state[f"concept_connections_{doc.id}"] = _connections
+            st.rerun()
+    except Exception as _cl_lazy_exc:
+        LOGGER.warning("Lazy concept linking failed: %s", _cl_lazy_exc)
+
 # ─── Persist dirty note edits to SQLite ──────────────────────────────
 if st.session_state.pop("_note_dirty", False):
     # Determine the vlm/llm models used for this result

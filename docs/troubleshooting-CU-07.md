@@ -396,3 +396,42 @@ secondaryBackgroundColor = "#FFF7ED"  # 연한 주황 → 빨강 primary와 조�
 - 런타임에만 존재하는 metadata는 반드시 schema field까지 같이 추가해야 persistence에서 안 사라진다.
 - version gate는 migration safety와 backward compatibility를 같이 봐야 한다. `unknown future`만 막고 `legacy known-shape`는 살리는 편이 안전했다.
 - policy enum과 classifier prompt가 분리되어 있으면 dead branch가 생긴다. 분류 가능성까지 함께 검증해야 한다.
+
+---
+
+## Issue 14 — 라이브러리 로드 시 concept linking이 표시되지 않음
+
+**Status:** Fixed (`ui/demo.py`)
+Branch: `feature/CU-17-concept-linking`
+
+**Symptom**
+노트가 있는 문서를 라이브러리에서 로드해도 "연결된 개념" 배너가 나타나지 않음. DB에 concept links가 0개.
+
+**Root Cause**
+두 가지가 겹침:
+
+1. **라이브러리 모드 스킵**: concept linking은 최초 RAG 인덱싱 직후에만 실행되는데, 인덱싱 블록이 `not _lib_mode` 조건으로 가드되어 있음. 라이브러리 로드 시에는 인덱싱 전체가 스킵되므로 concept linking도 실행 안 됨.
+2. **선착순 링킹 문제**: doc A를 먼저 분석할 때 다른 문서에 개념이 없으면 링크가 생성되지 않음. 나중에 doc B를 분석해도 doc A의 링크는 소급 생성되지 않음 — B가 A와 링크되지만, A는 B의 개념 추출 전에 이미 링킹을 마친 상태.
+
+실제로 `deep_learning_ch3.pdf`는 개념 10개가 DB에 있었지만 concept links는 0개였고, `Logistic_Regression...`는 개념 자체가 0개였음.
+
+**Fix**
+`ui/demo.py`에 lazy concept linking 블록 추가. 기존 인덱싱 블록과 별개로, 세션당 한 번 실행되며:
+
+- DB에 해당 문서의 개념이 없을 때만 `link_concepts()` 호출
+- `_lib_mode` 여부와 무관하게 동작
+- `_cl_triggered_{doc.id}` 키로 중복 실행 방지
+
+```python
+_cl_trigger_key = f"_cl_triggered_{doc.id}"
+if result.get("key_concepts") and not st.session_state.get(_cl_trigger_key):
+    st.session_state[_cl_trigger_key] = True
+    if not _get_doc_concepts(doc.id):
+        _connections = _link_concepts(doc.id, result["key_concepts"], model=llm_model)
+        st.session_state[f"concept_connections_{doc.id}"] = _connections
+        st.rerun()
+```
+
+**Takeaway**:
+- concept linking은 "분석 시점" 기준이 아니라 "렌더링 시점"에 DB 상태를 보고 필요하면 실행하는 lazy 방식이어야 한다.
+- 다문서 링킹 기능은 반드시 소급 적용(retroactive) 가능한 설계가 필요하다. 처음 분석 시 다른 문서가 없었더라도 나중에 링킹이 이루어져야 한다.
