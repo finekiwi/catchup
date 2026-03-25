@@ -1,3 +1,12 @@
+---
+title: CatchUp
+emoji: 📚
+colorFrom: red
+colorTo: yellow
+sdk: docker
+pinned: false
+---
+
 # CatchUp v2
 
 **You study. CatchUp connects.**

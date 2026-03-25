@@ -2,3 +2,6 @@ poppler-utils
 libgl1-mesa-glx
 libglib2.0-0
 tesseract-ocr
+libcairo2-dev
+pkg-config
+build-essential
