@@ -503,14 +503,15 @@ def link_concepts(document_id: str, key_concepts: list[str], model: str, thresho
 
     Pipeline:
     1. Normalize raw concept names via LLM (canonical + aliases + definition).
-    2. Delete existing concept data for idempotency (only after normalization succeeds).
-    3. Embed and store concepts in ChromaDB catchup_concepts collection.
-    4. Save normalized concepts to SQLite (get integer IDs).
-    5. Tier 1: exact canonical match search.
-    6. Tier 2: ChromaDB similarity search (threshold=0.75, top_k=3).
-    7. LLM relationship labeling for Tier 2 pairs only.
-    8. Combine Tier 1 + labeled Tier 2, save links to SQLite.
-    9. Return connection list for UI rendering.
+    2. Probe-save new concepts to SQLite — confirm write succeeds before touching existing data.
+    3. Delete existing concept data (links + concepts + ChromaDB vectors) — safe because step 2 confirmed SQLite is healthy.
+    4. Re-save normalized concepts to SQLite to get authoritative integer IDs after the clean delete.
+    5. Embed and store concepts in ChromaDB catchup_concepts collection.
+    6. Tier 1: exact canonical match search.
+    7. Tier 2: ChromaDB similarity search (threshold=0.75, top_k=3).
+    8. LLM relationship labeling for Tier 2 pairs only.
+    9. Combine Tier 1 + labeled Tier 2, save links to SQLite.
+    10. Return connection list for UI rendering.
 
     Args:
         document_id: Document.id of the newly uploaded document.
@@ -542,17 +543,27 @@ def link_concepts(document_id: str, key_concepts: list[str], model: str, thresho
         for c in normalized
     ]
 
-    # Step 2: idempotent delete — only after normalization succeeds to avoid data loss on API failure
+    # Step 2: save to SQLite first — confirm the write succeeds before touching existing data.
+    # Attempting save_concepts before delete ensures we never wipe valid existing concepts
+    # and then fail to insert replacements (atomic-style: verify write, then clean, then finalize).
+    probe_ids = save_concepts(document_id, concept_rows)
+    if not probe_ids:
+        LOGGER.warning("link_concepts: save_concepts probe returned empty IDs for document_id=%s", document_id)
+        return []
+
+    # Step 3: delete old concept data (links + concepts + ChromaDB vectors) now that we know
+    # the SQLite write path is healthy.  delete_document_concepts also removes the rows we
+    # just inserted above, so we re-save below to get the final clean IDs.
     delete_document_concepts(document_id)
 
-    # Step 3: embed and store in ChromaDB (before SQLite so we have embed text available)
-    embed_and_store_concepts(document_id, concept_rows)
-
-    # Step 4: save to SQLite, get integer IDs
+    # Step 4: save final concepts to SQLite, get authoritative integer IDs.
     ids = save_concepts(document_id, concept_rows)
     if not ids:
         LOGGER.warning("link_concepts: save_concepts returned empty IDs for document_id=%s", document_id)
         return []
+
+    # Step 5: embed and store in ChromaDB (after SQLite commit is confirmed)
+    embed_and_store_concepts(document_id, concept_rows)
 
     # Attach IDs to concept_rows for pair matching
     concepts_with_ids = []
@@ -562,14 +573,14 @@ def link_concepts(document_id: str, key_concepts: list[str], model: str, thresho
         enriched["aliases"] = (normalized[idx].get("aliases") or []) if idx < len(normalized) else []
         concepts_with_ids.append(enriched)
 
-    # Step 5: Tier 1 — exact canonical match
+    # Step 6: Tier 1 — exact canonical match
     tier1_pairs = find_exact_matches(document_id, concepts_with_ids)
     tier1_pair_keys: set[tuple] = {
         (min(p["concept_id_a"], p["concept_id_b"]), max(p["concept_id_a"], p["concept_id_b"]))
         for p in tier1_pairs
     }
 
-    # Step 6: Tier 2 — similarity search
+    # Step 7: Tier 2 — similarity search
     tier2_candidates = find_similar_concepts(
         document_id,
         concepts_with_ids,
@@ -578,10 +589,10 @@ def link_concepts(document_id: str, key_concepts: list[str], model: str, thresho
         top_k=3,
     )
 
-    # Step 7: LLM labeling for Tier 2
+    # Step 8: LLM labeling for Tier 2
     tier2_labeled = label_relationships(tier2_candidates, model)
 
-    # Step 8: combine and save
+    # Step 9: combine and save
     all_pairs = tier1_pairs + tier2_labeled
     if all_pairs:
         link_rows = [
@@ -596,7 +607,7 @@ def link_concepts(document_id: str, key_concepts: list[str], model: str, thresho
         ]
         save_concept_links(link_rows)
 
-    # Step 9: return UI-ready connections from SQLite join
+    # Step 10: return UI-ready connections from SQLite join
     from db.sqlite import get_concept_links_for_document
 
     return get_concept_links_for_document(document_id)

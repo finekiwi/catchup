@@ -301,6 +301,51 @@ def test_link_concepts_full_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert isinstance(connections, list)
 
 
+def test_link_concepts_preserves_existing_on_save_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """Existing concepts must not be deleted when save_concepts fails (probe-before-delete safety)."""
+    monkeypatch.setenv("CATCHUP_SQLITE_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("CATCHUP_CHROMA_PATH", str(tmp_path / "chroma"))
+
+    from llm import concept_linker
+    from db.sqlite import save_concepts, get_concepts_for_document
+
+    # Pre-populate existing valid concepts for the document
+    save_concepts(
+        "doc-safe",
+        [{"concept_name": "relu", "canonical_name": "relu", "aliases": [], "definition": "activation function"}],
+    )
+
+    normalize_payload = [
+        {"raw": "역전파", "canonical": "backpropagation", "aliases": [], "definition": "가중치 업데이트 알고리즘"}
+    ]
+    monkeypatch.setattr(concept_linker, "log_api_call", MagicMock())
+
+    # Make the probe save_concepts (step 2) return empty — simulates SQLite write failure
+    original_save = concept_linker.save_concepts
+    call_count = {"n": 0}
+
+    def failing_save(doc_id: str, rows: list) -> list[int]:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return []  # probe save fails
+        return original_save(doc_id, rows)
+
+    monkeypatch.setattr(concept_linker, "save_concepts", failing_save)
+    monkeypatch.setattr(concept_linker, "normalize_concepts", lambda *a, **kw: normalize_payload)
+    monkeypatch.setattr(concept_linker, "delete_document_concepts", MagicMock())
+
+    result = concept_linker.link_concepts("doc-safe", ["역전파"], "gpt-4o-mini")
+
+    # Pipeline must abort early — delete must never have been called
+    concept_linker.delete_document_concepts.assert_not_called()  # type: ignore[attr-defined]
+    assert result == []
+
+    # Original concepts must still be present (delete was never reached)
+    still_saved = get_concepts_for_document("doc-safe")
+    assert len(still_saved) == 1
+    assert still_saved[0]["canonical_name"] == "relu"
+
+
 # ---------------------------------------------------------------------------
 # delete_document_concepts
 # ---------------------------------------------------------------------------
