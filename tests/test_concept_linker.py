@@ -301,8 +301,8 @@ def test_link_concepts_full_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert isinstance(connections, list)
 
 
-def test_link_concepts_preserves_existing_on_save_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    """Existing concepts must not be deleted when save_concepts fails (probe-before-delete safety)."""
+def test_link_concepts_preserves_existing_on_db_unreachable(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """Existing concepts must not be deleted when the SQLite health check fails."""
     monkeypatch.setenv("CATCHUP_SQLITE_PATH", str(tmp_path / "test.db"))
     monkeypatch.setenv("CATCHUP_CHROMA_PATH", str(tmp_path / "chroma"))
 
@@ -319,20 +319,11 @@ def test_link_concepts_preserves_existing_on_save_failure(monkeypatch: pytest.Mo
         {"raw": "역전파", "canonical": "backpropagation", "aliases": [], "definition": "가중치 업데이트 알고리즘"}
     ]
     monkeypatch.setattr(concept_linker, "log_api_call", MagicMock())
-
-    # Make the probe save_concepts (step 2) return empty — simulates SQLite write failure
-    original_save = concept_linker.save_concepts
-    call_count = {"n": 0}
-
-    def failing_save(doc_id: str, rows: list) -> list[int]:
-        call_count["n"] += 1
-        if call_count["n"] == 1:
-            return []  # probe save fails
-        return original_save(doc_id, rows)
-
-    monkeypatch.setattr(concept_linker, "save_concepts", failing_save)
     monkeypatch.setattr(concept_linker, "normalize_concepts", lambda *a, **kw: normalize_payload)
     monkeypatch.setattr(concept_linker, "delete_document_concepts", MagicMock())
+
+    # Simulate SQLite being unreachable — health check returns False
+    monkeypatch.setattr(concept_linker, "_sqlite_health_check", lambda: False)
 
     result = concept_linker.link_concepts("doc-safe", ["역전파"], "gpt-4o-mini")
 
@@ -375,3 +366,96 @@ def test_delete_document_concepts(monkeypatch: pytest.MonkeyPatch, tmp_path: Any
     from db.sqlite import get_concepts_for_document
 
     assert get_concepts_for_document("doc-y") == []
+
+
+# ---------------------------------------------------------------------------
+# Regression: probe-save orphan (CU-17 P1 re-review)
+# ---------------------------------------------------------------------------
+
+
+def test_relink_does_not_orphan_concept_links(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """Re-linking a document must not leave stale concept_link rows from old IDs.
+
+    Regression test for the probe-save orphan bug: previously link_concepts() called
+    save_concepts() as a probe (INSERT OR REPLACE), bumping concept IDs to new AUTOINCREMENT
+    values. delete_document_concepts() then deleted links by those new IDs, leaving
+    concept_link rows pointing at the original IDs — causing get_concept_links_for_document()
+    to return [].
+
+    The fix replaces the probe-save with a SELECT 1 health check, so no ID churn occurs.
+    """
+    monkeypatch.setenv("CATCHUP_SQLITE_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("CATCHUP_CHROMA_PATH", str(tmp_path / "chroma"))
+
+    from db.sqlite import (
+        get_concept_links_for_document,
+        get_concepts_for_document,
+        save_concept_links,
+        save_concepts,
+    )
+
+    # --- First link pass: doc-a gets concept id=1, doc-b gets concept id=2.
+    # A concept_link (1, 2) is created.
+    ids_a = save_concepts(
+        "doc-a",
+        [{"concept_name": "backpropagation", "canonical_name": "backpropagation", "aliases": [], "definition": ""}],
+    )
+    ids_b = save_concepts(
+        "doc-b",
+        [{"concept_name": "backpropagation", "canonical_name": "backpropagation", "aliases": [], "definition": ""}],
+    )
+    save_concept_links(
+        [
+            {
+                "concept_id_a": ids_a[0],
+                "concept_id_b": ids_b[0],
+                "confidence_score": 1.0,
+                "relationship_type": "same_concept",
+                "relationship_desc": "",
+            }
+        ]
+    )
+
+    # Sanity: links are visible before re-link
+    assert len(get_concept_links_for_document("doc-a")) == 1
+
+    # --- Simulate re-link of doc-a via link_concepts (full pipeline, mocked externals).
+    from llm import concept_linker
+
+    normalize_payload = [
+        {"raw": "backpropagation", "canonical": "backpropagation", "aliases": [], "definition": "weight update algo"}
+    ]
+    monkeypatch.setattr(concept_linker, "log_api_call", MagicMock())
+    monkeypatch.setattr(concept_linker, "normalize_concepts", lambda *a, **kw: normalize_payload)
+    monkeypatch.setattr(concept_linker, "_get_openai_embedding", lambda text: ([0.0] * 1536, 5))
+
+    fake_collection = MagicMock()
+    fake_collection.count.return_value = 0
+    fake_collection.get.return_value = {"ids": []}
+    monkeypatch.setattr(concept_linker, "_get_concepts_collection", lambda: fake_collection)
+
+    concept_linker.link_concepts("doc-a", ["backpropagation"], "gpt-4o-mini")
+
+    # After re-link: doc-a concepts must exist and IDs must be consistent.
+    # Crucially, get_concept_links_for_document must NOT return [] due to orphaned rows.
+    concepts_a = get_concepts_for_document("doc-a")
+    assert len(concepts_a) == 1, "doc-a concept must be present after re-link"
+
+    # doc-b concept (id=ids_b[0]) still exists; the Tier-1 exact match should have saved a new link.
+    # Whether or not links are rebuilt depends on whether doc-b concepts are present — the important
+    # thing is that the old link (1, 2) is gone (no orphan) and the concepts table is consistent.
+    # Verify no stale concept_links reference a non-existent concept.
+    import sqlite3
+
+    conn = sqlite3.connect(str(tmp_path / "test.db"))
+    conn.row_factory = sqlite3.Row
+    stale = conn.execute(
+        """
+        SELECT cl.id FROM concept_links cl
+        LEFT JOIN concepts ca ON ca.id = cl.concept_id_a
+        LEFT JOIN concepts cb ON cb.id = cl.concept_id_b
+        WHERE ca.id IS NULL OR cb.id IS NULL
+        """
+    ).fetchall()
+    conn.close()
+    assert stale == [], f"Stale concept_links found after re-link: {[dict(r) for r in stale]}"

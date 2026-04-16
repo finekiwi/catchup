@@ -498,14 +498,39 @@ def label_relationships(pairs: list[dict], model: str) -> list[dict]:
     return labeled
 
 
+def _sqlite_health_check() -> bool:
+    """Return True if SQLite is reachable by running a trivial SELECT 1.
+
+    This is used as a pre-flight check before destructive operations so that
+    we never delete existing concept data when the database is unavailable.
+    No rows are written, so no AUTOINCREMENT IDs are consumed and no
+    UNIQUE-constraint replacements occur.
+    """
+    import sqlite3 as _sqlite3
+
+    from db.sqlite import _connect as _sqlite_connect  # local import to avoid circular
+
+    conn = _sqlite_connect()
+    if conn is None:
+        return False
+    try:
+        conn.execute("SELECT 1")
+        return True
+    except _sqlite3.Error as exc:
+        LOGGER.warning("SQLite health check failed: %s", exc)
+        return False
+    finally:
+        conn.close()
+
+
 def link_concepts(document_id: str, key_concepts: list[str], model: str, threshold: float = 0.75) -> list[dict]:
     """Main entry point: run full concept linking pipeline for a newly indexed document.
 
     Pipeline:
     1. Normalize raw concept names via LLM (canonical + aliases + definition).
-    2. Probe-save new concepts to SQLite — confirm write succeeds before touching existing data.
-    3. Delete existing concept data (links + concepts + ChromaDB vectors) — safe because step 2 confirmed SQLite is healthy.
-    4. Re-save normalized concepts to SQLite to get authoritative integer IDs after the clean delete.
+    2. SQLite health check (SELECT 1) — abort if DB is unreachable; no rows written.
+    3. Delete existing concept data (links + concepts + ChromaDB vectors).
+    4. Save normalized concepts to SQLite to get authoritative integer IDs.
     5. Embed and store concepts in ChromaDB catchup_concepts collection.
     6. Tier 1: exact canonical match search.
     7. Tier 2: ChromaDB similarity search (threshold=0.75, top_k=3).
@@ -517,7 +542,7 @@ def link_concepts(document_id: str, key_concepts: list[str], model: str, thresho
         document_id: Document.id of the newly uploaded document.
         key_concepts: Raw concept name strings from note generation output.
         model: LLM model for normalization and labeling.
-        threshold: Cosine similarity threshold for Tier 2 search (default 0.80).
+        threshold: Cosine similarity threshold for Tier 2 search (default 0.75).
 
     Returns:
         List of connection dicts suitable for _render_concept_connections() in UI.
@@ -543,20 +568,17 @@ def link_concepts(document_id: str, key_concepts: list[str], model: str, thresho
         for c in normalized
     ]
 
-    # Step 2: save to SQLite first — confirm the write succeeds before touching existing data.
-    # Attempting save_concepts before delete ensures we never wipe valid existing concepts
-    # and then fail to insert replacements (atomic-style: verify write, then clean, then finalize).
-    probe_ids = save_concepts(document_id, concept_rows)
-    if not probe_ids:
-        LOGGER.warning("link_concepts: save_concepts probe returned empty IDs for document_id=%s", document_id)
+    # Step 2: lightweight SQLite health check before touching existing data.
+    # Uses SELECT 1 — no INSERT, so no AUTOINCREMENT IDs are consumed and no
+    # UNIQUE-constraint replacements can orphan existing concept_links rows.
+    if not _sqlite_health_check():
+        LOGGER.warning("link_concepts: SQLite unreachable, aborting for document_id=%s", document_id)
         return []
 
-    # Step 3: delete old concept data (links + concepts + ChromaDB vectors) now that we know
-    # the SQLite write path is healthy.  delete_document_concepts also removes the rows we
-    # just inserted above, so we re-save below to get the final clean IDs.
+    # Step 3: delete old concept data (links + concepts + ChromaDB vectors).
     delete_document_concepts(document_id)
 
-    # Step 4: save final concepts to SQLite, get authoritative integer IDs.
+    # Step 4: save concepts to SQLite, get authoritative integer IDs.
     ids = save_concepts(document_id, concept_rows)
     if not ids:
         LOGGER.warning("link_concepts: save_concepts returned empty IDs for document_id=%s", document_id)
