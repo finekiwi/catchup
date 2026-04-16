@@ -233,6 +233,102 @@ def test_parse_image_document_fields(tmp_path: Path) -> None:
     assert doc.processing.vlm_model == "gpt-4o-mini"
 
 
+def test_parse_image_uses_preprocessed_path_and_attaches_metadata(tmp_path: Path) -> None:
+    """Analysis should use the preprocessed image while blocks keep preprocessing metadata."""
+    image_path = tmp_path / "preprocess.png"
+    processed_path = tmp_path / "preprocess_preprocessed.png"
+    _fake_image(image_path)
+    _fake_image(processed_path)
+    preprocess_meta = {
+        "original_size": (2000, 1500),
+        "processed_size": (1600, 1200),
+        "original_tokens_openai": 765,
+        "processed_tokens_openai": 765,
+        "token_reduction_pct": 0.0,
+        "format": "PNG",
+        "resized": True,
+    }
+
+    with (
+        patch(
+            "parsers.image_parser.preprocess_image",
+            return_value=(str(processed_path), preprocess_meta),
+        ),
+        patch(
+            "parsers.image_parser.call_vlm",
+            side_effect=[_classify("text_capture"), _text_analysis()],
+        ) as mock_vlm,
+    ):
+        doc = parse_image(str(image_path))
+
+    assert mock_vlm.call_args_list[1].args[1] == str(processed_path)
+    assert doc.blocks[0].metadata.preprocess == preprocess_meta
+    assert doc.model_dump(mode="json")["blocks"][0]["metadata"]["preprocess"] == {
+        **preprocess_meta,
+        "original_size": [2000, 1500],
+        "processed_size": [1600, 1200],
+    }
+
+
+def test_parse_image_preprocess_failure_falls_back_to_original(tmp_path: Path) -> None:
+    """Preprocessing failures should not block analysis of the original image."""
+    image_path = tmp_path / "fallback.png"
+    _fake_image(image_path)
+
+    with (
+        patch(
+            "parsers.image_parser.preprocess_image",
+            side_effect=ValueError("bad image"),
+        ),
+        patch(
+            "parsers.image_parser.call_vlm",
+            side_effect=[_classify("text_capture"), _text_analysis()],
+        ) as mock_vlm,
+    ):
+        doc = parse_image(str(image_path))
+
+    assert mock_vlm.call_args_list[1].args[1] == str(image_path)
+    assert doc.blocks[0].metadata.preprocess is None
+
+
+def test_parse_image_removes_transient_preprocessed_file(tmp_path: Path) -> None:
+    """Transient preprocessed siblings should be removed after analysis completes."""
+    image_path = tmp_path / "cleanup.png"
+    processed_path = tmp_path / "cleanup_preprocessed.png"
+    _fake_image(image_path)
+    _fake_image(processed_path)
+
+    with (
+        patch(
+            "parsers.image_parser.preprocess_image",
+            return_value=(str(processed_path), {"format": "PNG", "resized": True}),
+        ),
+        patch(
+            "parsers.image_parser.call_vlm",
+            side_effect=[_classify("text_capture"), _text_analysis()],
+        ),
+    ):
+        parse_image(str(image_path))
+
+    assert not processed_path.exists()
+
+
+def test_parse_image_chart_classification_uses_chart_branch(tmp_path: Path) -> None:
+    """Chart classifications should map to ImageType.CHART and the diagram parser path."""
+    image_path = tmp_path / "chart.png"
+    _fake_image(image_path)
+
+    with patch(
+        "parsers.image_parser.call_vlm",
+        side_effect=[_classify("chart"), _diagram_analysis()],
+    ):
+        doc = parse_image(str(image_path))
+
+    assert len(doc.blocks) == 1
+    assert doc.blocks[0].type == BlockType.FIGURE
+    assert doc.blocks[0].metadata.image_type == ImageType.CHART
+
+
 def test_map_vlm_output_to_block_for_diagram() -> None:
     """Diagram payload maps to FIGURE block with structured component/relationship text."""
     payload = DiagramVLMOutput.model_validate(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ from parsers.schemas.vlm_outputs import (
 )
 from prompts.vlm_classify import PROMPT as CLASSIFY_PROMPT
 from prompts import vlm_code, vlm_diagram, vlm_text
+from utils.image_preprocessor import preprocess_image
 from vlm.client import call_vlm
 
 LOGGER = logging.getLogger(__name__)
@@ -35,6 +37,7 @@ VLMParsedOutput = CodeVLMOutput | DiagramVLMOutput | TextVLMOutput
 _IMAGE_TYPE_MAP: dict[str, ImageType] = {
     "code_screenshot": ImageType.CODE_SCREENSHOT,
     "diagram": ImageType.DIAGRAM,
+    "chart": ImageType.CHART,
     "text_capture": ImageType.TEXT_CAPTURE,
     "equation": ImageType.EQUATION,
     "other": ImageType.OTHER,
@@ -43,6 +46,7 @@ _IMAGE_TYPE_MAP: dict[str, ImageType] = {
 _PROMPT_GETTER_BY_IMAGE_TYPE = {
     ImageType.CODE_SCREENSHOT: vlm_code.get_prompt,
     ImageType.DIAGRAM: vlm_diagram.get_prompt,
+    ImageType.CHART: vlm_diagram.get_prompt,
     ImageType.TEXT_CAPTURE: vlm_text.get_prompt,
     ImageType.EQUATION: vlm_text.get_prompt,
     ImageType.OTHER: vlm_text.get_prompt,
@@ -76,35 +80,51 @@ def parse_image(file_path: str, model: str = "gpt-4o-mini", language: str = "ko"
 
     # Step 1: classify
     image_type = classify_image(file_path, model)
+    processed_path = file_path
+    preprocess_meta: dict[str, Any] | None = None
 
-    # Step 2: analyze
-    analysis_prompt = _PROMPT_GETTER_BY_IMAGE_TYPE[image_type](language)
-    result = call_vlm(model, file_path, analysis_prompt, stage="image_analysis")
+    try:
+        processed_path, preprocess_meta = preprocess_image(file_path, image_type)
+    except ValueError as exc:
+        LOGGER.warning(
+            "Image preprocessing failed for %s, using original image: %s",
+            file_path,
+            exc,
+        )
 
-    blocks: list[Block] = []
-    if result.success:
-        try:
-            parsed = parse_vlm_output(result.content, image_type)
-            blocks.append(
-                map_vlm_output_to_block(
+    try:
+        # Step 2: analyze
+        analysis_prompt = _PROMPT_GETTER_BY_IMAGE_TYPE[image_type](language)
+        result = call_vlm(model, processed_path, analysis_prompt, stage="image_analysis")
+
+        blocks: list[Block] = []
+        if result.success:
+            try:
+                parsed = parse_vlm_output(result.content, image_type)
+                block = map_vlm_output_to_block(
                     image_type=image_type, payload=parsed, order=0, image_path=file_path
                 )
-            )
-        except Exception as exc:  # noqa: BLE001
-            LOGGER.warning(
-                "VLM JSON parse failed for %s, using raw fallback: %s", file_path, exc
-            )
-            blocks.append(
-                Block(
-                    type=BlockType.TEXT,
-                    content=_json_to_plain_text(result.content),
-                    order=0,
-                    metadata=BlockMetadata(image_type=image_type),
-                    image_path=file_path,
+                if preprocess_meta is not None:
+                    block.metadata.preprocess = preprocess_meta
+                blocks.append(block)
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning(
+                    "VLM JSON parse failed for %s, using raw fallback: %s", file_path, exc
                 )
-            )
-    else:
-        LOGGER.error("VLM analysis call failed for %s: %s", file_path, result.error)
+                metadata = BlockMetadata(image_type=image_type, preprocess=preprocess_meta)
+                blocks.append(
+                    Block(
+                        type=BlockType.TEXT,
+                        content=_json_to_plain_text(result.content),
+                        order=0,
+                        metadata=metadata,
+                        image_path=file_path,
+                    )
+                )
+        else:
+            LOGGER.error("VLM analysis call failed for %s: %s", file_path, result.error)
+    finally:
+        _cleanup_preprocessed_image(file_path, processed_path)
 
     processing = ProcessingInfo(
         parser_model="image_parser_v2.0",
@@ -203,7 +223,7 @@ def parse_vlm_output(raw_response: str, image_type: ImageType) -> VLMParsedOutpu
 
     if image_type == ImageType.CODE_SCREENSHOT:
         return CodeVLMOutput.model_validate(payload_dict)
-    if image_type == ImageType.DIAGRAM:
+    if image_type in {ImageType.DIAGRAM, ImageType.CHART}:
         return DiagramVLMOutput.model_validate(payload_dict)
     return TextVLMOutput.model_validate(payload_dict)
 
@@ -321,6 +341,21 @@ def _safe_document_id(file_path: str) -> str:
         return generate_document_id(file_path)
     except Exception:  # noqa: BLE001
         return hashlib.sha256(file_path.encode("utf-8")).hexdigest()[:16]
+
+
+def _cleanup_preprocessed_image(original_path: str, processed_path: str) -> None:
+    """Delete transient preprocessed images created next to temporary upload files."""
+    if processed_path == original_path:
+        return
+    processed = Path(processed_path)
+    if "_preprocessed" not in processed.stem:
+        return
+    try:
+        os.unlink(processed)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        LOGGER.warning("Failed to remove transient preprocessed image %s: %s", processed_path, exc)
 
 
 __all__ = ["classify_image", "map_vlm_output_to_block", "parse_image", "parse_vlm_output"]

@@ -1,0 +1,15 @@
+image_id,image_path,image_type,source_kind,source_doc,filename
+manual__bash_pipeline,/private/tmp/catchup-cu16-active/data/golden_resize/code_screenshot/manual__bash_pipeline.png,code_screenshot,manual_capture,,manual__bash_pipeline.png
+manual__python_loop,/private/tmp/catchup-cu16-active/data/golden_resize/code_screenshot/manual__python_loop.png,code_screenshot,manual_capture,,manual__python_loop.png
+manual__sql_join,/private/tmp/catchup-cu16-active/data/golden_resize/code_screenshot/manual__sql_join.png,code_screenshot,manual_capture,,manual__sql_join.png
+pdf_auto__d2l_ch4__p57__o22,/private/tmp/catchup-cu16-active/data/golden_resize/diagram/pdf_auto__d2l_ch4__p57__o22.png,diagram,pdf_auto,d2l_ch4,pdf_auto__d2l_ch4__p57__o22.png
+pdf_auto__deep_learning_ch3__p31__o17,/private/tmp/catchup-cu16-active/data/golden_resize/diagram/pdf_auto__deep_learning_ch3__p31__o17.png,diagram,pdf_auto,deep_learning_ch3,pdf_auto__deep_learning_ch3__p31__o17.png
+pdf_auto__deep_learning_ch3__p44__o30,/private/tmp/catchup-cu16-active/data/golden_resize/diagram/pdf_auto__deep_learning_ch3__p44__o30.png,diagram,pdf_auto,deep_learning_ch3,pdf_auto__deep_learning_ch3__p44__o30.png
+pdf_auto__deep_learning_ch3__p48__o31,/private/tmp/catchup-cu16-active/data/golden_resize/diagram/pdf_auto__deep_learning_ch3__p48__o31.png,diagram,pdf_auto,deep_learning_ch3,pdf_auto__deep_learning_ch3__p48__o31.png
+pdf_auto__little_book_ch3__p16__o2,/private/tmp/catchup-cu16-active/data/golden_resize/diagram/pdf_auto__little_book_ch3__p16__o2.png,diagram,pdf_auto,little_book_ch3,pdf_auto__little_book_ch3__p16__o2.png
+manual__attention_page,/private/tmp/catchup-cu16-active/data/golden_resize/text_capture/manual__attention_page.png,text_capture,manual_capture,,manual__attention_page.png
+manual__cnn_notes,/private/tmp/catchup-cu16-active/data/golden_resize/text_capture/manual__cnn_notes.png,text_capture,manual_capture,,manual__cnn_notes.png
+manual__rag_slide,/private/tmp/catchup-cu16-active/data/golden_resize/text_capture/manual__rag_slide.png,text_capture,manual_capture,,manual__rag_slide.png
+pdf_auto__llm_app_ch3__p1__o5,/private/tmp/catchup-cu16-active/data/golden_resize/other/pdf_auto__llm_app_ch3__p1__o5.png,other,pdf_auto,llm_app_ch3,pdf_auto__llm_app_ch3__p1__o5.png
+pdf_auto__llm_app_ch3__p24__o16,/private/tmp/catchup-cu16-active/data/golden_resize/other/pdf_auto__llm_app_ch3__p24__o16.png,other,pdf_auto,llm_app_ch3,pdf_auto__llm_app_ch3__p24__o16.png
+pdf_auto__llm_app_ch3__p65__o40,/private/tmp/catchup-cu16-active/data/golden_resize/other/pdf_auto__llm_app_ch3__p65__o40.png,other,pdf_auto,llm_app_ch3,pdf_auto__llm_app_ch3__p65__o40.png
