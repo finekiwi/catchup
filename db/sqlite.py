@@ -74,8 +74,8 @@ def _initialize_schema(connection: sqlite3.Connection) -> None:
         """
         CREATE TABLE IF NOT EXISTS concept_links (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            concept_id_a INTEGER NOT NULL,
-            concept_id_b INTEGER NOT NULL,
+            concept_id_a INTEGER NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+            concept_id_b INTEGER NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
             confidence_score REAL NOT NULL,
             relationship_type TEXT NOT NULL DEFAULT '',
             relationship_desc TEXT NOT NULL DEFAULT '',

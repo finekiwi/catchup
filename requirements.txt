@@ -1,3 +1,6 @@
+# Streamlit Cloud / HuggingFace Spaces deploy artifact.
+# Canonical dependency source is pyproject.toml (managed via uv).
+# This file is NOT used for local development or Docker builds.
 chromadb>=1.5.2
 docling>=2.76.0
 langchain>=1.2.10

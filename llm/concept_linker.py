@@ -22,7 +22,7 @@ from prompts.concept_linking import (
     get_label_prompt,
     get_normalize_prompt,
 )
-from rag.qa_chain import _get_openai_embedding
+from utils.embed import get_openai_embedding as _get_openai_embedding
 from utils.logging import log_api_call
 
 load_dotenv()
@@ -330,11 +330,12 @@ def find_similar_concepts(
             continue
 
         try:
-            # Query with enough candidates to filter
+            # Exclude same-document concepts at query time so self-hits never consume result slots
             n_results = min(10, count)
             raw = collection.query(
                 query_embeddings=[vector],
                 n_results=n_results,
+                where={"document_id": {"$ne": document_id}},
                 include=["metadatas", "distances"],
             )
         except Exception:
@@ -345,18 +346,13 @@ def find_similar_concepts(
         hit_distances: list[float] = (raw.get("distances") or [[]])[0]
 
         for meta, distance in zip(hit_metas, hit_distances):
-            # ChromaDB returns L2 distance by default; convert to cosine similarity
-            # For normalized vectors: cosine_sim = 1 - (distance / 2)
-            # However, ChromaDB with cosine space returns distance = 1 - cosine_sim
+            # ChromaDB with cosine space returns distance = 1 - cosine_sim
             similarity = 1.0 - distance
 
             if similarity < threshold:
                 continue
 
-            # Exclude same-document hits
             hit_doc_id = meta.get("document_id", "")
-            if hit_doc_id == document_id:
-                continue
 
             # Resolve the SQLite concept_id from the ChromaDB hit
             # The concept_id is NOT stored in ChromaDB metadata; we look it up from SQLite
@@ -506,8 +502,8 @@ def link_concepts(document_id: str, key_concepts: list[str], model: str, thresho
     """Main entry point: run full concept linking pipeline for a newly indexed document.
 
     Pipeline:
-    1. Delete existing concept data for idempotency.
-    2. Normalize raw concept names via LLM (canonical + aliases + definition).
+    1. Normalize raw concept names via LLM (canonical + aliases + definition).
+    2. Delete existing concept data for idempotency (only after normalization succeeds).
     3. Embed and store concepts in ChromaDB catchup_concepts collection.
     4. Save normalized concepts to SQLite (get integer IDs).
     5. Tier 1: exact canonical match search.
@@ -529,10 +525,7 @@ def link_concepts(document_id: str, key_concepts: list[str], model: str, thresho
     if not key_concepts:
         return []
 
-    # Step 1: idempotent delete
-    delete_document_concepts(document_id)
-
-    # Step 2: normalize
+    # Step 1: normalize (fallible — do NOT delete existing data until this succeeds)
     normalized = normalize_concepts(key_concepts, model)
     if not normalized:
         LOGGER.warning("link_concepts: normalization returned empty for document_id=%s", document_id)
@@ -548,6 +541,9 @@ def link_concepts(document_id: str, key_concepts: list[str], model: str, thresho
         }
         for c in normalized
     ]
+
+    # Step 2: idempotent delete — only after normalization succeeds to avoid data loss on API failure
+    delete_document_concepts(document_id)
 
     # Step 3: embed and store in ChromaDB (before SQLite so we have embed text available)
     embed_and_store_concepts(document_id, concept_rows)
