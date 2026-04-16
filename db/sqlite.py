@@ -57,6 +57,34 @@ def _initialize_schema(connection: sqlite3.Connection) -> None:
         )
         """
     )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS concepts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id TEXT NOT NULL,
+            concept_name TEXT NOT NULL,
+            canonical_name TEXT NOT NULL,
+            aliases TEXT NOT NULL DEFAULT '[]',
+            definition TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            UNIQUE(document_id, concept_name)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS concept_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            concept_id_a INTEGER NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+            concept_id_b INTEGER NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+            confidence_score REAL NOT NULL,
+            relationship_type TEXT NOT NULL DEFAULT '',
+            relationship_desc TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            UNIQUE(concept_id_a, concept_id_b)
+        )
+        """
+    )
     _ensure_column(
         connection,
         table="documents",
@@ -428,6 +456,311 @@ def delete_note(document_id: str, vlm_model: str, llm_model: str) -> None:
         connection.commit()
     except sqlite3.Error:
         LOGGER.exception("Failed to delete note for document_id=%s", document_id)
+    finally:
+        connection.close()
+
+
+# ---------------------------------------------------------------------------
+# Concepts CRUD
+# ---------------------------------------------------------------------------
+
+
+def save_concepts(document_id: str, concepts: list[dict]) -> list[int]:
+    """Upsert concepts for a document and return their IDs.
+
+    Each concept dict must contain: concept_name, canonical_name, aliases (list), definition.
+    Uses INSERT OR REPLACE semantics on (document_id, concept_name) UNIQUE constraint.
+
+    Args:
+        document_id: Document.id owning these concepts.
+        concepts: List of concept dicts with required keys.
+
+    Returns:
+        List of inserted/replaced row IDs in insertion order.
+    """
+    connection = _connect()
+    if connection is None:
+        return []
+
+    now = datetime.now(timezone.utc).isoformat()
+    ids: list[int] = []
+    try:
+        for concept in concepts:
+            aliases_json = json.dumps(concept.get("aliases") or [], ensure_ascii=False)
+            cursor = connection.execute(
+                """
+                INSERT OR REPLACE INTO concepts
+                    (document_id, concept_name, canonical_name, aliases, definition, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    document_id,
+                    concept["concept_name"],
+                    concept["canonical_name"],
+                    aliases_json,
+                    concept.get("definition") or "",
+                    now,
+                ),
+            )
+            ids.append(cursor.lastrowid)
+        connection.commit()
+    except sqlite3.Error:
+        LOGGER.exception("Failed to save concepts for document_id=%s", document_id)
+    finally:
+        connection.close()
+
+    return ids
+
+
+def _parse_concept_row(row: sqlite3.Row) -> dict:
+    """Convert a concepts table row into a plain dict with parsed aliases."""
+    aliases_raw = row["aliases"] or "[]"
+    try:
+        aliases = json.loads(aliases_raw)
+    except json.JSONDecodeError:
+        aliases = []
+    return {
+        "id": row["id"],
+        "document_id": row["document_id"],
+        "concept_name": row["concept_name"],
+        "canonical_name": row["canonical_name"],
+        "aliases": aliases,
+        "definition": row["definition"],
+        "created_at": row["created_at"],
+    }
+
+
+def get_concepts_for_document(document_id: str) -> list[dict]:
+    """Return all concepts belonging to a document.
+
+    Args:
+        document_id: Document.id to query.
+
+    Returns:
+        List of concept dicts with id, document_id, concept_name, canonical_name,
+        aliases (parsed list), definition, created_at.
+    """
+    connection = _connect()
+    if connection is None:
+        return []
+
+    try:
+        rows = connection.execute(
+            "SELECT id, document_id, concept_name, canonical_name, aliases, definition, created_at "
+            "FROM concepts WHERE document_id = ?",
+            (document_id,),
+        ).fetchall()
+        return [_parse_concept_row(row) for row in rows]
+    except sqlite3.Error:
+        LOGGER.exception("Failed to get concepts for document_id=%s", document_id)
+        return []
+    finally:
+        connection.close()
+
+
+def get_all_concepts(exclude_document_id: str | None = None) -> list[dict]:
+    """Return all concepts, optionally excluding one document's concepts.
+
+    Args:
+        exclude_document_id: If provided, skip concepts belonging to this document.
+
+    Returns:
+        List of concept dicts with id, document_id, concept_name, canonical_name,
+        aliases (parsed list), definition, created_at.
+    """
+    connection = _connect()
+    if connection is None:
+        return []
+
+    try:
+        if exclude_document_id is not None:
+            rows = connection.execute(
+                "SELECT id, document_id, concept_name, canonical_name, aliases, definition, created_at "
+                "FROM concepts WHERE document_id != ?",
+                (exclude_document_id,),
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                "SELECT id, document_id, concept_name, canonical_name, aliases, definition, created_at "
+                "FROM concepts"
+            ).fetchall()
+        return [_parse_concept_row(row) for row in rows]
+    except sqlite3.Error:
+        LOGGER.exception("Failed to get all concepts (exclude=%s)", exclude_document_id)
+        return []
+    finally:
+        connection.close()
+
+
+def save_concept_links(links: list[dict]) -> None:
+    """Upsert concept links with normalized pair ordering.
+
+    Pair ordering is normalized: always stores (min(a,b), max(a,b)) to ensure
+    uniqueness regardless of which side is "source" vs "target".
+
+    Each link dict must contain: concept_id_a, concept_id_b, confidence_score,
+    relationship_type, relationship_desc.
+
+    Args:
+        links: List of link dicts to upsert.
+    """
+    connection = _connect()
+    if connection is None:
+        return
+
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        for link in links:
+            id_a = link["concept_id_a"]
+            id_b = link["concept_id_b"]
+            # Normalize pair so (min, max) is always stored
+            low, high = min(id_a, id_b), max(id_a, id_b)
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO concept_links
+                    (concept_id_a, concept_id_b, confidence_score, relationship_type, relationship_desc, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    low,
+                    high,
+                    link["confidence_score"],
+                    link.get("relationship_type") or "",
+                    link.get("relationship_desc") or "",
+                    now,
+                ),
+            )
+        connection.commit()
+    except sqlite3.Error:
+        LOGGER.exception("Failed to save concept links")
+    finally:
+        connection.close()
+
+
+def get_concept_links_for_document(document_id: str) -> list[dict]:
+    """Return concept links where either endpoint belongs to document_id.
+
+    JOINs with documents table to resolve target document title. For each link,
+    determines which side is the "source" (belongs to document_id) and which is
+    the "target" (belongs to another document).
+
+    Args:
+        document_id: Document.id whose concept links to retrieve.
+
+    Returns:
+        List of link dicts with keys: concept_id_a, concept_id_b, confidence_score,
+        relationship_type, relationship_desc, source_concept_name, source_canonical_name,
+        target_concept_name, target_canonical_name, target_document_id, target_document_title.
+    """
+    connection = _connect()
+    if connection is None:
+        return []
+
+    try:
+        rows = connection.execute(
+            """
+            SELECT
+                cl.concept_id_a,
+                cl.concept_id_b,
+                cl.confidence_score,
+                cl.relationship_type,
+                cl.relationship_desc,
+                ca.concept_name   AS concept_name_a,
+                ca.canonical_name AS canonical_name_a,
+                ca.document_id    AS document_id_a,
+                cb.concept_name   AS concept_name_b,
+                cb.canonical_name AS canonical_name_b,
+                cb.document_id    AS document_id_b,
+                da.source         AS source_a,
+                db.source         AS source_b
+            FROM concept_links cl
+            JOIN concepts ca ON ca.id = cl.concept_id_a
+            JOIN concepts cb ON cb.id = cl.concept_id_b
+            LEFT JOIN documents da ON da.id = ca.document_id
+            LEFT JOIN documents db ON db.id = cb.document_id
+            WHERE ca.document_id = ? OR cb.document_id = ?
+            """,
+            (document_id, document_id),
+        ).fetchall()
+
+        results: list[dict] = []
+        for row in rows:
+            doc_id_a = row["document_id_a"]
+            doc_id_b = row["document_id_b"]
+
+            # Determine which side is source (current doc) vs target (other doc)
+            if doc_id_a == document_id:
+                source_concept_name = row["concept_name_a"]
+                source_canonical = row["canonical_name_a"]
+                target_concept_name = row["concept_name_b"]
+                target_canonical = row["canonical_name_b"]
+                target_doc_id = doc_id_b
+                target_doc_title = row["source_b"] or doc_id_b
+            else:
+                source_concept_name = row["concept_name_b"]
+                source_canonical = row["canonical_name_b"]
+                target_concept_name = row["concept_name_a"]
+                target_canonical = row["canonical_name_a"]
+                target_doc_id = doc_id_a
+                target_doc_title = row["source_a"] or doc_id_a
+
+            results.append(
+                {
+                    "concept_id_a": row["concept_id_a"],
+                    "concept_id_b": row["concept_id_b"],
+                    "confidence_score": row["confidence_score"],
+                    "relationship_type": row["relationship_type"],
+                    "relationship_desc": row["relationship_desc"],
+                    "source_concept_name": source_concept_name,
+                    "source_canonical_name": source_canonical,
+                    "target_concept_name": target_concept_name,
+                    "target_canonical_name": target_canonical,
+                    "target_document_id": target_doc_id,
+                    "target_document_title": target_doc_title,
+                }
+            )
+        return results
+    except sqlite3.Error:
+        LOGGER.exception("Failed to get concept links for document_id=%s", document_id)
+        return []
+    finally:
+        connection.close()
+
+
+def delete_concepts_for_document(document_id: str) -> None:
+    """Delete all concept links and concepts for a document (cascading).
+
+    Deletes links first (referential integrity), then the concepts themselves.
+
+    Args:
+        document_id: Document.id whose concepts and links to remove.
+    """
+    connection = _connect()
+    if connection is None:
+        return
+
+    try:
+        # Collect concept IDs belonging to this document
+        rows = connection.execute(
+            "SELECT id FROM concepts WHERE document_id = ?", (document_id,)
+        ).fetchall()
+        concept_ids = [row["id"] for row in rows]
+
+        if concept_ids:
+            placeholders = ",".join("?" * len(concept_ids))
+            connection.execute(
+                f"DELETE FROM concept_links WHERE concept_id_a IN ({placeholders}) "
+                f"OR concept_id_b IN ({placeholders})",
+                concept_ids + concept_ids,
+            )
+            connection.execute(
+                f"DELETE FROM concepts WHERE id IN ({placeholders})",
+                concept_ids,
+            )
+
+        connection.commit()
+    except sqlite3.Error:
+        LOGGER.exception("Failed to delete concepts for document_id=%s", document_id)
     finally:
         connection.close()
 

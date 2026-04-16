@@ -258,3 +258,78 @@ if st.button("캐시 초기화"):
 3. PDF figure 추출 + 학습노트 포함 (Docling PictureItem → `Block.image_path` → 노트 렌더링)
 4. ipynb cell output 이미지 추출 (base64 → 파일 저장 → `Block.image_path` → 노트 렌더링)
 5. 다른 문서 타입(PDF, 이미지)으로 코드 스니펫 포함 결과 추가 검증
+
+---
+
+## Issue 13 — Review follow-up: CU-16 persistence / compatibility / chart branch
+
+**Status:** Fixed (`261d82b`)
+
+**Symptom**
+- adaptive resize metadata가 블록에 붙어도 저장/복원 후 사라짐
+- 과거 note row가 version marker 부재로 읽히지 않음
+- 동일 문서를 다시 저장하면 `created_at`이 현재 시각으로 바뀜
+- chart용 resize policy가 있어도 실제 classify 결과에서는 branch가 죽어 있음
+- `*_preprocessed.*` 임시 파일이 업로드/임시 경로에 남음
+
+**Root Cause**
+1. `BlockMetadata`에 `preprocess` 필드가 없어 JSON round-trip에서 메타데이터가 탈락.
+2. `db/sqlite.py`가 `_note_result_version == "v2"`만 허용해 legacy row를 전부 배제.
+3. `save_document()`가 upsert 중 original `created_at` semantic을 보존하지 않음.
+4. `prompts/vlm_classify.py`는 `chart`를 출력하지 않는데 resize policy는 `ImageType.CHART`를 기대.
+5. `image_parser.py`가 preprocess 산출물 cleanup을 하지 않음.
+
+**Fix**
+- `models/document.py`: `BlockMetadata.preprocess` 추가
+- `db/sqlite.py`:
+  - `_deserialize_note_result()`로 note restore 공통화
+  - legacy row 허용, unknown future version만 skip
+  - `save_document()`에서 `doc.created_at` 그대로 저장, upsert 시 `created_at` 미갱신
+- `prompts/vlm_classify.py`: `v1.4.0`, `"chart"` output class 추가, diagram/chart 정의 분리
+- `parsers/image_parser.py`:
+  - chart → `ImageType.CHART`
+  - chart는 diagram parser path 사용
+  - `block.metadata.preprocess` 저장
+  - `_cleanup_preprocessed_image()`로 transient file 삭제
+- `prompts/VERSION_LOG.md`: `vlm_classify` v1.4.0 기록 추가
+
+**Test Coverage**
+- `tests/test_db.py`: `created_at` preservation, legacy note acceptance, future-version skip
+- `tests/test_image_parser.py`: preprocess serialization, transient file cleanup, chart path
+- `tests/test_prompt_contracts.py`: classify prompt chart contract
+
+**Lesson**
+- persistence fix는 schema, storage, restore path를 같이 바꿔야 완결된다.
+- strict version gating은 migration 초기에는 안전해 보여도 legacy usability를 깨기 쉽다.
+- enum/prompt/policy가 따로 놀면 production dead branch가 생긴다.
+
+---
+
+## Issue 14 — 라이브러리에서 이미지 문서 재열기 시 미리보기 깨짐
+
+**Status:** Fixed
+
+**Symptom**
+- 이미지 파일 업로드 후 분석 완료 → 세션 소멸/페이지 새로고침 후 라이브러리에서 재열기
+- `"이미지 미리보기는 원본 파일이 필요합니다"` 안내만 노출, 실제 이미지 미표시
+- 전체화면(lightbox) 기능도 동작하지 않음
+
+**Root Cause**
+- `save_document()` / `save_note()`는 메타데이터만 SQLite 저장, 이미지 바이트/경로 미저장
+- Streamlit `uploaded_file`은 세션 기간에만 유효 → 세션 소멸 시 바이트 접근 불가
+- 라이브러리 모드에서 `is_image=True` 문서를 열면 `uploaded_file`이 없어 preview/lightbox 복원 불가
+
+**Fix**
+- `ui/demo.py`
+  - `_image_preview_dir()`: `CATCHUP_IMAGE_PREVIEW_DIR` 환경변수 or 기본값 `data/image_uploads`
+  - `_persist_uploaded_image(file_hash, suffix, file_bytes)`: `file_hash` 기반 디스크 저장
+  - `_load_persisted_image(file_hash)`: 저장된 이미지 로드
+  - 이미지 분석 완료 시 원본 파일을 `file_hash` 기준으로 `data/image_uploads/`에 저장
+  - 라이브러리 모드에서 `is_image=True`면 persisted preview 복원
+  - persisted file 없을 때만 fallback 안내 노출
+- `tests/test_ui.py`: preview 저장/복원 테스트, temp dir 격리
+
+**Takeaway**
+- `uploaded_file`에 의존하는 렌더링 로직은 세션 소멸을 반드시 가정할 것
+- 이미지 바이트가 필요한 기능은 업로드 직후 디스크에 영속 저장 필수
+- `file_hash`(SHA-256)를 파일명 기준으로 사용하면 동일 파일 중복 저장 방지

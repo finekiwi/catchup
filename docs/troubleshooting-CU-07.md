@@ -339,3 +339,99 @@ secondaryBackgroundColor = "#FFF7ED"  # 연한 주황 → 빨강 primary와 조�
 | 10 | Gemini 모델명 404 오류 | `vlm/client.py`, `llm/note_generator.py` | — | Fixed |
 | 11 | ipynb 코드 블록 → note_markdown 복사 + JSON parse fail | `llm/note_generator.py` | — | Fixed |
 | 12 | 데모 UI 색상 테마 불일치 (보라/파랑 잔존) | `ui/demo.py`, `.streamlit/config.toml` | — | Fixed |
+
+---
+
+## Issue #13: Review follow-up — CU-16 persistence / compatibility / chart branch
+
+**Status**: ✅ Fixed (`261d82b`)
+
+**Symptom**:
+- adaptive preprocessing metadata가 런타임에는 붙지만 저장 후 다시 불러오면 사라짐
+- 기존 note row가 `_note_result_version`이 없다는 이유로 라이브러리에서 읽히지 않음
+- 문서를 다시 저장할 때 original `created_at`이 현재 시각으로 덮여 library ordering이 흔들림
+- resize policy에 `CHART`용 1024px branch가 정의돼 있어도 실제 분류 결과에서는 도달하지 못함
+- 이미지 파싱 중 생성된 `*_preprocessed.*` 파일이 temp/upload 경로에 남음
+
+**Root Cause**:
+1. `models/document.py`의 `BlockMetadata`에 `preprocess` 필드가 없어 `doc.model_dump()`/`model_validate()` round-trip 시 메타데이터가 증발함.
+2. `db/sqlite.py`가 `_note_result_version == "v2"`만 허용해서 legacy saved note를 전부 버림.
+3. `save_document()`가 original `created_at` 의미를 보존하지 않아 재저장 시 library 정렬 기준이 흔들림.
+4. `prompts/vlm_classify.py`는 `chart`를 출력하지 않는데 런타임 policy는 `ImageType.CHART`를 기대하고 있었음.
+5. `parsers/image_parser.py`가 preprocess 결과 파일을 만들고도 후처리 cleanup을 하지 않았음.
+
+**Fix**:
+- `models/document.py`
+  - `BlockMetadata.preprocess: Optional[dict[str, Any]]` 추가
+- `db/sqlite.py`
+  - `_deserialize_note_result()` 추가
+  - legacy row (`version` 없음)는 허용
+  - unknown future version만 skip
+  - `save_document()`는 `doc.created_at`을 그대로 저장하고 upsert 시 `created_at`을 덮어쓰지 않음
+- `prompts/vlm_classify.py`
+  - `PROMPT_VERSION` `v1.4.0`
+  - output enum에 `"chart"` 추가
+  - diagram vs chart definition 분리
+- `parsers/image_parser.py`
+  - chart classification → `ImageType.CHART`
+  - chart는 diagram parser branch 사용
+  - `_cleanup_preprocessed_image()` 추가로 transient sibling 파일 제거
+  - `block.metadata.preprocess` 저장
+- `prompts/VERSION_LOG.md`
+  - `vlm_classify` v1.4.0 entry 추가
+
+**Regression Tests**:
+- `tests/test_db.py`
+  - duplicate upsert 후 `created_at` 보존
+  - legacy note row read 허용
+  - future version row만 skip
+- `tests/test_image_parser.py`
+  - `preprocess` metadata JSON serialization 확인
+  - transient preprocessed file cleanup 확인
+  - `chart` classification path 확인
+- `tests/test_prompt_contracts.py`
+  - classify prompt에 `chart`/`quantitative visualization` 포함 확인
+
+**Takeaway**:
+- 런타임에만 존재하는 metadata는 반드시 schema field까지 같이 추가해야 persistence에서 안 사라진다.
+- version gate는 migration safety와 backward compatibility를 같이 봐야 한다. `unknown future`만 막고 `legacy known-shape`는 살리는 편이 안전했다.
+- policy enum과 classifier prompt가 분리되어 있으면 dead branch가 생긴다. 분류 가능성까지 함께 검증해야 한다.
+
+---
+
+## Issue 14 — 라이브러리 로드 시 concept linking이 표시되지 않음
+
+**Status:** Fixed (`ui/demo.py`)
+Branch: `feature/CU-17-concept-linking`
+
+**Symptom**
+노트가 있는 문서를 라이브러리에서 로드해도 "연결된 개념" 배너가 나타나지 않음. DB에 concept links가 0개.
+
+**Root Cause**
+두 가지가 겹침:
+
+1. **라이브러리 모드 스킵**: concept linking은 최초 RAG 인덱싱 직후에만 실행되는데, 인덱싱 블록이 `not _lib_mode` 조건으로 가드되어 있음. 라이브러리 로드 시에는 인덱싱 전체가 스킵되므로 concept linking도 실행 안 됨.
+2. **선착순 링킹 문제**: doc A를 먼저 분석할 때 다른 문서에 개념이 없으면 링크가 생성되지 않음. 나중에 doc B를 분석해도 doc A의 링크는 소급 생성되지 않음 — B가 A와 링크되지만, A는 B의 개념 추출 전에 이미 링킹을 마친 상태.
+
+실제로 `deep_learning_ch3.pdf`는 개념 10개가 DB에 있었지만 concept links는 0개였고, `Logistic_Regression...`는 개념 자체가 0개였음.
+
+**Fix**
+`ui/demo.py`에 lazy concept linking 블록 추가. 기존 인덱싱 블록과 별개로, 세션당 한 번 실행되며:
+
+- DB에 해당 문서의 개념이 없을 때만 `link_concepts()` 호출
+- `_lib_mode` 여부와 무관하게 동작
+- `_cl_triggered_{doc.id}` 키로 중복 실행 방지
+
+```python
+_cl_trigger_key = f"_cl_triggered_{doc.id}"
+if result.get("key_concepts") and not st.session_state.get(_cl_trigger_key):
+    st.session_state[_cl_trigger_key] = True
+    if not _get_doc_concepts(doc.id):
+        _connections = _link_concepts(doc.id, result["key_concepts"], model=llm_model)
+        st.session_state[f"concept_connections_{doc.id}"] = _connections
+        st.rerun()
+```
+
+**Takeaway**:
+- concept linking은 "분석 시점" 기준이 아니라 "렌더링 시점"에 DB 상태를 보고 필요하면 실행하는 lazy 방식이어야 한다.
+- 다문서 링킹 기능은 반드시 소급 적용(retroactive) 가능한 설계가 필요하다. 처음 분석 시 다른 문서가 없었더라도 나중에 링킹이 이루어져야 한다.

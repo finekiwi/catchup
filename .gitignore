@@ -240,3 +240,10 @@ scripts/*
 # macOS
 .DS_Store
 **/.DS_Store
+
+# Binary/media files not needed in repo
+*.pptx
+*.docx
+data/fonts/
+data/golden_resize/
+data/image_uploads/
