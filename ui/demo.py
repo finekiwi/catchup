@@ -77,6 +77,42 @@ def _doc_cache_key(file_hash: str, vlm_model: str) -> str:
     """Return the session cache key for parsed documents."""
     return f"doc_{_ANALYSIS_CACHE_VERSION}_{file_hash}_{vlm_model}"
 
+
+def _image_preview_dir() -> Path:
+    """Return the persistent storage path for original uploaded image files."""
+    return Path(os.getenv("CATCHUP_IMAGE_PREVIEW_DIR", "data/image_uploads"))
+
+
+def _persist_uploaded_image(file_hash: str, suffix: str, file_bytes: bytes) -> Path | None:
+    """Persist the original uploaded image so library restores can show a preview."""
+    normalized_suffix = suffix.lower() or ".png"
+    preview_path = _image_preview_dir() / f"{file_hash}{normalized_suffix}"
+    try:
+        preview_path.parent.mkdir(parents=True, exist_ok=True)
+        preview_path.write_bytes(file_bytes)
+        return preview_path
+    except OSError:
+        LOGGER.warning("Failed to persist uploaded image preview at path=%s", preview_path)
+        return None
+
+
+def _load_persisted_image(file_hash: str) -> tuple[bytes, str] | None:
+    """Load a persisted original image by file hash for library-mode preview restore."""
+    preview_dir = _image_preview_dir()
+    try:
+        candidates = sorted(preview_dir.glob(f"{file_hash}.*"))
+    except OSError:
+        LOGGER.warning("Failed to scan persisted image preview directory path=%s", preview_dir)
+        return None
+    if not candidates:
+        return None
+    preview_path = candidates[0]
+    try:
+        return preview_path.read_bytes(), preview_path.suffix.lower()
+    except OSError:
+        LOGGER.warning("Failed to read persisted image preview path=%s", preview_path)
+        return None
+
 # ---------------------------------------------------------------------------
 # Global CSS — light theme styles for all custom components
 # ---------------------------------------------------------------------------
@@ -766,6 +802,73 @@ def _render_concept_tags(concepts: list[str]) -> str:
         for i, c in enumerate(concepts)
     )
     return f'<div style="margin: 0.4em 0 0.8em;">{tags}</div>'
+
+
+def _render_concept_connections(connections: list[dict]) -> None:
+    """Render concept connection banner below concept tags.
+
+    Uses soft teal palette (background #E0ECE8, accent #3A8A6C).
+    Groups Tier 1 matches by target document with "외 N개" collapse for multiples.
+    Shows confidence percentage for Tier 2 connections.
+
+    Args:
+        connections: List of connection dicts from get_concept_links_for_document().
+    """
+    if not connections:
+        return
+
+    lines: list[str] = []
+
+    # Group Tier 1 (same_concept) by target_document_title for potential collapse
+    tier1: list[dict] = [c for c in connections if c.get("relationship_type") == "same_concept"]
+    tier2: list[dict] = [c for c in connections if c.get("relationship_type") != "same_concept"]
+
+    # Group Tier 1 by target doc
+    from collections import defaultdict as _defaultdict
+
+    t1_by_doc: dict[str, list[dict]] = _defaultdict(list)
+    for conn in tier1:
+        t1_by_doc[conn.get("target_document_title") or conn.get("target_document_id", "?")].append(conn)
+
+    for doc_title, doc_conns in t1_by_doc.items():
+        first = doc_conns[0]
+        src = html.escape(first.get("source_concept_name") or first.get("source_canonical_name") or "")
+        tgt = html.escape(first.get("target_concept_name") or first.get("target_canonical_name") or "")
+        doc = html.escape(doc_title or "?")
+        line = (
+            f'🔗 이 문서의 <strong>{src}</strong>는 <strong>{doc}</strong>의 '
+            f'<strong>{tgt}</strong>와 관련됩니다'
+        )
+        if len(doc_conns) > 1:
+            line += f' <em>(외 {len(doc_conns) - 1}개)</em>'
+        lines.append(f"<div style='margin-bottom:0.35em'>{line}</div>")
+
+    for conn in tier2:
+        src = html.escape(conn.get("source_concept_name") or conn.get("source_canonical_name") or "")
+        tgt = html.escape(conn.get("target_concept_name") or conn.get("target_canonical_name") or "")
+        doc = html.escape(conn.get("target_document_title") or conn.get("target_document_id") or "?")
+        desc = html.escape(conn.get("relationship_desc") or "")
+        score = conn.get("confidence_score") or 0.0
+        confidence_str = f" <span style='color:#5a9e84'>(신뢰도 {int(score * 100)}%)</span>"
+        desc_part = f": <em>{desc}</em>" if desc else ""
+        line = (
+            f'🔗 이 문서의 <strong>{src}</strong>는 <strong>{doc}</strong>의 '
+            f'<strong>{tgt}</strong>와 관련됩니다{desc_part}{confidence_str}'
+        )
+        lines.append(f"<div style='margin-bottom:0.35em'>{line}</div>")
+
+    if not lines:
+        return
+
+    inner = "\n".join(lines)
+    banner_html = (
+        f'<div style="background:#E0ECE8;border-left:4px solid #3A8A6C;'
+        f'border-radius:6px;padding:0.7em 1em;margin:0.6em 0 0.8em;'
+        f'color:#1e4d3a;font-size:0.9em;line-height:1.6">'
+        f"{inner}"
+        f"</div>"
+    )
+    st.markdown(banner_html, unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1915,9 +2018,9 @@ with st.sidebar:
             "LLM 모델 (노트/Q&A)", options=SUPPORTED_LLM_MODELS, index=0
         )
         _LLM_HINTS = {
-            "gpt-4.1-nano": "빠르고 저렴 (기본값)",
+            "gpt-4.1-mini": "고품질 · 중간 비용 (기본값)",
+            "gpt-4.1-nano": "빠르고 저렴",
             "gpt-4o-mini": "균형",
-            "gpt-4.1-mini": "고품질 · 중간 비용",
             "gpt-4o": "최고 품질 · 고비용",
             "gpt-5-nano": "빠르고 저렴",
             "claude-haiku-4-5-20251001": "빠르고 저렴 (Anthropic)",
@@ -2034,6 +2137,13 @@ with st.sidebar:
                     delete_document_index(
                         _ld.id
                     )  # Remove ChromaDB vectors so re-upload re-indexes
+                    try:
+                        from llm.concept_linker import delete_document_concepts as _del_concepts
+
+                        _del_concepts(_ld.id)
+                    except Exception as _dc_exc:
+                        LOGGER.warning("Failed to delete concept data for %s: %s", _ld.id, _dc_exc)
+                    st.session_state.pop(f"concept_connections_{_ld.id}", None)
                     delete_document(_ld.id)
                     st.rerun()
         st.markdown("---")
@@ -2136,6 +2246,18 @@ else:
     st.session_state.setdefault("_pipeline_steps", {})["upload"] = True
     st.markdown(f"**{uploaded_file.name}** ({uploaded_file.size:,} bytes)")
 
+preview_file_name = ""
+preview_file_bytes = b""
+preview_suffix = ""
+preview_cache_key = ""
+
+if _lib_mode and is_image:
+    persisted_preview = _load_persisted_image(file_hash)
+    if persisted_preview is not None:
+        preview_file_bytes, preview_suffix = persisted_preview
+        preview_file_name = doc.source
+        preview_cache_key = cache_key
+
 # ===================================================================
 # ANALYSIS PIPELINE (skipped in library mode)
 # ===================================================================
@@ -2144,6 +2266,10 @@ if not _lib_mode:
     file_hash = hashlib.sha256(file_bytes).hexdigest()
     cache_key = _result_cache_key(file_hash, vlm_model, llm_model)
     doc_cache_key = _doc_cache_key(file_hash, vlm_model)
+    preview_file_name = uploaded_file.name
+    preview_file_bytes = file_bytes
+    preview_suffix = suffix
+    preview_cache_key = cache_key
 
     if not st.button("분석 시작", type="primary", use_container_width=False):
         if cache_key not in st.session_state:
@@ -2233,6 +2359,8 @@ if not _lib_mode:
         st.session_state[f"is_image_{cache_key}"] = is_image
 
         # Persist to SQLite
+        if is_image:
+            _persist_uploaded_image(file_hash, suffix, file_bytes)
         save_document(doc)
         save_note(doc.id, file_hash, result, vlm_model, llm_model, is_image)
 
@@ -2260,9 +2388,16 @@ with col_content:
             st.info(str(err))
 
     if is_image:
-        if _lib_mode:
-            st.info(
-                "이미지 미리보기는 원본 파일이 필요합니다. 파일을 다시 업로드하면 미리보기를 확인할 수 있습니다."
+        if not preview_file_bytes:
+            st.markdown(
+                (
+                    '<div style="background:#FFF5F0;border-left:4px solid #C4553A;'
+                    "padding:0.85rem 1rem;border-radius:12px;color:#C4553A;"
+                    'font-size:0.92rem;margin:0.5rem 0 1rem 0">'
+                    "이미지 미리보기를 복원하지 못했습니다. 파일을 다시 업로드하면 원본 미리보기를 확인할 수 있습니다."
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
             )
         else:
             preview_controls, preview_action = st.columns([3, 1])
@@ -2281,14 +2416,20 @@ with col_content:
                 if st.button(
                     "전체화면 보기",
                     use_container_width=True,
-                    key=f"open_image_lightbox_{cache_key}",
+                    key=f"open_image_lightbox_{preview_cache_key}",
                 ):
                     _show_image_lightbox(
-                        uploaded_file.name, file_bytes, suffix, cache_key
+                        preview_file_name,
+                        preview_file_bytes,
+                        preview_suffix,
+                        preview_cache_key,
                     )
             st.markdown(
                 _render_image_preview_card(
-                    uploaded_file.name, file_bytes, suffix, zoom_percent
+                    preview_file_name,
+                    preview_file_bytes,
+                    preview_suffix,
+                    zoom_percent,
                 ),
                 unsafe_allow_html=True,
             )
@@ -2390,6 +2531,18 @@ with col_content:
         if key_concepts:
             st.markdown("**핵심 개념**")
             st.markdown(_render_concept_tags(key_concepts), unsafe_allow_html=True)
+
+        # ─── Concept connections banner ─────────────────────────────────
+        _conn_key = f"concept_connections_{doc.id}"
+        if not st.session_state.get(_conn_key):
+            try:
+                from db.sqlite import get_concept_links_for_document as _get_links
+
+                st.session_state[_conn_key] = _get_links(doc.id)
+            except Exception as _link_exc:
+                LOGGER.warning("Failed to load concept links: %s", _link_exc)
+                st.session_state[_conn_key] = []
+        _render_concept_connections(st.session_state.get(_conn_key) or [])
 
         _NOTE_PANEL_H = 840
         note_scroll = st.container(height=_NOTE_PANEL_H)
@@ -2514,10 +2667,38 @@ if not st.session_state.get(_indexed_key) and doc.blocks and not _lib_mode:
     try:
         index_document(doc)
         st.session_state[_indexed_key] = True
+        # ─── Concept linking (runs once after initial indexing) ───
+        if result.get("key_concepts"):
+            try:
+                from llm.concept_linker import link_concepts as _link_concepts
+
+                _connections = _link_concepts(doc.id, result["key_concepts"], model=llm_model)
+                st.session_state[f"concept_connections_{doc.id}"] = _connections
+            except Exception as _cl_exc:
+                LOGGER.warning("Concept linking failed: %s", _cl_exc)
         st.rerun()
     except Exception as _idx_exc:
         LOGGER.warning("RAG indexing failed: %s", _idx_exc)
         st.warning(f"RAG 인덱싱 실패: {_idx_exc}")
+
+# ─── Lazy concept linking (covers lib-mode and docs analyzed before this feature) ──
+# Runs once per session per doc. If concepts are missing from DB (e.g. doc was
+# analyzed before concept linking was added, or loaded from library on first open),
+# trigger linking now so cross-document connections are always up-to-date.
+_cl_trigger_key = f"_cl_triggered_{doc.id}"
+if result.get("key_concepts") and not st.session_state.get(_cl_trigger_key):
+    st.session_state[_cl_trigger_key] = True
+    try:
+        from db.sqlite import get_concepts_for_document as _get_doc_concepts
+
+        if not _get_doc_concepts(doc.id):
+            from llm.concept_linker import link_concepts as _link_concepts
+
+            _connections = _link_concepts(doc.id, result["key_concepts"], model=llm_model)
+            st.session_state[f"concept_connections_{doc.id}"] = _connections
+            st.rerun()
+    except Exception as _cl_lazy_exc:
+        LOGGER.warning("Lazy concept linking failed: %s", _cl_lazy_exc)
 
 # ─── Persist dirty note edits to SQLite ──────────────────────────────
 if st.session_state.pop("_note_dirty", False):

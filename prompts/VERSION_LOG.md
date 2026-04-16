@@ -21,6 +21,7 @@
 ## vlm_classify.py
 | Version | Date | Change | Quality Impact |
 |---------|------|--------|----------------|
+| v1.4.0 | 2026-03-17 | Added explicit `chart` output class and separated chart vs diagram definitions. Charts now cover quantitative plots with axes/legends/series; diagrams remain structure/flow-oriented. | Activates CHART classification in production so the 1024px adaptive resize branch is reachable |
 | v1.3.0 | 2026-03-16 | Expanded "other" decorative examples: mascot/cartoon characters, chapter-divider art, title-page artwork, paper-craft decorations, decorative animals — even if they resemble a diagram. | Prevents bee mascots / decorative chapter art from leaking as diagram or text_capture |
 | v1.2.0 | 2026-03-16 | Added self-check heuristic ("Would a student learn something from this alone?"). Added exhaustive "other" examples: publisher logos by example (O'Reilly/Hanbit/Packt), book title images (even if technical term in title), chapter divider pages. Clarified text_capture requires "instructional content, not just a title". | Catches title-only images like "Deep Learning from Scratch" text art that v1.1.0 still leaked |
 | v1.1.0 | 2026-03-16 | Rewrote definitions to explicitly exclude non-educational content. Added CRITICAL rule: book cover, title page, publisher logo, author photo, decorative illustration → "other" even if text is present. Expanded "diagram" to include graphs/charts with axes, neural network structures. "text_capture" now limited to instructional content only. | Book covers / logos / decorative images that leaked as text_capture or diagram now correctly classified as other |
@@ -78,6 +79,11 @@
 | v1.4.0 | 2026-03-13 | Update note-modification response: redirect user to '✏️ 노트 수정' tab instead of edit mode toggle, reflecting new CU-11 note editor UI. | Aligns prompt with new UI affordance |
 | v1.5.0 | 2026-03-14 | Add follow-up suggestion block (---SUGGESTIONS---/---END--- delimiters) appended after genuine document answers. UI parses and renders as clickable buttons (NotebookLM-style). Skip for note-mod redirects, emotional responses, and "not found" fallbacks. | Improves discovery of follow-on questions; no impact on main answer quality |
 | v1.5.1 | 2026-03-15 | Add indirect-evidence rule: if context touches topic implicitly (e.g. explains life without X), synthesize answer instead of falling back. Fallback reserved for genuinely unrelated context only. | Fixes false "찾을 수 없습니다" on implicit/indirect evidence blocks |
+
+## concept_linking.py
+| Version | Date | Change | Quality Impact |
+|---------|------|--------|----------------|
+| v1.0.0 | 2026-03-17 | Initial prompts for CU-17 concept linking. CANONICAL_NORMALIZE_PROMPT: batch-normalizes raw concept names into canonical EN + KO aliases + one-line KO definition. RELATIONSHIP_LABEL_PROMPT: classifies semantic relationship between two concepts as implements/extends/prerequisite/application or null. | Enables cross-document concept linking with precision-first approach (null → drop pair) |
 
 ## query_rewrite.py
 | Version | Date | Change | Quality Impact |

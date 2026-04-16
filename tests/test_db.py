@@ -95,6 +95,7 @@ def test_sqlite_upsert_on_duplicate_document_id(tmp_path, monkeypatch) -> None:
     assert fetched.source == "second.pdf"
     assert fetched.status == ProcessingStatus.CONCEPTS_EXTRACTED
     assert fetched.metadata.title == "Updated Title"
+    assert fetched.created_at == datetime(2026, 3, 3, tzinfo=timezone.utc)
     assert len(fetched.blocks) == 1
     assert fetched.blocks[0].image_path == "data/figures/duplicate-doc/1.png"
     assert len(sqlite_db.list_documents()) == 1
@@ -180,6 +181,80 @@ def test_notes_delete(tmp_path, monkeypatch) -> None:
 
     sqlite_db.delete_note("doc-1", "vlm", "llm")
     assert sqlite_db.get_note("doc-1", "vlm", "llm") is None
+
+
+def test_get_note_accepts_legacy_rows_without_version_key(tmp_path, monkeypatch) -> None:
+    """Legacy note rows without a version marker should remain readable."""
+    monkeypatch.setenv("CATCHUP_SQLITE_PATH", str(tmp_path / "test.db"))
+
+    connection = sqlite_db._connect()
+    assert connection is not None
+    connection.execute(
+        """
+        INSERT INTO notes (document_id, file_hash, vlm_model, llm_model, result_json, is_image, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "doc-legacy",
+            "legacy-hash",
+            "vlm",
+            "llm",
+            '{"title": "Legacy", "note_markdown": "## Legacy"}',
+            0,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    fetched = sqlite_db.get_note("doc-legacy", "vlm", "llm")
+    assert fetched is not None
+    assert fetched["result"]["title"] == "Legacy"
+
+
+def test_list_notes_skips_only_unknown_future_versions(tmp_path, monkeypatch) -> None:
+    """Future-version rows should be skipped without invalidating legacy/current rows."""
+    monkeypatch.setenv("CATCHUP_SQLITE_PATH", str(tmp_path / "test.db"))
+
+    sqlite_db.save_note("doc-1", "current-hash", {"title": "Current"}, "vlm1", "llm1")
+    connection = sqlite_db._connect()
+    assert connection is not None
+    connection.execute(
+        """
+        INSERT INTO notes (document_id, file_hash, vlm_model, llm_model, result_json, is_image, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "doc-1",
+            "legacy-hash",
+            "vlm2",
+            "llm2",
+            '{"title": "Legacy"}',
+            0,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+    connection.execute(
+        """
+        INSERT INTO notes (document_id, file_hash, vlm_model, llm_model, result_json, is_image, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "doc-1",
+            "future-hash",
+            "vlm3",
+            "llm3",
+            '{"title": "Future", "_note_result_version": "v999"}',
+            0,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    notes = sqlite_db.list_notes_for_document("doc-1")
+    titles = {row["result"]["title"] for row in notes}
+    assert titles == {"Current", "Legacy"}
 
 
 class _FakeCollection:
@@ -286,3 +361,90 @@ def test_chroma_store_and_search(monkeypatch) -> None:
     assert results[1]["id"] == "doc-1:1"
     assert results[1]["metadata"]["doc_id"] == "doc-1"
     assert results[1]["metadata"]["type"] == BlockType.TEXT.value
+
+
+# ---------------------------------------------------------------------------
+# Concepts CRUD tests (CU-17)
+# ---------------------------------------------------------------------------
+
+
+def test_save_get_concepts_roundtrip(tmp_path, monkeypatch) -> None:
+    """save_concepts → get_concepts_for_document should preserve all fields."""
+    monkeypatch.setenv("CATCHUP_SQLITE_PATH", str(tmp_path / "test.db"))
+
+    concepts = [
+        {"concept_name": "역전파", "canonical_name": "backpropagation", "aliases": ["backprop", "역전파"], "definition": "가중치 업데이트 알고리즘"},
+        {"concept_name": "활성화 함수", "canonical_name": "activation function", "aliases": [], "definition": "비선형 변환"},
+    ]
+    ids = sqlite_db.save_concepts("doc-1", concepts)
+    assert len(ids) == 2
+    assert all(isinstance(i, int) for i in ids)
+
+    fetched = sqlite_db.get_concepts_for_document("doc-1")
+    assert len(fetched) == 2
+
+    bp = next(c for c in fetched if c["canonical_name"] == "backpropagation")
+    assert bp["document_id"] == "doc-1"
+    assert bp["concept_name"] == "역전파"
+    assert "backprop" in bp["aliases"]
+    assert bp["definition"] == "가중치 업데이트 알고리즘"
+
+
+def test_concept_links_join(tmp_path, monkeypatch) -> None:
+    """save_concept_links → get_concept_links_for_document should return correct source/target."""
+    monkeypatch.setenv("CATCHUP_SQLITE_PATH", str(tmp_path / "test.db"))
+
+    # Create two documents in SQLite so JOIN with documents table works
+    doc_a = _build_document("doc-a", "lecture_a.pdf")
+    doc_b = _build_document("doc-b", "lecture_b.pdf")
+    sqlite_db.save_document(doc_a)
+    sqlite_db.save_document(doc_b)
+
+    ids_a = sqlite_db.save_concepts("doc-a", [{"concept_name": "relu", "canonical_name": "relu", "aliases": [], "definition": "활성화 함수"}])
+    ids_b = sqlite_db.save_concepts("doc-b", [{"concept_name": "activation", "canonical_name": "relu", "aliases": ["relu"], "definition": "비선형 함수"}])
+
+    sqlite_db.save_concept_links([
+        {
+            "concept_id_a": ids_a[0],
+            "concept_id_b": ids_b[0],
+            "confidence_score": 1.0,
+            "relationship_type": "same_concept",
+            "relationship_desc": "",
+        }
+    ])
+
+    links_for_a = sqlite_db.get_concept_links_for_document("doc-a")
+    assert len(links_for_a) == 1
+    link = links_for_a[0]
+    assert link["source_canonical_name"] == "relu"
+    assert link["target_document_id"] == "doc-b"
+    assert link["confidence_score"] == 1.0
+    assert link["relationship_type"] == "same_concept"
+
+    # Also verify from doc-b perspective
+    links_for_b = sqlite_db.get_concept_links_for_document("doc-b")
+    assert len(links_for_b) == 1
+    assert links_for_b[0]["target_document_id"] == "doc-a"
+
+
+def test_delete_concepts_cascade(tmp_path, monkeypatch) -> None:
+    """delete_concepts_for_document should remove links and concepts."""
+    monkeypatch.setenv("CATCHUP_SQLITE_PATH", str(tmp_path / "test.db"))
+
+    ids_a = sqlite_db.save_concepts("doc-a", [{"concept_name": "relu", "canonical_name": "relu", "aliases": [], "definition": ""}])
+    ids_b = sqlite_db.save_concepts("doc-b", [{"concept_name": "relu", "canonical_name": "relu", "aliases": [], "definition": ""}])
+
+    sqlite_db.save_concept_links([
+        {"concept_id_a": ids_a[0], "concept_id_b": ids_b[0], "confidence_score": 1.0, "relationship_type": "same_concept", "relationship_desc": ""}
+    ])
+
+    # Verify link exists
+    assert len(sqlite_db.get_concept_links_for_document("doc-a")) == 1
+
+    # Delete doc-a concepts → link should cascade
+    sqlite_db.delete_concepts_for_document("doc-a")
+
+    assert sqlite_db.get_concepts_for_document("doc-a") == []
+    assert sqlite_db.get_concept_links_for_document("doc-a") == []
+    # doc-b concepts should be unaffected
+    assert len(sqlite_db.get_concepts_for_document("doc-b")) == 1

@@ -19,6 +19,7 @@ from llm.note_generator import _is_noise_block
 from models.document import Document
 from prompts.rag_qa import PROMPT
 from rag.query_rewriter import rewrite_query as _rewrite_query
+from utils.embed import get_openai_embedding as _get_openai_embedding
 from utils.logging import log_api_call
 from utils.models import MODEL_REGISTRY, call_llm, compute_cost
 
@@ -205,14 +206,6 @@ def rechunk_blocks(
 
     return flat
 
-
-def _get_openai_embedding(text: str) -> tuple[list[float], int]:
-    """Embed text using OpenAI text-embedding-3-small. Returns (vector, total_tokens)."""
-    import openai  # lazy import
-
-    client = openai.OpenAI()
-    resp = client.embeddings.create(model=EMBED_MODEL, input=text)
-    return resp.data[0].embedding, resp.usage.total_tokens
 
 
 def _expand_with_adjacent_blocks(

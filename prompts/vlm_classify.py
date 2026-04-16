@@ -1,16 +1,17 @@
 """VLM prompt for image type classification."""
 
 PROMPT_NAME = "vlm_classify"
-PROMPT_VERSION = "v1.3.0"
+PROMPT_VERSION = "v1.4.0"
 
 PROMPT = """Classify the educational content type of this image.
 
 OUTPUT FORMAT (JSON only, no markdown fences):
-{"image_type": "code_screenshot" | "diagram" | "text_capture" | "equation" | "other", "confidence": 0.95}
+{"image_type": "code_screenshot" | "diagram" | "chart" | "text_capture" | "equation" | "other", "confidence": 0.95}
 
 DEFINITIONS — assign to the FIRST matching type:
 - "code_screenshot": source code, terminal/shell output, IDE screenshot, config file snippet
-- "diagram": technical diagram explaining a concept — flowchart, architecture diagram, neural network structure, data pipeline, sequence diagram, ER diagram, graph/chart with labeled axes, system topology
+- "diagram": technical diagram explaining a concept — flowchart, architecture diagram, neural network structure, data pipeline, sequence diagram, ER diagram, system topology. Focus is structure, entities, or directional flow rather than quantitative values.
+- "chart": quantitative visualization — bar chart, line chart, scatter plot, histogram, pie chart, heatmap, or graph with labeled axes, legends, numeric scales, or plotted series. Focus is measured values, comparisons, or trends.
 - "text_capture": educational text WITH instructional content — lecture slide explaining a topic, handwritten notes, textbook page section, whiteboard explanation. The text must teach something technical, not just display a title.
 - "equation": standalone mathematical formulas, LaTeX expressions, derivations
 - "other": anything that does NOT convey educational/instructional content:
